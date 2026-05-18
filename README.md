@@ -55,6 +55,9 @@ Examples:
 repovista audit --language English --model gpt-5.5
 repovista audit --out reports/repovista --keep-logs
 repovista audit --ci --json --fail-on-critical --no-progress
+repovista audit --run-checks --strict-reports
+repovista audit --resume .repovista/2026-05-18T14-57-32-123Z
+repovista audit --phase risk-and-bug --phase summary
 ```
 
 ## Report Structure
@@ -69,18 +72,21 @@ Each run creates its own timestamped folder:
     02-code-quality-report.md
     03-risk-and-bug-report.md
     04-feature-roadmap.md
+    findings.json
     index.md
     meta.json
+    summary.json
     logs/
 ```
 
-`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` and `meta.json` record the Codex execution settings, including model, reasoning effort, fast mode, profile, and sandbox. `meta.json` also contains run options, phase status, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
+`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, Codex, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report. `summary.json` contains machine-readable run, phase, finding, and evidence summaries. `meta.json` records Codex execution settings, including model, reasoning effort, fast mode, profile, sandbox, phase status, report quality warnings, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## CLI Options
 
 | Option | Purpose |
 |---|---|
 | `--out <dir>` | Report output directory, default `.repovista` |
+| `--resume <run-dir>` | Resume or complete an existing RepoVista run directory |
 | `--model <name>` | Override the Codex model |
 | `--profile <name>` | Use a Codex configuration profile |
 | `--reasoning <effort>` | Override Codex reasoning effort |
@@ -89,8 +95,17 @@ Each run creates its own timestamped folder:
 | `--sandbox <mode>` | Codex sandbox, `read-only` or `workspace-write`, default `read-only` |
 | `--language <name>` | Report language, default `English` |
 | `--json` | Store metadata and Codex JSONL events |
-| `--include <patterns>` | Document additional include patterns for inventory/context |
+| `--include <patterns>` | Include additional inventory/context patterns, including selected generated folders |
 | `--ignore <patterns>` | Additional ignore patterns for inventory and context |
+| `--phase <id>` | Run only selected phases; repeatable or comma-separated. IDs: `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`, `summary` |
+| `--run-checks` | Run detected or explicit local check commands before Codex and include results in the evidence pack |
+| `--no-run-checks` | Disable a saved `runChecks` default |
+| `--check <command>` | Add an explicit local check command for `--run-checks`; repeatable |
+| `--check-timeout <minutes>` | Timeout per local check command, default `5` |
+| `--timeout <minutes>` | Timeout per Codex phase, default `30` |
+| `--phase-timeout <minutes>` | Alias for `--timeout` |
+| `--strict-reports` | Mark phases failed when report quality gates detect missing required sections or weak evidence |
+| `--no-strict-reports` | Disable a saved strict report default |
 | `--ci` | CI-friendly mode without progress output |
 | `--fail-on-critical` | Return exit code `2` in CI when critical findings are detected |
 | `--no-progress` | Reduce progress output |
@@ -105,7 +120,9 @@ RepoVista is an audit tool by default, not an auto-fix tool.
 - Codex is started with `--sandbox read-only` by default.
 - `danger-full-access` and full-access variants are rejected in the MVP.
 - RepoVista itself writes only to the report directory.
+- `--run-checks` is opt-in because project check commands can execute repository scripts and may create build/test artifacts.
 - Old `.repovista` reports, dependencies, build artifacts, caches, coverage, media assets, and archives are excluded from the inventory.
+- `--include` can intentionally add selected ignored paths back to the inventory, except VCS metadata and the active report directory.
 - Sensitive values in read metadata are masked; `.env` contents are not included in reports.
 - There is no automatic Codex installation, no destructive commands, and no telemetry.
 
@@ -124,6 +141,17 @@ RepoVista sets these Codex options:
 - `--output-last-message <report.md>`, so the final answer is separated cleanly from the technical stream
 - `--config model_reasoning_effort="<effort>"` when a reasoning default or CLI override is set
 - `--config service_tier="priority"` when fast mode is enabled
+- A default 30-minute timeout per phase, configurable with `--timeout`
+
+## Evidence and Quality Gates
+
+Before Codex phases start, RepoVista writes an evidence pack into `00-inventory.md`. It records Node.js, npm, package metadata, Git branch/commit/dirty state, Codex CLI version, and optional local check results.
+
+When `--run-checks` is set, RepoVista runs explicit `--check` commands or detected npm scripts in this order when present: `typecheck`, `lint`, `test`, `security:audit`. Results are included in the evidence pack. In CI mode, failed checks make the run exit with code `1`.
+
+RepoVista validates each generated Markdown report for expected sections and concrete evidence. Quality warnings are recorded in `meta.json`; with `--strict-reports`, a phase with quality warnings is marked failed.
+
+The risk report is also parsed into `findings.json`. Findings are extracted best when the report uses the structured fields requested by RepoVista: title, severity, category, affected paths, evidence, recommended fix, effort, and confidence.
 
 ## Settings
 
@@ -134,6 +162,8 @@ The model and reasoning menus are populated from the installed Codex CLI via `co
 Settings are stored in `~/.config/repovista/settings.json` by default. Set `REPOVISTA_CONFIG=/path/to/settings.json` to use a different settings file.
 
 CLI flags always override saved settings for the current run.
+
+The settings menu can persist model, reasoning, profile, fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, JSON/log settings, CI mode, and critical-finding behavior.
 
 ## CI Notes
 
@@ -154,6 +184,9 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 ## Typical Workflows
 
 - Understand an unfamiliar repository: run `repovista`, then read `.repovista/<run-id>/index.md`.
+- Prepare a higher-signal report: run `repovista audit --run-checks --strict-reports`.
+- Continue an interrupted run: `repovista audit --resume .repovista/<run-id>`.
+- Rerun only the risk report and summary: `repovista audit --resume .repovista/<run-id> --phase risk-and-bug --phase summary`.
 - Configure persistent defaults: run `repovista settings`, choose a model with Space, return with Enter, then save.
 - Keep technical logs for troubleshooting: `repovista audit --keep-logs`.
 - Generate reports in a specific language: `repovista audit --language Spanish`.

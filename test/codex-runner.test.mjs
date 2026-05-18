@@ -113,3 +113,32 @@ test("codex runner creates an error report on failed process", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("codex runner cancels a phase after timeout", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-timeout-"));
+  try {
+    const reportPath = path.join(root, "report.md");
+    const child = new FakeChild();
+    child.kill = (signal) => {
+      setImmediate(() => child.emit("close", null, signal));
+      return true;
+    };
+    const result = await runCodexPhase({
+      phaseId: "architecture",
+      phaseTitle: "Architecture",
+      prompt: "prompt",
+      projectRoot: root,
+      reportPath,
+      sandbox: "read-only",
+      jsonEvents: false,
+      keepLogs: false,
+      timeoutSeconds: 0.01
+    }, () => child);
+
+    assert.equal(result.success, false);
+    assert.match(result.error, /timed out/);
+    assert.match(await readFile(reportPath, "utf8"), /timed out/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

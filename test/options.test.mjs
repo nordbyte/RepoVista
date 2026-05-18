@@ -33,6 +33,16 @@ test("explicit audit command parses supported options", () => {
     "src/**,README.md",
     "--ignore",
     "fixtures/**",
+    "--phase",
+    "risk-and-bug,summary",
+    "--run-checks",
+    "--check",
+    "npm run typecheck",
+    "--check-timeout",
+    "2",
+    "--timeout",
+    "45",
+    "--strict-reports",
     "--ci",
     "--fail-on-critical",
     "--keep-logs"
@@ -49,6 +59,12 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.json, true);
   assert.deepEqual(parsed.options.includes, ["src/**", "README.md"]);
   assert.deepEqual(parsed.options.ignores, ["fixtures/**"]);
+  assert.deepEqual(parsed.options.phases, ["risk-and-bug", "summary"]);
+  assert.equal(parsed.options.runChecks, true);
+  assert.deepEqual(parsed.options.checkCommands, ["npm run typecheck"]);
+  assert.equal(parsed.options.checkTimeoutSeconds, 120);
+  assert.equal(parsed.options.phaseTimeoutSeconds, 2700);
+  assert.equal(parsed.options.strictReports, true);
   assert.equal(parsed.options.ci, true);
   assert.equal(parsed.options.progress, false);
   assert.equal(parsed.options.failOnCritical, true);

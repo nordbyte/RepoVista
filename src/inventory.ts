@@ -1,8 +1,9 @@
 import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { renderEvidenceMarkdown } from "./evidence.js";
 import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
 import { maskObject, maskSensitiveText } from "./secrets.js";
-import type { SandboxMode } from "./types.js";
+import type { EvidencePack, SandboxMode } from "./types.js";
 
 export interface InventoryOptions {
   outDir: string;
@@ -18,6 +19,7 @@ export interface InventoryOptions {
   now?: Date;
   maxFiles?: number;
   maxTreeEntries?: number;
+  evidence?: EvidencePack;
 }
 
 export interface InventoryResult {
@@ -155,6 +157,7 @@ export async function createProjectInventory(
   const matcher = createIgnoreMatcher({
     projectRoot,
     outDir: options.outDir,
+    includePatterns: options.includes,
     ignorePatterns: options.ignores
   });
 
@@ -208,6 +211,7 @@ export async function createProjectInventory(
     includes: options.includes,
     ignores: options.ignores,
     codex: options.codex,
+    evidence: options.evidence,
     maxTreeEntries
   });
 
@@ -368,6 +372,7 @@ function renderInventory(input: {
     fastMode: boolean;
     sandbox: SandboxMode;
   };
+  evidence?: EvidencePack;
   maxTreeEntries: number;
 }): string {
   const packageScripts = readPackageScripts(input.packageJson.data);
@@ -384,6 +389,7 @@ function renderInventory(input: {
 - Note: Sensitive file contents are not collected; detected sensitive values are masked.
 
 ${renderWarnings(input.warnings)}
+${input.evidence ? renderEvidenceMarkdown(input.evidence) : ""}
 
 ## Package Managers and Lockfiles
 
@@ -547,8 +553,7 @@ function renderTree(files: ScannedFile[], maxEntries: number): string {
   const visible = paths.slice(0, maxEntries);
   const lines = ["."];
   for (const relativePath of visible) {
-    const depth = relativePath.split("/").length - 1;
-    lines.push(`${"  ".repeat(depth)}- ${path.basename(relativePath)}`);
+    lines.push(`- ${relativePath}`);
   }
   if (paths.length > visible.length) {
     lines.push(`... ${paths.length - visible.length} additional entries omitted`);

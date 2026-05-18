@@ -117,3 +117,74 @@ test("critical finding detector distinguishes empty critical sections from real 
     true
   );
 });
+
+test("resume preserves completed phase reports without rerunning Codex", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-resume-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+    const options = {
+      command: "audit",
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: [],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    };
+    const dependencies = {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      })
+    };
+
+    let runCount = 0;
+    const first = await runAudit(options, {
+      ...dependencies,
+      runCodex: async (request) => {
+        runCount += 1;
+        await writeFile(request.reportPath, `# ${request.phaseTitle}\n\nReport for ${request.phaseId} references src/index.ts.\n`, "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+    assert.equal(runCount, 5);
+
+    const resumed = await runAudit({ ...options, resumeDir: first.paths.runDir }, {
+      ...dependencies,
+      runCodex: async () => {
+        throw new Error("Codex should not run for completed resume");
+      }
+    });
+
+    assert.equal(resumed.exitCode, 0);
+    assert.equal(resumed.meta.phases.every((phase) => phase.status === "success"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

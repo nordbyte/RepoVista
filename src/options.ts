@@ -10,6 +10,12 @@ export const DEFAULT_OPTIONS: AuditOptions = {
   json: false,
   includes: [],
   ignores: [],
+  phases: [],
+  runChecks: false,
+  checkCommands: [],
+  checkTimeoutSeconds: 300,
+  phaseTimeoutSeconds: 1800,
+  strictReports: false,
   ci: false,
   failOnCritical: false,
   progress: true,
@@ -18,13 +24,19 @@ export const DEFAULT_OPTIONS: AuditOptions = {
 
 const VALUE_OPTIONS = new Set([
   "out",
+  "resume",
   "model",
   "profile",
   "reasoning",
   "sandbox",
   "language",
   "include",
-  "ignore"
+  "ignore",
+  "phase",
+  "check",
+  "check-timeout",
+  "phase-timeout",
+  "timeout"
 ]);
 
 const BOOLEAN_OPTIONS = new Set([
@@ -33,10 +45,22 @@ const BOOLEAN_OPTIONS = new Set([
   "fail-on-critical",
   "fast",
   "no-fast",
+  "run-checks",
+  "no-run-checks",
+  "strict-reports",
+  "no-strict-reports",
   "no-progress",
   "keep-logs",
   "version",
   "help"
+]);
+
+const PHASE_IDS = new Set([
+  "architecture",
+  "code-quality",
+  "risk-and-bug",
+  "feature-roadmap",
+  "summary"
 ]);
 
 export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OPTIONS): CliParseResult {
@@ -108,6 +132,18 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "no-fast":
         options.fastMode = false;
         break;
+      case "run-checks":
+        options.runChecks = true;
+        break;
+      case "no-run-checks":
+        options.runChecks = false;
+        break;
+      case "strict-reports":
+        options.strictReports = true;
+        break;
+      case "no-strict-reports":
+        options.strictReports = false;
+        break;
       case "no-progress":
         options.progress = false;
         break;
@@ -156,6 +192,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "out":
       options.outDir = requireNonEmpty(name, value);
       break;
+    case "resume":
+      options.resumeDir = requireNonEmpty(name, value);
+      break;
     case "model":
       options.model = requireNonEmpty(name, value);
       break;
@@ -177,6 +216,20 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "ignore":
       options.ignores.push(...splitPatterns(value));
       break;
+    case "phase":
+      options.phases.push(...splitPatterns(value).map(validatePhase));
+      options.phases = Array.from(new Set(options.phases));
+      break;
+    case "check":
+      options.checkCommands.push(requireNonEmpty(name, value));
+      break;
+    case "check-timeout":
+      options.checkTimeoutSeconds = parsePositiveMinutes(name, value);
+      break;
+    case "phase-timeout":
+    case "timeout":
+      options.phaseTimeoutSeconds = parsePositiveMinutes(name, value);
+      break;
   }
 }
 
@@ -193,6 +246,26 @@ function splitPatterns(value: string): string[] {
     .split(",")
     .map((pattern) => pattern.trim())
     .filter(Boolean);
+}
+
+function validatePhase(value: string): string {
+  if (value === "all") {
+    return value;
+  }
+
+  if (!PHASE_IDS.has(value)) {
+    throw new CliUsageError(`Unknown phase: ${value}`);
+  }
+
+  return value;
+}
+
+function parsePositiveMinutes(optionName: string, value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new CliUsageError(`Option --${optionName} must be a positive number of minutes.`);
+  }
+  return Math.round(parsed * 60);
 }
 
 export function validateSandbox(value: string): SandboxMode {
@@ -224,6 +297,7 @@ Commands:
 
 Options:
   --out <dir>           Report output directory (default: .repovista)
+  --resume <run-dir>    Resume or complete an existing RepoVista run directory
   --model <name>        Override the Codex model
   --profile <name>      Use a Codex configuration profile
   --reasoning <effort>  Override Codex reasoning effort
@@ -234,6 +308,15 @@ Options:
   --json                Store metadata and Codex JSONL events
   --include <patterns>  Additional include patterns for inventory/context
   --ignore <patterns>   Additional ignore patterns
+  --phase <id>          Run only selected phase(s); repeatable or comma-separated
+  --run-checks          Run detected or explicit local check commands before Codex
+  --no-run-checks       Disable saved run-checks default
+  --check <command>     Add an explicit local check command for --run-checks
+  --check-timeout <min> Timeout per local check command (default: 5)
+  --timeout <min>       Timeout per Codex phase (default: 30)
+  --phase-timeout <min> Alias for --timeout
+  --strict-reports      Fail phases when report quality gates warn
+  --no-strict-reports   Disable saved strict report default
   --ci                  CI mode without progress output
   --fail-on-critical    Exit with code 2 in CI when critical findings are detected
   --no-progress         Reduce progress output

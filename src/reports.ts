@@ -35,6 +35,30 @@ export async function prepareRunDirectory(
   };
 }
 
+export async function useExistingRunDirectory(
+  projectRoot: string,
+  runDirectory: string,
+  createLogs: boolean
+): Promise<RunPaths> {
+  const runDir = path.resolve(projectRoot, runDirectory);
+  const runStat = await stat(runDir);
+  if (!runStat.isDirectory()) {
+    throw new Error(`Resume path is not a directory: ${runDir}`);
+  }
+
+  const logsDir = createLogs ? path.join(runDir, "logs") : undefined;
+  if (logsDir) {
+    await mkdir(logsDir, { recursive: true });
+  }
+
+  return {
+    outRoot: path.dirname(runDir),
+    runDir,
+    runId: path.basename(runDir),
+    logsDir
+  };
+}
+
 export async function writeMarkdownReport(filePath: string, content: string): Promise<void> {
   await writeFile(filePath, ensureTrailingNewline(content), "utf8");
 }

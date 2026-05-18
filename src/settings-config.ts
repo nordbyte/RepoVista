@@ -11,6 +11,13 @@ export interface RepoVistaSettings {
   sandbox?: SandboxMode;
   language?: string;
   outDir?: string;
+  includes?: string[];
+  ignores?: string[];
+  runChecks?: boolean;
+  checkCommands?: string[];
+  checkTimeoutSeconds?: number;
+  phaseTimeoutSeconds?: number;
+  strictReports?: boolean;
   json?: boolean;
   keepLogs?: boolean;
   progress?: boolean;
@@ -62,8 +69,14 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     progress: settings.progress ?? defaults.progress,
     ci: settings.ci ?? defaults.ci,
     failOnCritical: settings.failOnCritical ?? defaults.failOnCritical,
-    includes: [...defaults.includes],
-    ignores: [...defaults.ignores]
+    runChecks: settings.runChecks ?? defaults.runChecks,
+    checkCommands: settings.checkCommands ? [...settings.checkCommands] : [...defaults.checkCommands],
+    checkTimeoutSeconds: settings.checkTimeoutSeconds ?? defaults.checkTimeoutSeconds,
+    phaseTimeoutSeconds: settings.phaseTimeoutSeconds ?? defaults.phaseTimeoutSeconds,
+    strictReports: settings.strictReports ?? defaults.strictReports,
+    includes: settings.includes ? [...settings.includes] : [...defaults.includes],
+    ignores: settings.ignores ? [...settings.ignores] : [...defaults.ignores],
+    phases: [...defaults.phases]
   };
 }
 
@@ -81,7 +94,26 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     sanitized.sandbox = settings.sandbox;
   }
 
-  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical"] as const) {
+  for (const key of ["includes", "ignores", "checkCommands"] as const) {
+    if (Array.isArray(settings[key])) {
+      const values = settings[key]
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length) {
+        sanitized[key] = Array.from(new Set(values));
+      }
+    }
+  }
+
+  for (const key of ["checkTimeoutSeconds", "phaseTimeoutSeconds"] as const) {
+    const value = settings[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      sanitized[key] = Math.round(value);
+    }
+  }
+
+  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports"] as const) {
     if (typeof settings[key] === "boolean") {
       sanitized[key] = settings[key];
     }

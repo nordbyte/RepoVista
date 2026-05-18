@@ -76,6 +76,10 @@ export async function runCodexPhase(
     let stdoutText = "";
     let stderrText = "";
     let settled = false;
+    let timedOut = false;
+    let interrupted = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+    let timeoutTimer: NodeJS.Timeout | undefined;
     const stdoutLog = stdoutLogPath ? createWriteStream(stdoutLogPath, { flags: "w" }) : undefined;
     const stderrLog = stderrLogPath ? createWriteStream(stderrLogPath, { flags: "w" }) : undefined;
 
@@ -84,6 +88,14 @@ export async function runCodexPhase(
         return;
       }
       settled = true;
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      process.off("SIGINT", interruptHandler);
+      process.off("SIGTERM", interruptHandler);
       stdoutLog?.end();
       stderrLog?.end();
       resolve({
@@ -95,6 +107,26 @@ export async function runCodexPhase(
         ...result
       });
     };
+
+    const terminateChild = (reason: "timeout" | "interrupt") => {
+      if (settled) {
+        return;
+      }
+      if (reason === "timeout") {
+        timedOut = true;
+      } else {
+        interrupted = true;
+      }
+      child.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        if (!settled) {
+          child.kill("SIGKILL");
+        }
+      }, 5000);
+      forceKillTimer.unref();
+    };
+
+    const interruptHandler = () => terminateChild("interrupt");
 
     try {
       child = spawnAdapter("codex", args, {
@@ -108,6 +140,14 @@ export async function runCodexPhase(
         void finish({ success: false, error: message });
       });
       return;
+    }
+
+    process.once("SIGINT", interruptHandler);
+    process.once("SIGTERM", interruptHandler);
+
+    if (request.timeoutSeconds > 0) {
+      timeoutTimer = setTimeout(() => terminateChild("timeout"), request.timeoutSeconds * 1000);
+      timeoutTimer.unref();
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -127,9 +167,18 @@ export async function runCodexPhase(
       });
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       void (async () => {
         if (settled) {
+          return;
+        }
+
+        if (timedOut || interrupted) {
+          const message = timedOut
+            ? `Codex run timed out after ${request.timeoutSeconds} seconds.`
+            : "Codex run was interrupted and cancelled.";
+          await writeCodexFailureReport(request, message, stdoutText, stderrText);
+          await finish({ success: false, exitCode: code, error: signal ? `${message} Signal: ${signal}.` : message });
           return;
         }
 

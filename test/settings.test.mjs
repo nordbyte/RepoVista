@@ -20,6 +20,13 @@ test("settings sanitize persisted defaults", () => {
     sandbox: "read-only",
     language: " English ",
     outDir: " .repovista ",
+    includes: [" src/** ", "", "README.md"],
+    ignores: [" dist/** ", "dist/**"],
+    runChecks: true,
+    checkCommands: [" npm test ", ""],
+    checkTimeoutSeconds: 90.2,
+    phaseTimeoutSeconds: 1800.6,
+    strictReports: true,
     json: true,
     keepLogs: true,
     progress: false,
@@ -36,6 +43,13 @@ test("settings sanitize persisted defaults", () => {
     sandbox: "read-only",
     language: "English",
     outDir: ".repovista",
+    includes: ["src/**", "README.md"],
+    ignores: ["dist/**"],
+    runChecks: true,
+    checkCommands: ["npm test"],
+    checkTimeoutSeconds: 90,
+    phaseTimeoutSeconds: 1801,
+    strictReports: true,
     json: true,
     keepLogs: true,
     progress: false,
@@ -50,7 +64,12 @@ test("settings apply to audit defaults while preserving include and ignore array
     reasoning: "xhigh",
     fastMode: true,
     language: "Spanish",
-    keepLogs: true
+    keepLogs: true,
+    includes: ["src/**"],
+    ignores: ["fixtures/**"],
+    runChecks: true,
+    checkCommands: ["npm test"],
+    strictReports: true
   });
 
   assert.equal(options.model, "gpt-5.5");
@@ -58,8 +77,11 @@ test("settings apply to audit defaults while preserving include and ignore array
   assert.equal(options.fastMode, true);
   assert.equal(options.language, "Spanish");
   assert.equal(options.keepLogs, true);
-  assert.deepEqual(options.includes, []);
-  assert.deepEqual(options.ignores, []);
+  assert.deepEqual(options.includes, ["src/**"]);
+  assert.deepEqual(options.ignores, ["fixtures/**"]);
+  assert.equal(options.runChecks, true);
+  assert.deepEqual(options.checkCommands, ["npm test"]);
+  assert.equal(options.strictReports, true);
 });
 
 test("settings are saved as JSON", async () => {

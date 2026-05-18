@@ -9,6 +9,7 @@ test("inventory summarizes a mock project without old reports or secret values",
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-inventory-"));
   try {
     await mkdir(path.join(root, "src"), { recursive: true });
+    await mkdir(path.join(root, "dist"), { recursive: true });
     await mkdir(path.join(root, ".repovista", "old"), { recursive: true });
     await mkdir(path.join(root, "node_modules", "pkg"), { recursive: true });
     await writeFile(
@@ -31,20 +32,22 @@ test("inventory summarizes a mock project without old reports or secret values",
       "utf8"
     );
     await writeFile(path.join(root, "src", "index.ts"), "export const ok = true;\n", "utf8");
+    await writeFile(path.join(root, "dist", "generated.ts"), "export const generated = true;\n", "utf8");
     await writeFile(path.join(root, ".repovista", "old", "index.md"), "old report\n", "utf8");
     await writeFile(path.join(root, "node_modules", "pkg", "index.js"), "module.exports = {}\n", "utf8");
 
     const inventory = await createProjectInventory(root, {
       outDir: ".repovista",
-      includes: [],
+      includes: ["dist/**"],
       ignores: [],
       now: new Date("2026-05-18T14:57:32.123Z")
     });
 
-    assert.equal(inventory.languages.TypeScript, 1);
+    assert.equal(inventory.languages.TypeScript, 2);
     assert.ok(inventory.frameworks.includes("React"));
     assert.ok(inventory.frameworks.includes("Express"));
     assert.match(inventory.markdown, /TOKEN=\[masked\]/);
+    assert.match(inventory.markdown, /dist\/generated\.ts/);
     assert.doesNotMatch(inventory.markdown, /old report/);
     assert.doesNotMatch(inventory.markdown, /node_modules\/pkg/);
   } finally {

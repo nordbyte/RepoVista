@@ -5,6 +5,7 @@ export type CliAction = "audit" | "settings" | "help" | "version";
 export interface AuditOptions {
   command: "audit";
   outDir: string;
+  resumeDir?: string;
   model?: string;
   profile?: string;
   reasoning?: string;
@@ -14,6 +15,12 @@ export interface AuditOptions {
   json: boolean;
   includes: string[];
   ignores: string[];
+  phases: string[];
+  runChecks: boolean;
+  checkCommands: string[];
+  checkTimeoutSeconds: number;
+  phaseTimeoutSeconds: number;
+  strictReports: boolean;
   ci: boolean;
   failOnCritical: boolean;
   progress: boolean;
@@ -39,6 +46,65 @@ export interface PhaseReportStatus {
   status: "pending" | "success" | "failed" | "skipped";
   durationMs?: number;
   error?: string;
+  qualityPassed?: boolean;
+  qualityWarnings?: string[];
+}
+
+export interface EvidenceCommandResult {
+  command: string;
+  exitCode: number | null;
+  durationMs: number;
+  timedOut: boolean;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+}
+
+export interface EvidencePack {
+  collectedAt: string;
+  projectRoot: string;
+  runtime: {
+    node: string;
+    npm: string;
+    platform: string;
+  };
+  packageJson?: {
+    name?: string;
+    version?: string;
+    private?: boolean;
+  };
+  git: {
+    available: boolean;
+    branch?: string;
+    commit?: string;
+    dirty?: boolean;
+    remote?: string;
+    statusShort?: string[];
+    error?: string;
+  };
+  codex: {
+    available: boolean;
+    version?: string;
+    error?: string;
+  };
+  checks: {
+    enabled: boolean;
+    timeoutSeconds: number;
+    commands: string[];
+    results: EvidenceCommandResult[];
+  };
+}
+
+export interface StructuredFinding {
+  id: string;
+  source: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low" | "unknown";
+  category?: string;
+  paths: string[];
+  evidence?: string;
+  recommendation?: string;
+  confidence?: string;
 }
 
 export interface AuditMeta {
@@ -53,10 +119,17 @@ export interface AuditMeta {
   completedAt?: string;
   options: {
     outDir: string;
+    resumeDir?: string;
     language: string;
     json: boolean;
     includes: string[];
     ignores: string[];
+    phases: string[];
+    runChecks: boolean;
+    checkCommands: string[];
+    checkTimeoutSeconds: number;
+    phaseTimeoutSeconds: number;
+    strictReports: boolean;
     ci: boolean;
     failOnCritical: boolean;
     progress: boolean;
@@ -75,7 +148,13 @@ export interface AuditMeta {
     gitRepository: boolean;
     warnings: string[];
   };
+  evidence?: EvidencePack;
   phases: PhaseReportStatus[];
+  findings: StructuredFinding[];
+  outputs?: {
+    findingsJson?: string;
+    summaryJson?: string;
+  };
   exitCode: number;
 }
 
@@ -93,6 +172,7 @@ export interface CodexRunRequest {
   sandbox: SandboxMode;
   jsonEvents: boolean;
   keepLogs: boolean;
+  timeoutSeconds: number;
 }
 
 export interface CodexRunResult {

@@ -60,6 +60,9 @@ Safety and working rules:
 - Clearly mark uncertainty as a hypothesis or open question.
 - Do not invent facts. If something is not supported by evidence, say so.
 - Prioritize findings and recommendations clearly.
+- Ground every important claim in concrete evidence from files, configuration, tests, local checks, or Git metadata.
+- For recommendations, include affected paths/modules, impact, confidence, and an implementation hint.
+- Avoid generic best-practice filler that is not tied to this repository.
 - Write the final report in ${context.language}.
 - Return only the Markdown report as the final answer.
 
@@ -131,8 +134,8 @@ The report must contain these sections:
 10. Medium-Term Refactorings
 11. Larger Architecture Measures
 
-For relevant weaknesses, name the file or path, problem, impact, recommendation, and priority.
-`;
+For relevant weaknesses, name the file or path, evidence, problem, impact, recommendation, priority, confidence, and implementation hint.
+	`;
 }
 
 function buildRiskPrompt(context: PromptContext): string {
@@ -168,8 +171,19 @@ The report must contain these sections:
 8. Missing Tests
 9. Recommended Next Steps
 
-For each finding, include title, severity, category, file or path, evidence from the code, problem rationale, concrete fix proposal, and estimated effort. Mark uncertain findings explicitly as hypotheses.
-`;
+For each finding, use this field format so RepoVista can extract structured findings:
+- Title: <short title>
+- Severity: Critical | High | Medium | Low
+- Category: <bug, security, reliability, maintainability, data loss, etc.>
+- Affected paths: <comma-separated concrete files/modules>
+- Evidence: <specific code/config/test/local-check evidence>
+- Problem rationale: <why this is a real risk>
+- Recommended fix: <concrete fix proposal>
+- Estimated effort: <small, medium, large>
+- Confidence: High | Medium | Low
+
+If a severity section has no findings, say that explicitly. Mark uncertain findings explicitly as hypotheses.
+	`;
 }
 
 function buildRoadmapPrompt(context: PromptContext): string {
@@ -202,8 +216,8 @@ The report must contain these sections:
 6. Security and Reliability Improvements
 7. Prioritized Roadmap
 
-For each proposal, include title, description, rationale from code or architecture, benefit, effort, risk, affected files or modules, possible implementation steps, and priority. Avoid generic proposals.
-`;
+For each proposal, include title, description, evidence/rationale from code or architecture, benefit, effort, risk, affected files or modules, possible implementation steps, priority, and confidence. Avoid generic proposals.
+	`;
 }
 
 function buildSummaryPrompt(context: PromptContext): string {
@@ -257,5 +271,11 @@ function clip(content: string): string {
   if (content.length <= CONTEXT_LIMIT) {
     return content;
   }
-  return `${content.slice(0, CONTEXT_LIMIT)}\n\n... RepoVista context truncated ...`;
+  const headLength = Math.floor(CONTEXT_LIMIT * 0.6);
+  const tailLength = CONTEXT_LIMIT - headLength;
+  return `${content.slice(0, headLength)}
+
+... RepoVista context truncated; preserving the end of the report below ...
+
+${content.slice(content.length - tailLength)}`;
 }

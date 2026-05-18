@@ -30,6 +30,13 @@ const DEFAULT_IGNORED_DIRECTORIES = new Set([
   "target"
 ]);
 
+const ALWAYS_IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  ".repovista"
+]);
+
 const IGNORED_EXTENSIONS = new Set([
   ".7z",
   ".a",
@@ -78,11 +85,13 @@ export interface IgnoreMatcher {
 export interface IgnoreMatcherOptions {
   projectRoot: string;
   outDir: string;
+  includePatterns?: string[];
   ignorePatterns?: string[];
 }
 
 export function createIgnoreMatcher(options: IgnoreMatcherOptions): IgnoreMatcher {
   const outRelative = normalizeRelative(path.relative(options.projectRoot, path.resolve(options.projectRoot, options.outDir)));
+  const includePatterns = (options.includePatterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
   const customPatterns = (options.ignorePatterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
 
   return {
@@ -93,11 +102,19 @@ export function createIgnoreMatcher(options: IgnoreMatcherOptions): IgnoreMatche
       }
 
       const segments = normalized.split("/");
-      if (segments.some((segment) => DEFAULT_IGNORED_DIRECTORIES.has(segment))) {
+      if (segments.some((segment) => ALWAYS_IGNORED_DIRECTORIES.has(segment))) {
         return true;
       }
 
       if (outRelative && (normalized === outRelative || normalized.startsWith(`${outRelative}/`))) {
+        return true;
+      }
+
+      if (includePatterns.some((pattern) => matchesPatternForTraversal(normalized, pattern, isDirectory))) {
+        return false;
+      }
+
+      if (segments.some((segment) => DEFAULT_IGNORED_DIRECTORIES.has(segment))) {
         return true;
       }
 
@@ -128,6 +145,20 @@ export function matchesPattern(relativePath: string, pattern: string): boolean {
   }
 
   return globToRegExp(normalizedPattern).test(normalizedPath);
+}
+
+function matchesPatternForTraversal(relativePath: string, pattern: string, isDirectory: boolean): boolean {
+  const normalizedPattern = normalizeRelative(pattern);
+  if (matchesPattern(relativePath, normalizedPattern)) {
+    return true;
+  }
+
+  if (!isDirectory) {
+    return false;
+  }
+
+  const directoryPrefix = `${relativePath}/`;
+  return normalizedPattern.startsWith(directoryPrefix) || normalizedPattern.startsWith(`${directoryPrefix}**`);
 }
 
 export function globToRegExp(pattern: string): RegExp {
