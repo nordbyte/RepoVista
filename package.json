@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/make-cli-executable.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "security:audit": "npm audit --audit-level=moderate",
     "test": "npm run build && node --test test/*.test.mjs",
     "prepack": "npm run build"
   },
@@ -33,8 +34,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/repovista/repovista.git"
+    "url": "git+https://github.com/nordbyte/RepoVista.git"
   },
+  "bugs": {
+    "url": "https://github.com/nordbyte/RepoVista/issues"
+  },
+  "homepage": "https://github.com/nordbyte/RepoVista#readme",
   "devDependencies": {
     "@types/node": "^20.17.19",
     "typescript": "^5.7.3"
