@@ -8,7 +8,9 @@ import {
   extractFindings,
   extractFindingsWithSource,
   hasFailedChecks,
+  loadStoredFindings,
   renderEvidenceMarkdown,
+  validateFindingEvidence,
   validateReportQuality
 } from "../dist/index.js";
 
@@ -223,6 +225,81 @@ Fix src/schema.ts, src/index.ts and test/schema.test.ts.
   assert.equal(quality.passed, true);
 });
 
+test("schema findings get stable ids and validated evidence details", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-evidence-validation-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "src", "schema.ts"), "export function validateSchema() {\n  return true;\n}\n", "utf8");
+
+    const report = `# Risk
+
+## Executive Summary
+
+One issue.
+
+## Critical Findings
+
+No critical findings.
+
+## High Findings
+
+One high finding.
+
+## Medium Findings
+
+No medium findings.
+
+## Low Findings
+
+No low findings.
+
+## Recommended Next Steps
+
+Fix src/schema.ts, src/index.ts and test/schema.test.ts.
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Schema title",
+      "severity": "high",
+      "category": "security",
+      "affectedPaths": ["src/schema.ts"],
+      "evidence": "src/schema.ts validates the report schema",
+      "evidenceReferences": [
+        {
+          "path": "src/schema.ts",
+          "startLine": 1,
+          "endLine": 1,
+          "quote": "export function validateSchema"
+        }
+      ],
+      "problemRationale": "The parser depends on valid structured fields.",
+      "recommendedFix": "Keep schema validation in place.",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
+`;
+    const first = extractFindings(report)[0];
+    const second = extractFindings(report)[0];
+    assert.match(first.id, /^fnd_[a-f0-9]{12}$/);
+    assert.equal(first.id, second.id);
+    assert.equal(first.status, "open");
+    assert.equal(first.evidenceDetails[0].startLine, 1);
+    assert.equal(first.evidenceDetails[0].quote, "export function validateSchema");
+
+    const validation = await validateFindingEvidence(root, first, new Set(["src"]));
+    assert.equal(validation.passed, true);
+    assert.equal(validation.references[0].quoteMatches, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("audit writes structured findings and summary json", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-structured-"));
   try {
@@ -352,8 +429,16 @@ None.
     assert.equal(result.exitCode, 2);
     const findings = JSON.parse(await readFile(path.join(result.paths.runDir, "findings.json"), "utf8"));
     const summary = JSON.parse(await readFile(path.join(result.paths.runDir, "summary.json"), "utf8"));
+    const promptManifest = JSON.parse(await readFile(path.join(result.paths.runDir, "prompt-manifest.json"), "utf8"));
+    const features = JSON.parse(await readFile(path.join(result.paths.runDir, "features.json"), "utf8"));
+    const storedFindings = await loadStoredFindings(root, ".repovista");
     assert.equal(findings[0].severity, "critical");
+    assert.match(findings[0].id, /^fnd_/);
+    assert.equal(findings[0].evidenceValidation.passed, true);
     assert.equal(summary.findingCounts.critical, 1);
+    assert.equal(promptManifest.phases.length, 5);
+    assert.equal(features.features.length > 0, true);
+    assert.equal(storedFindings[0].id, findings[0].id);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

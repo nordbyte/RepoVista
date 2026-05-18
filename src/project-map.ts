@@ -2,6 +2,7 @@ import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
 import { validateReportRoot } from "./reports.js";
+import { buildSemanticFeatures } from "./semantic-features.js";
 import {
   buildProjectAreas,
   createWorkShards,
@@ -9,7 +10,7 @@ import {
   recommendParallelism,
   resolveParallelism
 } from "./work-partitioner.js";
-import type { AuditOptions, ParallelExecutionMeta, ParallelMode, ProjectFileSummary, ProjectMap } from "./types.js";
+import type { AuditOptions, DiffScope, ParallelExecutionMeta, ParallelMode, ProjectFileSummary, ProjectMap } from "./types.js";
 
 const PROJECT_MAP_VERSION = 1;
 const MAX_PROJECT_MAP_FILES = 30_000;
@@ -30,13 +31,15 @@ export async function initializeProjectMap(
 export async function createProjectMap(
   projectRoot: string,
   options: AuditOptions,
-  now = new Date()
+  now = new Date(),
+  since?: DiffScope
 ): Promise<ProjectMap> {
   const files = await scanProjectFiles(projectRoot, options);
   const packageJson = await readPackageJson(projectRoot);
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const languages = countLanguages(files);
   const areas = buildProjectAreas(files);
+  const features = buildSemanticFeatures(files, areas, since);
   const recommendedParallelism = recommendParallelism(files.length, totalBytes, areas);
   const warnings: string[] = [];
   if (files.length >= MAX_PROJECT_MAP_FILES) {
@@ -58,8 +61,10 @@ export async function createProjectMap(
     frameworks: detectFrameworks(packageJson),
     packageManagers: detectPackageManagers(files),
     areas,
+    features,
     recommendedParallelism,
     recommendedShards: createWorkShards(areas, recommendedParallelism),
+    since,
     warnings
   };
 }
@@ -72,6 +77,9 @@ export async function loadProjectMap(projectRoot: string, outDir: string): Promi
     const parsed = JSON.parse(raw) as ProjectMap;
     if (parsed.version !== PROJECT_MAP_VERSION || !Array.isArray(parsed.areas)) {
       return undefined;
+    }
+    if (!Array.isArray(parsed.features)) {
+      parsed.features = buildSemanticFeatures([], parsed.areas);
     }
     return { map: parsed, mapPath };
   } catch {
@@ -111,6 +119,10 @@ export function renderProjectPlan(map: ProjectMap, mode: ParallelMode = "auto"):
     .slice(0, 12)
     .map((area) => `- ${area.title}: ${area.fileCount} files, paths: ${area.paths.join(", ")}`)
     .join("\n") || "- No areas detected";
+  const featureLines = (map.features ?? [])
+    .slice(0, 12)
+    .map((feature) => `- ${feature.title}: ${feature.kind}, paths: ${feature.paths.join(", ") || "n/a"}`)
+    .join("\n") || "- No semantic features detected";
   const shardLines = meta.shards
     .map((shard) => [
       `- ${shard.id}: ${shard.title}`,
@@ -132,6 +144,9 @@ ${languageLines}
 
 Areas:
 ${areaLines}
+
+Semantic features:
+${featureLines}
 
 Thread assignments:
 ${shardLines}

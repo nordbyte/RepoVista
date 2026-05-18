@@ -1,6 +1,6 @@
 import { CliUsageError } from "./errors.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, CliParseResult, ParallelMode, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, CliParseResult, FindingStatus, ParallelMode, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
@@ -41,7 +41,11 @@ const VALUE_OPTIONS = new Set([
   "check",
   "check-timeout",
   "phase-timeout",
-  "timeout"
+  "timeout",
+  "since",
+  "finding",
+  "status",
+  "note"
 ]);
 
 const BOOLEAN_OPTIONS = new Set([
@@ -57,6 +61,7 @@ const BOOLEAN_OPTIONS = new Set([
   "no-progress",
   "no-parallel",
   "keep-logs",
+  "all",
   "version",
   "help"
 ]);
@@ -159,6 +164,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "keep-logs":
         options.keepLogs = true;
         break;
+      case "all":
+        options.allFindings = true;
+        break;
       case "version":
         wantsVersion = true;
         break;
@@ -177,7 +185,7 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     wantsHelp = true;
   } else if (command === "version") {
     wantsVersion = true;
-  } else if (command !== "audit" && command !== "init" && command !== "plan" && command !== "settings" && command !== "compare") {
+  } else if (!isCommand(command)) {
     throw new CliUsageError(`Unknown command: ${command}`);
   }
 
@@ -196,6 +204,23 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     options.compareOldRun = requireNonEmpty("old", positionals[1]);
     options.compareNewRun = requireNonEmpty("new", positionals[2]);
     return { action: "compare", options };
+  }
+
+  if (command === "next") {
+    if (positionals.length > 1) {
+      throw new CliUsageError("Command next does not take positional arguments.");
+    }
+    return { action: "next", options };
+  }
+
+  if (command === "show" || command === "triage" || command === "revalidate") {
+    if (positionals.length > 2) {
+      throw new CliUsageError(`Command ${command} accepts at most one finding id.`);
+    }
+    if (positionals[1]) {
+      options.findingId = requireNonEmpty("finding", positionals[1]);
+    }
+    return { action: command, options };
   }
 
   if (positionals.length > 1) {
@@ -266,7 +291,31 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "timeout":
       options.phaseTimeoutSeconds = parsePositiveMinutes(name, value);
       break;
+    case "since":
+      options.since = requireNonEmpty(name, value);
+      break;
+    case "finding":
+      options.findingId = requireNonEmpty(name, value);
+      break;
+    case "status":
+      options.findingStatus = validateFindingStatus(value);
+      break;
+    case "note":
+      options.note = requireNonEmpty(name, value);
+      break;
   }
+}
+
+function isCommand(value: string): value is CliParseResult["action"] {
+  return value === "audit" ||
+    value === "init" ||
+    value === "plan" ||
+    value === "settings" ||
+    value === "compare" ||
+    value === "next" ||
+    value === "show" ||
+    value === "triage" ||
+    value === "revalidate";
 }
 
 export function validateProvider(value: string): AiProviderId {
@@ -337,6 +386,20 @@ export function validateSandbox(value: string): SandboxMode {
   throw new CliUsageError(`Unknown sandbox mode: ${value}`);
 }
 
+function validateFindingStatus(value: string): FindingStatus {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "open" ||
+    normalized === "fixed" ||
+    normalized === "false-positive" ||
+    normalized === "wont-fix" ||
+    normalized === "uncertain"
+  ) {
+    return normalized;
+  }
+  throw new CliUsageError("Option --status must be open, fixed, false-positive, wont-fix, or uncertain.");
+}
+
 export function renderHelp(): string {
   return `RepoVista - AI-powered read-only repository audits
 
@@ -346,12 +409,20 @@ Usage:
   repovista init [options]
   repovista plan [options]
   repovista compare <old-run-dir> <new-run-dir>
+  repovista next [--status <status>]
+  repovista show <finding-id>
+  repovista triage <finding-id> --status <status> [--note <text>]
+  repovista revalidate <finding-id|--all>
 
 Commands:
   audit                 Run a full audit in the current directory
   init                  Initialize or refresh the RepoVista project map
   plan                  Show the recommended parallel execution plan
   compare               Compare two RepoVista run directories
+  next                  Show the next prioritized finding from the persistent finding state
+  show                  Show one persisted finding with evidence and lifecycle history
+  triage                Update the lifecycle status of one finding
+  revalidate            Re-check finding evidence against the current checkout
   settings              Edit persisted default settings in an interactive menu
   help                  Show help
   version               Show version
@@ -362,6 +433,7 @@ Options:
   --no-parallel         Disable saved parallel default
   --out <dir>           Report output directory (default: .repovista)
   --resume <run-dir>    Resume or complete an existing RepoVista run directory
+  --since <git-ref>     Focus the audit on files changed since the given Git ref
   --model <name>        Override the provider model
   --profile <name>      Use a Codex configuration profile
   --reasoning <effort>  Override provider reasoning effort
@@ -385,6 +457,10 @@ Options:
   --fail-on-critical    Exit with code 2 in CI when critical findings are detected
   --no-progress         Reduce progress output
   --keep-logs           Store technical provider logs
+  --finding <id>        Finding id for show, triage, or revalidate
+  --status <status>     Finding status: open, fixed, false-positive, wont-fix, uncertain
+  --note <text>         Triage note stored in finding history
+  --all                 Include all finding statuses or revalidate all findings
   --version             Show version
   --help                Show help
 `;

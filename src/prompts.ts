@@ -4,6 +4,19 @@ export interface PromptContext {
   reportFolderName: string;
   inventoryMarkdown: string;
   previousReports: Record<string, string>;
+  since?: {
+    ref: string;
+    changedFiles: string[];
+  };
+  features?: Array<{
+    id: string;
+    title: string;
+    kind: string;
+    paths: string[];
+    ownedFiles: string[];
+    tests: string[];
+    trustBoundaries: string[];
+  }>;
 }
 
 export interface PhaseDefinition {
@@ -63,6 +76,7 @@ Safety and working rules:
 - Ground every important claim in concrete evidence from files, configuration, tests, local checks, or Git metadata.
 - RepoVista already collected the Evidence Pack shown below. Treat Evidence Pack check results as completed checks. Do not write that tests or checks were not run when the Evidence Pack ran them; if you ran no extra provider-side commands, write "No additional provider-side commands were run beyond the Evidence Pack."
 - Keep Evidence Pack results separate from your provider-side read-only context. The Evidence Pack is tool-collected evidence; your own session remains read-only.
+- Use the semantic feature map and optional diff scope below to target the review. If a diff scope exists, prioritize changed files while still mentioning important cross-file dependencies.
 - For recommendations, include affected paths/modules, impact, confidence, and an implementation hint.
 - Avoid generic best-practice filler that is not tied to this repository.
 - Write the final report in ${context.language}.
@@ -71,6 +85,10 @@ Safety and working rules:
 Local project inventory from RepoVista:
 
 ${clip(context.inventoryMarkdown)}
+
+${renderDiffScope(context)}
+
+${renderFeatureMap(context)}
 `;
 }
 
@@ -196,7 +214,15 @@ Also include a fenced JSON block near the end of the report. This JSON schema is
       "category": "<bug, security, reliability, maintainability, data loss, etc.>",
       "affectedPaths": ["src/example.ts"],
       "evidence": "<specific code/config/test/local-check evidence>",
-      "evidenceReferences": ["src/example.ts"],
+      "evidenceReferences": [
+        {
+          "path": "src/example.ts",
+          "startLine": 1,
+          "endLine": 12,
+          "quote": "<short exact snippet when useful>",
+          "symbol": "<function/class/config key when useful>"
+        }
+      ],
       "problemRationale": "<why this is a real risk>",
       "recommendedFix": "<concrete fix proposal>",
       "estimatedEffort": "small | medium | large",
@@ -289,6 +315,38 @@ function renderPrevious(context: PromptContext, reportFiles: string[]): string {
     return `## ${fileName}\n\n${clip(content)}`;
   });
   return sections.join("\n\n");
+}
+
+function renderDiffScope(context: PromptContext): string {
+  if (!context.since) {
+    return "";
+  }
+  const changedFiles = context.since.changedFiles.length
+    ? context.since.changedFiles.map((file) => `- ${file}`).join("\n")
+    : "- No changed files detected.";
+  return `Diff scope from RepoVista:
+
+Base ref: ${context.since.ref}
+Changed files:
+${changedFiles}
+`;
+}
+
+function renderFeatureMap(context: PromptContext): string {
+  if (!context.features?.length) {
+    return "";
+  }
+  const featureLines = context.features.slice(0, 16).map((feature) => [
+    `- ${feature.id}: ${feature.title} (${feature.kind})`,
+    `  paths: ${feature.paths.join(", ") || "n/a"}`,
+    `  owned files: ${feature.ownedFiles.slice(0, 8).join(", ") || "n/a"}`,
+    `  tests: ${feature.tests.slice(0, 6).join(", ") || "n/a"}`,
+    `  trust boundaries: ${feature.trustBoundaries.join(", ") || "n/a"}`
+  ].join("\n"));
+  return `Semantic feature map from RepoVista:
+
+${featureLines.join("\n")}
+`;
 }
 
 function clip(content: string): string {

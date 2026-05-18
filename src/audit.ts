@@ -2,13 +2,17 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PreflightError } from "./errors.js";
 import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
+import { validateFindingsEvidence } from "./evidence-validation.js";
+import { writeFindingState } from "./finding-state.js";
 import { extractFindings, findingCountsBySeverity } from "./findings.js";
+import { collectDiffScope } from "./git-diff.js";
 import { createProjectInventory } from "./inventory.js";
 import { Logger } from "./logger.js";
+import { addPromptManifestPhase, createPromptManifest } from "./prompt-manifest.js";
 import { ANALYSIS_PHASES, type PhaseDefinition, type PromptContext } from "./prompts.js";
 import { validateReportQuality } from "./quality-gates.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
-import { createParallelExecutionMeta, loadProjectMap } from "./project-map.js";
+import { createParallelExecutionMeta, createProjectMap, loadProjectMap } from "./project-map.js";
 import { getReportProvider } from "./providers/index.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { createRunId } from "./run-id.js";
@@ -24,11 +28,14 @@ import {
 import type {
   AuditMeta,
   AuditOptions,
+  DiffScope,
   EvidencePack,
   ParallelExecutionMeta,
   PhaseReportStatus,
+  PromptManifest,
   ProviderRunResult,
   RunPaths,
+  SemanticFeature,
   StructuredFinding
 } from "./types.js";
 
@@ -106,6 +113,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       logger.warn("One or more local check commands failed. The report will include the check output.");
     }
 
+    const diffScope = options.since ? await collectAuditDiffScope(projectRoot, options.since, logger) : undefined;
+
     logger.step("Creating project inventory");
     const inventory = await createProjectInventory(projectRoot, {
       outDir: options.outDir,
@@ -132,6 +141,16 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     await writeMarkdownReport(inventoryPath, inventory.markdown);
     previousReports["00-inventory.md"] = inventory.markdown;
 
+    const featureMap = await createProjectMap(projectRoot, options, now, diffScope);
+    const featuresPath = reportPath(paths.runDir, "features.json");
+    await writeJsonFile(featuresPath, {
+      schemaVersion: 1,
+      runId: paths.runId,
+      since: diffScope,
+      features: featureMap.features
+    });
+    const promptManifest = createPromptManifest(paths.runId, now, featureMap.features, diffScope);
+
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
     const parallel = await resolveParallelMeta(projectRoot, options, logger);
@@ -157,9 +176,19 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         projectRoot,
         reportFolderName: path.basename(options.outDir),
         inventoryMarkdown: inventory.markdown,
-        previousReports
+        previousReports,
+        since: diffScope,
+        features: featureMap.features
       };
       const prompt = phase.buildPrompt(context);
+      await addPromptManifestPhase(promptManifest, {
+        phaseId: phase.id,
+        reportFile: phase.reportFile,
+        prompt,
+        inventoryPath,
+        previousReports,
+        featureMapPath: featuresPath
+      });
       const result = parallel && parallel.effectiveParallelism > 1 && canParallelizePhase(phase)
         ? await runParallelPhase({
             phase,
@@ -193,11 +222,17 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       }
     }
 
-    const findings = extractFindings(previousReports["03-risk-and-bug-report.md"] ?? "");
+    const extractedFindings = extractFindings(previousReports["03-risk-and-bug-report.md"] ?? "");
+    const findings = await validateFindingsEvidence(
+      projectRoot,
+      extractedFindings,
+      allowedEvidencePaths(featureMap.features),
+      new Date()
+    );
     meta.findings = findings;
     meta.exitCode = determineExitCode(options, meta.phases, previousReports["03-risk-and-bug-report.md"], findings, evidence);
     meta.completedAt = new Date().toISOString();
-    await writeStructuredOutputs(paths, meta, findings, evidence);
+    await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath);
   } catch (error) {
     meta.exitCode = 1;
     throw error;
@@ -360,6 +395,38 @@ async function resolveParallelMeta(
   return meta;
 }
 
+async function collectAuditDiffScope(
+  projectRoot: string,
+  ref: string,
+  logger: Logger
+): Promise<DiffScope> {
+  try {
+    const scope = await collectDiffScope(projectRoot, ref);
+    logger.info(`Diff audit scope: ${scope.changedFiles.length} changed file(s) since ${scope.ref}.`);
+    return scope;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PreflightError(`Could not collect --since diff scope: ${message}`);
+  }
+}
+
+function allowedEvidencePaths(features: SemanticFeature[]): Set<string> | undefined {
+  const values = new Set<string>();
+  for (const feature of features) {
+    for (const item of [
+      ...feature.paths,
+      ...feature.ownedFiles,
+      ...feature.contextFiles,
+      ...feature.tests
+    ]) {
+      if (item) {
+        values.add(item);
+      }
+    }
+  }
+  return values.size ? values : undefined;
+}
+
 function canParallelizePhase(phase: PhaseDefinition): boolean {
   return phase.id !== "summary";
 }
@@ -485,6 +552,7 @@ function createInitialMeta(
       parallel: options.parallel ?? "off",
       outDir: options.outDir,
       resumeDir: options.resumeDir,
+      since: options.since,
       language: options.language,
       json: options.json,
       includes: options.includes,
@@ -725,13 +793,18 @@ async function writeStructuredOutputs(
   paths: RunPaths,
   meta: AuditMeta,
   findings: StructuredFinding[],
-  evidence: EvidencePack
+  evidence: EvidencePack,
+  promptManifest: PromptManifest,
+  featuresPath: string
 ): Promise<void> {
   const findingsPath = reportPath(paths.runDir, "findings.json");
   const summaryPath = reportPath(paths.runDir, "summary.json");
+  const promptManifestPath = reportPath(paths.runDir, "prompt-manifest.json");
+  const findingStateDir = await writeFindingState(meta.projectRoot, meta.options.outDir, findings, meta.runId);
   const findingCounts = findingCountsBySeverity(findings);
   meta.findingCounts = findingCounts;
   await writeJsonFile(findingsPath, findings);
+  await writeJsonFile(promptManifestPath, promptManifest);
   await writeJsonFile(summaryPath, {
     tool: meta.tool,
     runId: meta.runId,
@@ -741,6 +814,7 @@ async function writeStructuredOutputs(
     ai: meta.ai,
     codex: meta.codex,
     parallel: meta.parallel,
+    since: promptManifest.since,
     evidence: {
       git: evidence.git,
       aiProvider: evidence.aiProvider,
@@ -752,11 +826,19 @@ async function writeStructuredOutputs(
       }
     },
     phases: meta.phases,
-    findingCounts
+    findingCounts,
+    outputs: {
+      promptManifestJson: promptManifestPath,
+      findingStateDir,
+      featuresJson: featuresPath
+    }
   });
   meta.outputs = {
     findingsJson: findingsPath,
-    summaryJson: summaryPath
+    summaryJson: summaryPath,
+    promptManifestJson: promptManifestPath,
+    findingStateDir,
+    featuresJson: featuresPath
   };
 }
 

@@ -72,7 +72,12 @@ repovista audit --ci --json --fail-on-critical --no-progress
 repovista audit --run-checks --strict-reports
 repovista audit --resume .repovista/2026-05-18T14-57-32-123Z
 repovista audit --phase risk-and-bug --phase summary
+repovista audit --since origin/main
 repovista compare .repovista/old-run .repovista/new-run
+repovista next
+repovista show fnd_abc123def456
+repovista triage fnd_abc123def456 --status fixed --note "validated"
+repovista revalidate fnd_abc123def456
 ```
 
 ## Report Structure
@@ -81,6 +86,7 @@ Each run creates its own timestamped folder:
 
 ```text
 .repovista/
+  findings/
   project-map.json
   2026-05-18T14-57-32-123Z/
     00-inventory.md
@@ -88,15 +94,17 @@ Each run creates its own timestamped folder:
     02-code-quality-report.md
     03-risk-and-bug-report.md
     04-feature-roadmap.md
+    features.json
     findings.json
     index.md
     meta.json
+    prompt-manifest.json
     summary.json
     shards/
     logs/
 ```
 
-`project-map.json` is written by `repovista init` and stores the repository areas, recommended thread count, and default shard assignments. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report's JSON schema block, with Markdown fields as a fallback for older reports. `summary.json` contains machine-readable run, phase, finding, provider, parallel, and evidence summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality warnings, and preflight information. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
+`project-map.json` is written by `repovista init` and stores the repository areas, semantic features, recommended thread count, and default shard assignments. `.repovista/findings/` stores the persistent finding lifecycle state across runs. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `features.json` stores the run-specific semantic feature map and optional diff scope. `findings.json` contains structured risk findings extracted from the risk report's JSON schema block, with Markdown fields as a fallback for older reports. `prompt-manifest.json` records prompt sizes, approximate token counts, included context files, truncation signals, semantic features, and diff scope. `summary.json` contains machine-readable run, phase, finding, provider, parallel, and evidence summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality warnings, and preflight information. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## Comparing Reports
 
@@ -108,6 +116,21 @@ repovista compare .repovista/2026-05-18T14-57-32-123Z .repovista/2026-05-18T16-2
 
 The comparison prints Markdown with provider/model/reasoning metadata, finding count deltas, added/resolved/persisting findings, report line and evidence-reference deltas, and phase quality status.
 
+## Finding Workflow
+
+RepoVista assigns stable `fnd_<hash>` finding ids from severity, title, category, affected paths, and evidence references. New audits update `.repovista/findings/` so findings can be triaged and revalidated independently from a single report run.
+
+```sh
+repovista next
+repovista next --status uncertain
+repovista show fnd_abc123def456
+repovista triage fnd_abc123def456 --status false-positive --note "not reachable in production"
+repovista revalidate fnd_abc123def456
+repovista revalidate --all
+```
+
+Evidence validation checks that referenced paths stay inside the project root, exist, and optionally match line ranges or quotes from schema-based `evidenceReferences`. Revalidation is local and read-only: valid evidence keeps a finding open, missing or changed evidence marks it fixed when all references disappeared, and weak evidence marks it uncertain.
+
 ## CLI Options
 
 | Option | Purpose |
@@ -117,6 +140,7 @@ The comparison prints Markdown with provider/model/reasoning metadata, finding c
 | `--no-parallel` | Disable a saved parallel default |
 | `--out <dir>` | Report output directory, default `.repovista` |
 | `--resume <run-dir>` | Resume or complete an existing RepoVista run directory |
+| `--since <git-ref>` | Focus the audit on files changed since the given Git ref |
 | `--model <name>` | Override the provider model |
 | `--profile <name>` | Use a Codex configuration profile |
 | `--reasoning <effort>` | Override provider reasoning effort |
@@ -140,6 +164,10 @@ The comparison prints Markdown with provider/model/reasoning metadata, finding c
 | `--fail-on-critical` | Return exit code `2` in CI when critical findings are detected |
 | `--no-progress` | Reduce progress output |
 | `--keep-logs` | Store technical provider logs |
+| `--finding <id>` | Finding id for `show`, `triage`, or `revalidate` |
+| `--status <status>` | Finding status: `open`, `fixed`, `false-positive`, `wont-fix`, or `uncertain` |
+| `--note <text>` | Triage note stored in finding history |
+| `--all` | Include all finding statuses or revalidate all findings |
 | `--version` | Show version |
 | `--help` | Show help |
 
@@ -207,7 +235,18 @@ When `--run-checks` is set, RepoVista runs explicit `--check` commands or detect
 
 RepoVista validates each generated Markdown report for expected sections and concrete evidence. The gates also check minimum report depth signals such as path evidence counts, a minimum roadmap proposal count, required proposal fields, risk finding schema validity, and wording that distinguishes provider-side read-only context from completed Evidence Pack checks. Quality warnings are recorded in `meta.json`; with `--strict-reports`, a phase with quality warnings is marked failed.
 
-The risk report is also parsed into `findings.json`. The primary source is a fenced JSON schema block with title, severity, category, affected paths, evidence, evidence references, problem rationale, recommended fix, effort, and confidence. Older Markdown field extraction remains as a compatibility fallback.
+The risk report is also parsed into `findings.json`. The primary source is a fenced JSON schema block with title, severity, category, affected paths, evidence, evidence references, problem rationale, recommended fix, effort, and confidence. `evidenceReferences` can be strings or objects with `path`, `startLine`, `endLine`, `quote`, and `symbol`; RepoVista validates these references after the provider phase. Older Markdown field extraction remains as a compatibility fallback.
+
+## Diff Audits
+
+Use `--since <git-ref>` for focused audits of a branch or change set:
+
+```sh
+repovista audit --since origin/main
+repovista audit --since v0.1.0 --phase risk-and-bug --phase summary
+```
+
+RepoVista runs `git diff --name-only <ref>...HEAD`, stores the changed files in `features.json` and `prompt-manifest.json`, and tells providers to prioritize changed files while still considering cross-file dependencies.
 
 ## Settings
 
@@ -243,9 +282,11 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 - Initialize and inspect parallel planning: `repovista init && repovista plan`.
 - Run a parallel audit after initialization: `repovista audit --parallel auto`.
 - Prepare a higher-signal report: run `repovista audit --run-checks --strict-reports`.
+- Review a branch diff: `repovista audit --since origin/main`.
 - Continue an interrupted run: `repovista audit --resume .repovista/<run-id>`.
 - Rerun only the risk report and summary: `repovista audit --resume .repovista/<run-id> --phase risk-and-bug --phase summary`.
 - Compare two reports: `repovista compare .repovista/<old-run-id> .repovista/<new-run-id>`.
+- Work through findings: `repovista next`, then `repovista show <id>`, `repovista triage <id> --status fixed`, or `repovista revalidate <id>`.
 - Configure persistent defaults: run `repovista settings`, choose a model with Space, return with Enter, then save.
 - Run with Claude Code: `repovista audit --provider claude --model sonnet --reasoning high`.
 - Keep technical logs for troubleshooting: `repovista audit --keep-logs`.

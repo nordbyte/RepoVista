@@ -32,7 +32,10 @@ test("project initialization writes a map with thread recommendations", async ()
     assert.equal(loaded.map.fileCount, map.fileCount);
     assert.ok(map.recommendedParallelism >= 2);
     assert.ok(map.recommendedShards.length >= 2);
+    assert.ok(map.features.length >= 2);
+    assert.ok(map.features.some((feature) => feature.kind === "cli" || feature.kind === "integration" || feature.kind === "test-suite"));
     assert.match(plan, /Thread assignments/);
+    assert.match(plan, /Semantic features/);
     assert.ok(await readFile(mapPath, "utf8"));
   } finally {
     await rm(root, { recursive: true, force: true });

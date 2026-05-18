@@ -4,7 +4,20 @@ export type AiProviderId = "codex" | "claude";
 
 export type ParallelMode = "off" | "auto" | number;
 
-export type CliAction = "audit" | "init" | "plan" | "settings" | "compare" | "help" | "version";
+export type CliAction =
+  | "audit"
+  | "init"
+  | "plan"
+  | "settings"
+  | "compare"
+  | "next"
+  | "show"
+  | "triage"
+  | "revalidate"
+  | "help"
+  | "version";
+
+export type FindingStatus = "open" | "fixed" | "false-positive" | "wont-fix" | "uncertain";
 
 export interface AuditOptions {
   command: "audit";
@@ -33,6 +46,11 @@ export interface AuditOptions {
   keepLogs: boolean;
   compareOldRun?: string;
   compareNewRun?: string;
+  since?: string;
+  findingId?: string;
+  findingStatus?: FindingStatus;
+  note?: string;
+  allFindings?: boolean;
 }
 
 export interface CliParseResult {
@@ -127,14 +145,58 @@ export interface StructuredFinding {
   title: string;
   severity: "critical" | "high" | "medium" | "low" | "unknown";
   category?: string;
+  status?: FindingStatus;
+  triage?: string;
+  signature?: string;
   paths: string[];
   evidence?: string;
   evidenceReferences?: string[];
+  evidenceDetails?: FindingEvidenceReference[];
+  evidenceValidation?: FindingEvidenceValidation;
   recommendation?: string;
   problemRationale?: string;
   estimatedEffort?: string;
   confidence?: string;
+  firstSeenRunId?: string;
+  lastSeenRunId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  history?: FindingHistoryEntry[];
   schemaVersion?: number;
+}
+
+export interface FindingEvidenceReference {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  quote?: string;
+  symbol?: string;
+}
+
+export interface FindingEvidenceValidation {
+  checkedAt: string;
+  passed: boolean;
+  warnings: string[];
+  references: FindingEvidenceValidationReference[];
+}
+
+export interface FindingEvidenceValidationReference {
+  path: string;
+  exists: boolean;
+  insideRoot: boolean;
+  lineRangeValid?: boolean;
+  quoteMatches?: boolean;
+  warning?: string;
+}
+
+export interface FindingHistoryEntry {
+  runId?: string;
+  kind: "audit" | "triage" | "revalidate";
+  status?: FindingStatus;
+  note?: string;
+  reasoning?: string;
+  commands: string[];
+  createdAt: string;
 }
 
 export interface AuditMeta {
@@ -152,6 +214,7 @@ export interface AuditMeta {
     parallel: ParallelMode;
     outDir: string;
     resumeDir?: string;
+    since?: string;
     language: string;
     json: boolean;
     includes: string[];
@@ -205,6 +268,9 @@ export interface AuditMeta {
   outputs?: {
     findingsJson?: string;
     summaryJson?: string;
+    promptManifestJson?: string;
+    findingStateDir?: string;
+    featuresJson?: string;
   };
   exitCode: number;
 }
@@ -237,6 +303,53 @@ export interface WorkShard {
   focus: string;
 }
 
+export interface SemanticFeature {
+  id: string;
+  title: string;
+  kind: string;
+  paths: string[];
+  ownedFiles: string[];
+  contextFiles: string[];
+  tests: string[];
+  tags: string[];
+  trustBoundaries: string[];
+  source: "project-map" | "diff";
+  confidence: "high" | "medium" | "low";
+}
+
+export interface DiffScope {
+  ref: string;
+  changedFiles: string[];
+}
+
+export interface PromptManifestFile {
+  path: string;
+  role: "inventory" | "previous-report" | "project-file" | "feature-map";
+  bytes: number;
+  includedBytes: number;
+  truncated: boolean;
+  readable: boolean;
+  skippedReason?: string;
+}
+
+export interface PromptManifestPhase {
+  phaseId: string;
+  reportFile: string;
+  promptBytes: number;
+  approximateTokens: number;
+  includedFiles: PromptManifestFile[];
+  omittedFiles: PromptManifestFile[];
+}
+
+export interface PromptManifest {
+  schemaVersion: 1;
+  runId: string;
+  createdAt: string;
+  since?: DiffScope;
+  features: SemanticFeature[];
+  phases: PromptManifestPhase[];
+}
+
 export interface ProjectMap {
   version: 1;
   projectRoot: string;
@@ -249,8 +362,10 @@ export interface ProjectMap {
   frameworks: string[];
   packageManagers: string[];
   areas: ProjectArea[];
+  features: SemanticFeature[];
   recommendedParallelism: number;
   recommendedShards: WorkShard[];
+  since?: DiffScope;
   warnings: string[];
 }
 

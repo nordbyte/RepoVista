@@ -202,6 +202,12 @@ function diffFindings(oldFindings: StructuredFinding[], newFindings: StructuredF
 }
 
 function findingKey(finding: StructuredFinding): string {
+  if (finding.signature) {
+    return finding.signature;
+  }
+  if (finding.id?.startsWith("fnd_")) {
+    return finding.id;
+  }
   const paths = [...(finding.paths ?? [])].sort().join(",");
   return [
     finding.severity,

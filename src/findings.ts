@@ -1,4 +1,5 @@
-import type { StructuredFinding } from "./types.js";
+import { findingSignature, stableFindingId } from "./stable-id.js";
+import type { FindingEvidenceReference, FindingStatus, StructuredFinding } from "./types.js";
 
 export interface FindingExtractionResult {
   findings: StructuredFinding[];
@@ -75,20 +76,26 @@ function extractMarkdownFindings(report: string, source: string): StructuredFind
     }
 
     const title = extractTitle(block) ?? `${capitalize(severity)} finding`;
-    findings.push({
-      id: `finding-${String(findings.length + 1).padStart(3, "0")}`,
+    const paths = extractPaths(block);
+    const evidence = cleanField(EVIDENCE_PATTERN.exec(block)?.[1]);
+    const evidenceReferences = extractPaths(evidence ?? "");
+    findings.push(withStableFindingIdentity({
+      id: "",
       source,
       title,
       severity,
       category: cleanField(CATEGORY_PATTERN.exec(block)?.[1]),
-      paths: extractPaths(block),
-      evidence: cleanField(EVIDENCE_PATTERN.exec(block)?.[1]),
-      evidenceReferences: extractPaths(cleanField(EVIDENCE_PATTERN.exec(block)?.[1]) ?? ""),
+      status: "open",
+      triage: triageFor(cleanField(CATEGORY_PATTERN.exec(block)?.[1]), severity, cleanField(CONFIDENCE_PATTERN.exec(block)?.[1])),
+      paths,
+      evidence,
+      evidenceReferences,
+      evidenceDetails: evidenceReferences.map((reference) => ({ path: reference })),
       recommendation: cleanField(RECOMMENDATION_PATTERN.exec(block)?.[1]),
       problemRationale: cleanField(PROBLEM_RATIONALE_PATTERN.exec(block)?.[1]),
       estimatedEffort: cleanField(ESTIMATED_EFFORT_PATTERN.exec(block)?.[1]),
       confidence: cleanField(CONFIDENCE_PATTERN.exec(block)?.[1])
-    });
+    }));
   }
 
   return findings;
@@ -117,23 +124,32 @@ function normalizeSchemaFinding(
   }
 
   const paths = readPathArray(record.affectedPaths ?? record.paths ?? record.affectedFiles);
-  const evidenceReferences = readPathArray(record.evidenceReferences ?? record.evidencePaths ?? record.references);
-
-  return {
-    id: readString(record.id) ?? `finding-${String(index + 1).padStart(3, "0")}`,
+  const evidenceDetails = readEvidenceReferences(record.evidenceReferences ?? record.evidenceDetails ?? record.evidencePaths ?? record.references);
+  const evidenceReferences = evidenceDetails.map((reference) => reference.path);
+  const category = readString(record.category);
+  const confidence = readString(record.confidence);
+  const normalized: StructuredFinding = {
+    id: readString(record.id) ?? "",
     source,
     title: title ?? `${capitalize(severity)} finding`,
     severity,
-    category: readString(record.category),
+    category,
+    status: normalizeStatus(readString(record.status)) ?? "open",
+    triage: readString(record.triage) ?? triageFor(category, severity, confidence),
     paths,
     evidence: readString(record.evidence),
     evidenceReferences: evidenceReferences.length ? evidenceReferences : extractPaths(readString(record.evidence) ?? ""),
+    evidenceDetails: evidenceDetails.length
+      ? evidenceDetails
+      : extractPaths(readString(record.evidence) ?? "").map((reference) => ({ path: reference })),
     recommendation: readString(record.recommendedFix ?? record.recommendation),
     problemRationale: readString(record.problemRationale ?? record.rationale),
     estimatedEffort: readString(record.estimatedEffort ?? record.effort),
-    confidence: readString(record.confidence),
+    confidence,
     schemaVersion
   };
+
+  return withStableFindingIdentity(normalized);
 }
 
 function jsonBlocks(report: string): string[] {
@@ -184,12 +200,100 @@ function readPathArray(value: unknown): string[] {
   return Array.from(paths).sort();
 }
 
+function readEvidenceReferences(value: unknown): FindingEvidenceReference[] {
+  const references: FindingEvidenceReference[] = [];
+  const seen = new Set<string>();
+  const values = Array.isArray(value) ? value : typeof value === "string" ? splitPathField(value) : [];
+  for (const item of values) {
+    const reference = readEvidenceReference(item);
+    if (!reference) {
+      continue;
+    }
+    const key = `${reference.path}:${reference.startLine ?? ""}:${reference.endLine ?? ""}:${reference.quote ?? ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      references.push(reference);
+    }
+  }
+  return references.sort((left, right) => left.path.localeCompare(right.path) || (left.startLine ?? 0) - (right.startLine ?? 0));
+}
+
+function readEvidenceReference(value: unknown): FindingEvidenceReference | undefined {
+  if (typeof value === "string") {
+    const pathValue = normalizePathCandidate(value, true);
+    return pathValue ? { path: pathValue } : undefined;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const pathValue = normalizePathCandidate(readString(record.path ?? record.file ?? record.relativePath), true);
+  if (!pathValue) {
+    return undefined;
+  }
+
+  const startLine = readPositiveInteger(record.startLine ?? record.line ?? record.lineStart);
+  const endLine = readPositiveInteger(record.endLine ?? record.lineEnd) ?? startLine;
+  return {
+    path: pathValue,
+    startLine,
+    endLine,
+    quote: readString(record.quote ?? record.snippet),
+    symbol: readString(record.symbol)
+  };
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : Number.NaN;
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return undefined;
+  }
+  return parsed;
+}
+
 function normalizeSeverity(value: string | undefined): StructuredFinding["severity"] {
   const normalized = value?.trim().toLowerCase();
   if (normalized === "critical" || normalized === "high" || normalized === "medium" || normalized === "low") {
     return normalized;
   }
   return "unknown";
+}
+
+function normalizeStatus(value: string | undefined): FindingStatus | undefined {
+  const normalized = value?.toLowerCase();
+  if (normalized === "open" || normalized === "fixed" || normalized === "false-positive" || normalized === "wont-fix" || normalized === "uncertain") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function withStableFindingIdentity(finding: StructuredFinding): StructuredFinding {
+  const signature = findingSignature(finding);
+  const id = finding.id && finding.id.startsWith("fnd_") ? finding.id : stableFindingId(finding);
+  return {
+    ...finding,
+    id,
+    signature,
+    status: finding.status ?? "open",
+    triage: finding.triage ?? triageFor(finding.category, finding.severity, finding.confidence)
+  };
+}
+
+function triageFor(category: string | undefined, severity: StructuredFinding["severity"], confidence: string | undefined): string {
+  const normalizedCategory = category?.toLowerCase() ?? "";
+  const normalizedConfidence = confidence?.toLowerCase() ?? "";
+  if (severity === "critical" || severity === "high") {
+    return normalizedConfidence === "low" ? "needs-confirmation" : "needs-fix";
+  }
+  if (/security|auth|secret|injection|path|data loss/.test(normalizedCategory)) {
+    return "needs-fix";
+  }
+  if (/test|coverage|docs?/.test(normalizedCategory)) {
+    return "improvement";
+  }
+  return "review";
 }
 
 export function findingCountsBySeverity(findings: StructuredFinding[]): Record<string, number> {

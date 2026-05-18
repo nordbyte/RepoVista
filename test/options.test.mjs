@@ -48,6 +48,8 @@ test("explicit audit command parses supported options", () => {
     "2",
     "--timeout",
     "45",
+    "--since",
+    "origin/main",
     "--strict-reports",
     "--ci",
     "--fail-on-critical",
@@ -72,6 +74,7 @@ test("explicit audit command parses supported options", () => {
   assert.deepEqual(parsed.options.checkCommands, ["npm run typecheck"]);
   assert.equal(parsed.options.checkTimeoutSeconds, 120);
   assert.equal(parsed.options.phaseTimeoutSeconds, 2700);
+  assert.equal(parsed.options.since, "origin/main");
   assert.equal(parsed.options.strictReports, true);
   assert.equal(parsed.options.ci, true);
   assert.equal(parsed.options.progress, false);
@@ -110,4 +113,24 @@ test("compare command requires old and new run directories", () => {
   assert.equal(parsed.options.compareOldRun, ".repovista/old");
   assert.equal(parsed.options.compareNewRun, ".repovista/new");
   assert.throws(() => parseCliArgs(["compare", ".repovista/old"]), /requires two run directories/);
+});
+
+test("finding workflow commands are recognized", () => {
+  const next = parseCliArgs(["next", "--status", "uncertain"]);
+  assert.equal(next.action, "next");
+  assert.equal(next.options.findingStatus, "uncertain");
+
+  const show = parseCliArgs(["show", "fnd_123"]);
+  assert.equal(show.action, "show");
+  assert.equal(show.options.findingId, "fnd_123");
+
+  const triage = parseCliArgs(["triage", "fnd_123", "--status", "false-positive", "--note", "fixture"]);
+  assert.equal(triage.action, "triage");
+  assert.equal(triage.options.findingStatus, "false-positive");
+  assert.equal(triage.options.note, "fixture");
+
+  const revalidate = parseCliArgs(["revalidate", "--all"]);
+  assert.equal(revalidate.action, "revalidate");
+  assert.equal(revalidate.options.allFindings, true);
+  assert.throws(() => parseCliArgs(["triage", "fnd_123", "--status", "ignored"]), /--status/);
 });

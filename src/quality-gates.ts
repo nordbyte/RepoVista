@@ -166,8 +166,17 @@ function validateRiskFindings(markdown: string): string[] {
     if (!finding.evidence) {
       warnings.push(`Schema finding ${label} is missing evidence.`);
     }
-    if (!(finding.evidenceReferences?.length || finding.paths.length)) {
+    if (!(finding.evidenceDetails?.length || finding.evidenceReferences?.length || finding.paths.length)) {
       warnings.push(`Schema finding ${label} is missing concrete evidenceReferences.`);
+    }
+    if (finding.evidenceDetails?.some((reference) => !reference.path)) {
+      warnings.push(`Schema finding ${label} has an invalid evidence reference.`);
+    }
+    if (!finding.status) {
+      warnings.push(`Schema finding ${label} is missing lifecycle status.`);
+    }
+    if (!finding.signature) {
+      warnings.push(`Schema finding ${label} is missing a stable signature.`);
     }
     if (!finding.problemRationale) {
       warnings.push(`Schema finding ${label} is missing problemRationale.`);

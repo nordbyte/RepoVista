@@ -5,6 +5,12 @@ import path from "node:path";
 import { runAudit } from "./audit.js";
 import { runCompareCommand } from "./compare.js";
 import { CliUsageError, RepoVistaError } from "./errors.js";
+import {
+  runNextFindingCommand,
+  runRevalidateFindingCommand,
+  runShowFindingCommand,
+  runTriageFindingCommand
+} from "./finding-state.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
@@ -45,6 +51,22 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         optionsWithSettings.options.compareOldRun ?? "",
         optionsWithSettings.options.compareNewRun ?? ""
       ));
+      return 0;
+    }
+    if (optionsWithSettings.action === "next") {
+      process.stdout.write(await runNextFindingCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "show") {
+      process.stdout.write(await runShowFindingCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "triage") {
+      process.stdout.write(await runTriageFindingCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "revalidate") {
+      process.stdout.write(await runRevalidateFindingCommand(optionsWithSettings.options));
       return 0;
     }
     const result = await runAudit(optionsWithSettings.options, { version });

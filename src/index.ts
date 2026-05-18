@@ -9,7 +9,18 @@ export { createProjectMap, createParallelExecutionMeta, initializeProjectMap, lo
 export { runInitCommand, runPlanCommand } from "./project-commands.js";
 export { getReportProvider, isReportProviderId, REPORT_PROVIDER_IDS, REPORT_PROVIDERS } from "./providers/index.js";
 export { collectEvidence, hasFailedChecks, renderEvidenceMarkdown } from "./evidence.js";
+export { evidenceReferencesForFinding, validateFindingEvidence, validateFindingsEvidence } from "./evidence-validation.js";
+export {
+  findingStateDirectory,
+  loadStoredFindings,
+  runNextFindingCommand,
+  runRevalidateFindingCommand,
+  runShowFindingCommand,
+  runTriageFindingCommand,
+  writeFindingState
+} from "./finding-state.js";
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity } from "./findings.js";
+export { collectDiffScope } from "./git-diff.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";
 export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateProvider, validateSandbox } from "./options.js";
@@ -20,6 +31,7 @@ export { createRunId } from "./run-id.js";
 export { isSensitiveKey, maskObject, maskSensitiveText, maskSensitiveValue } from "./secrets.js";
 export { applySettingsToDefaults, loadSettings, saveSettings, sanitizeSettings } from "./settings-config.js";
 export { summarizeSettings } from "./settings-menu.js";
+export { findingSignature, stableFindingId, stableId } from "./stable-id.js";
 export type {
   AuditMeta,
   AuditOptions,
@@ -28,11 +40,18 @@ export type {
   CliParseResult,
   CodexRunRequest,
   CodexRunResult,
+  DiffScope,
   EvidenceCommandResult,
   EvidencePack,
+  FindingEvidenceReference,
+  FindingEvidenceValidation,
+  FindingHistoryEntry,
+  FindingStatus,
   ParallelExecutionMeta,
   ParallelMode,
   PhaseReportStatus,
+  PromptManifest,
+  PromptManifestPhase,
   ProjectArea,
   ProjectFileSummary,
   ProjectMap,
@@ -40,6 +59,7 @@ export type {
   ProviderRunResult,
   RunPaths,
   SandboxMode,
+  SemanticFeature,
   StructuredFinding,
   WorkShard
 } from "./types.js";
