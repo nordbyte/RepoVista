@@ -63,7 +63,14 @@ test("audit creates the full report structure with mocked Codex phases", async (
 
     const meta = JSON.parse(await readFile(path.join(result.paths.runDir, "meta.json"), "utf8"));
     assert.equal(meta.codex.sandbox, "read-only");
+    assert.equal(meta.codex.model, "Codex configured default");
+    assert.equal(meta.codex.reasoning, "model default");
     assert.equal(meta.phases.every((phase) => phase.status === "success"), true);
+
+    const inventory = await readFile(path.join(result.paths.runDir, "00-inventory.md"), "utf8");
+    assert.match(inventory, /## Codex Execution Settings/);
+    assert.match(inventory, /Model: Codex configured default/);
+    assert.match(inventory, /Reasoning: model default/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

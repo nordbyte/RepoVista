@@ -50,6 +50,13 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       outDir: options.outDir,
       includes: options.includes,
       ignores: options.ignores,
+      codex: {
+        model: options.model,
+        profile: options.profile,
+        reasoning: options.reasoning,
+        fastMode: options.fastMode,
+        sandbox: options.sandbox
+      },
       now
     });
     for (const warning of inventory.warnings) {
@@ -152,9 +159,9 @@ function createInitialMeta(
       keepLogs: options.keepLogs
     },
     codex: {
-      model: options.model,
-      profile: options.profile,
-      reasoning: options.reasoning,
+      model: options.model ?? "Codex configured default",
+      profile: options.profile ?? "none",
+      reasoning: options.reasoning ?? "model default",
       fastMode: options.fastMode,
       sandbox: options.sandbox
     },

@@ -74,7 +74,7 @@ Each run creates its own timestamped folder:
     logs/
 ```
 
-`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `meta.json` contains run options, phase status, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
+`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` and `meta.json` record the Codex execution settings, including model, reasoning effort, fast mode, profile, and sandbox. `meta.json` also contains run options, phase status, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## CLI Options
 

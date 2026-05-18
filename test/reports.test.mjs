@@ -38,7 +38,13 @@ test("metadata is written as formatted JSON", async () => {
         progress: false,
         keepLogs: true
       },
-      codex: { sandbox: "read-only" },
+      codex: {
+        model: "Codex configured default",
+        profile: "none",
+        reasoning: "model default",
+        fastMode: false,
+        sandbox: "read-only"
+      },
       preflight: {
         codexAvailable: true,
         projectRecognized: true,
@@ -52,6 +58,7 @@ test("metadata is written as formatted JSON", async () => {
     const json = JSON.parse(await readFile(metaPath, "utf8"));
     assert.equal(json.tool.name, "RepoVista");
     assert.equal(json.codex.sandbox, "read-only");
+    assert.equal(json.codex.reasoning, "model default");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

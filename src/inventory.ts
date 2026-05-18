@@ -2,11 +2,19 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
 import { maskObject, maskSensitiveText } from "./secrets.js";
+import type { SandboxMode } from "./types.js";
 
 export interface InventoryOptions {
   outDir: string;
   includes: string[];
   ignores: string[];
+  codex?: {
+    model?: string;
+    profile?: string;
+    reasoning?: string;
+    fastMode: boolean;
+    sandbox: SandboxMode;
+  };
   now?: Date;
   maxFiles?: number;
   maxTreeEntries?: number;
@@ -199,6 +207,7 @@ export async function createProjectInventory(
     importantDirectories,
     includes: options.includes,
     ignores: options.ignores,
+    codex: options.codex,
     maxTreeEntries
   });
 
@@ -352,6 +361,13 @@ function renderInventory(input: {
   importantDirectories: string[];
   includes: string[];
   ignores: string[];
+  codex?: {
+    model?: string;
+    profile?: string;
+    reasoning?: string;
+    fastMode: boolean;
+    sandbox: SandboxMode;
+  };
   maxTreeEntries: number;
 }): string {
   const packageScripts = readPackageScripts(input.packageJson.data);
@@ -410,12 +426,33 @@ ${renderList(detectSpecialFiles(input.files))}
 - Include: ${input.includes.length ? input.includes.map((item) => `\`${item}\``).join(", ") : "none"}
 - Ignore: ${input.ignores.length ? input.ignores.map((item) => `\`${item}\``).join(", ") : "none"}
 
+## Codex Execution Settings
+
+${renderCodexSettings(input.codex)}
+
 ## Shortened File Tree
 
 \`\`\`text
 ${renderTree(input.files, input.maxTreeEntries)}
 \`\`\`
 `;
+}
+
+function renderCodexSettings(codex: {
+  model?: string;
+  profile?: string;
+  reasoning?: string;
+  fastMode: boolean;
+  sandbox: SandboxMode;
+} | undefined): string {
+  return [
+    `- Model: ${codex?.model ?? "Codex configured default"}`,
+    `- Reasoning: ${codex?.reasoning ?? "model default"}`,
+    `- Fast mode: ${codex?.fastMode ? "on" : "off"}`,
+    `- Profile: ${codex?.profile ?? "none"}`,
+    `- Sandbox: ${codex?.sandbox ?? "read-only"}`,
+    "- Approval policy: never"
+  ].join("\n");
 }
 
 function readPackageScripts(packageJson?: Record<string, unknown>): Record<string, string> {

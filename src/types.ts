@@ -63,9 +63,9 @@ export interface AuditMeta {
     keepLogs: boolean;
   };
   codex: {
-    model?: string;
-    profile?: string;
-    reasoning?: string;
+    model: string;
+    profile: string;
+    reasoning: string;
     fastMode: boolean;
     sandbox: SandboxMode;
   };
