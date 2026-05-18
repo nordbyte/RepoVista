@@ -20,18 +20,17 @@ RepoVista does not install provider CLIs through a postinstall script and does n
 
 ## Installation
 
-From a local checkout:
-
-```sh
-npm install
-npm run build
-npm link
-```
-
-After publication:
+Install from npm:
 
 ```sh
 npm install -g repovista
+```
+
+RepoVista is also published to GitHub Packages as `@nordbyte/repovista` for releases. Configure npm for GitHub Packages if you want to install that mirror:
+
+```sh
+npm config set @nordbyte:registry https://npm.pkg.github.com
+npm install -g @nordbyte/repovista
 ```
 
 ## Usage
