@@ -3,10 +3,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const execFileAsync = promisify(execFile);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("provider plugins are loaded from JSON definitions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-provider-plugin-"));
@@ -25,7 +27,7 @@ test("provider plugins are loaded from JSON definitions", async () => {
       "-e",
       "import { getReportProvider, REPORT_PROVIDER_IDS } from './dist/index.js'; const p = getReportProvider('fixture-provider'); console.log(JSON.stringify({ ids: REPORT_PROVIDER_IDS, args: p.buildArgs({ projectRoot: '/repo', reportPath: '/tmp/report.md', phaseId: 'phase', phaseTitle: 'Phase', model: 'model-x', fastMode: false, sandbox: 'read-only', jsonEvents: false, keepLogs: false, timeoutSeconds: 1, provider: 'fixture-provider' }) }));"
     ], {
-      cwd: path.resolve(new URL("..", import.meta.url).pathname),
+      cwd: repoRoot,
       env: {
         ...process.env,
         REPOVISTA_PROVIDER_PLUGIN: pluginPath
