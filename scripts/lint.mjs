@@ -3,7 +3,7 @@ import path from "node:path";
 
 const ROOT = process.cwd();
 const CHECK_ROOTS = [".github", "scripts", "src", "test"];
-const ROOT_FILES = ["package.json", "package-lock.json", "README.md", "tsconfig.json"];
+const ROOT_FILES = [".gitattributes", "package.json", "package-lock.json", "README.md", "tsconfig.json"];
 const OPTIONAL_ROOT_FILES = ["repovista.md"];
 const EXTENSIONS = new Set([".js", ".mjs", ".ts", ".json", ".md", ".yml", ".yaml"]);
 const IGNORED_DIRS = new Set([".git", ".repovista", "dist", "node_modules"]);
