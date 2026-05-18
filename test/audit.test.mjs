@@ -16,7 +16,7 @@ test("audit creates the full report structure with mocked Codex phases", async (
       command: "audit",
       outDir: ".repovista",
       sandbox: "read-only",
-      language: "Deutsch",
+      language: "English",
       json: true,
       includes: [],
       ignores: [],
@@ -33,7 +33,7 @@ test("audit creates the full report structure with mocked Codex phases", async (
       commandExists: async () => true,
       runCodex: async (request) => {
         const content = request.phaseId === "risk-and-bug"
-          ? "# Risiko\n\n## Kritische Befunde\n\nKeine belastbaren kritischen Befunde.\n"
+          ? "# Risk\n\n## Critical Findings\n\nNo critical findings.\n"
           : `# ${request.phaseTitle}\n\nReport for ${request.phaseId}.\n`;
         await writeFile(request.reportPath, content, "utf8");
         return {
@@ -77,7 +77,7 @@ test("audit rejects project root as report folder before creating run directorie
       command: "audit",
       outDir: ".",
       sandbox: "read-only",
-      language: "Deutsch",
+      language: "English",
       json: false,
       includes: [],
       ignores: [],
@@ -94,7 +94,7 @@ test("audit rejects project root as report folder before creating run directorie
         version: "0.1.0",
         commandExists: async () => true
       }),
-      /Reportordner darf nicht identisch/
+      /report directory must not be identical/i
     );
 
     assert.deepEqual((await readdir(root)).sort(), ["package.json"]);
@@ -104,9 +104,9 @@ test("audit rejects project root as report folder before creating run directorie
 });
 
 test("critical finding detector distinguishes empty critical sections from real findings", () => {
-  assert.equal(hasCriticalFindings("## Kritische Befunde\n\nKeine belastbaren kritischen Befunde."), false);
+  assert.equal(hasCriticalFindings("## Critical Findings\n\nNo critical findings."), false);
   assert.equal(
-    hasCriticalFindings("## Kritische Befunde\n\n- Titel: Unsichere Auth\n- Schweregrad: Kritisch"),
+    hasCriticalFindings("## Critical Findings\n\n- Title: Unsafe auth\n- Severity: Critical"),
     true
   );
 });

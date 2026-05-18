@@ -60,7 +60,7 @@ test("codex runner writes success report via mocked process", async () => {
 
     const result = await runCodexPhase({
       phaseId: "architecture",
-      phaseTitle: "Architektur",
+      phaseTitle: "Architecture",
       prompt: "prompt",
       projectRoot: root,
       reportPath,
@@ -93,7 +93,7 @@ test("codex runner creates an error report on failed process", async () => {
 
     const result = await runCodexPhase({
       phaseId: "risk",
-      phaseTitle: "Risiko",
+      phaseTitle: "Risk",
       prompt: "prompt",
       projectRoot: root,
       reportPath,
@@ -103,8 +103,8 @@ test("codex runner creates an error report on failed process", async () => {
     }, spawnAdapter);
 
     assert.equal(result.success, false);
-    assert.match(await readFile(reportPath, "utf8"), /Fehlgeschlagen/);
-    assert.match(result.error, /authentifiziert/);
+    assert.match(await readFile(reportPath, "utf8"), /Failed/);
+    assert.match(result.error, /unauthenticated/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

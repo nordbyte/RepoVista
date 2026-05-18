@@ -8,7 +8,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.action, "audit");
   assert.equal(parsed.options.outDir, ".repovista");
   assert.equal(parsed.options.sandbox, "read-only");
-  assert.equal(parsed.options.language, "Deutsch");
+  assert.equal(parsed.options.language, "English");
   assert.equal(parsed.options.progress, true);
 });
 
@@ -50,9 +50,9 @@ test("explicit audit command parses supported options", () => {
 });
 
 test("danger-full-access sandbox is rejected", () => {
-  assert.throws(() => validateSandbox("danger-full-access"), /Gefährlicher Sandbox-Modus/);
+  assert.throws(() => validateSandbox("danger-full-access"), /Dangerous sandbox mode/);
 });
 
 test("unknown options fail clearly", () => {
-  assert.throws(() => parseCliArgs(["--unknown"]), /Unbekannte Option/);
+  assert.throws(() => parseCliArgs(["--unknown"]), /Unknown option/);
 });

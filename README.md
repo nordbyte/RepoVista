@@ -1,21 +1,21 @@
 # RepoVista
 
-RepoVista ist ein npm-installierbares CLI-Tool, das im aktuellen Projektverzeichnis einen strukturierten, read-only Codex-Audit orchestriert. Es sammelt zuerst ein kompaktes lokales Projektinventar, startet danach mehrere spezialisierte `codex exec`-Läufe und schreibt die Ergebnisse als Markdown-Reports nach `.repovista/<run-id>`.
+RepoVista is an npm-installable CLI tool that orchestrates a structured, read-only Codex audit in the current project directory. It first collects a compact local project inventory, then runs several specialized `codex exec` phases and writes the results as Markdown reports to `.repovista/<run-id>`.
 
-RepoVista ist kein Ersatz für manuelle Reviews, Tests, SAST-Scanner, Dependency-Audits oder Security-Assessments. Es ist ein schneller Einstieg, um Architektur, Qualität, Risiken, Bugs und sinnvolle Verbesserungen eines Repositories besser zu verstehen.
+RepoVista is not a replacement for manual reviews, tests, SAST scanners, dependency audits, or security assessments. It is a fast entry point for understanding a repository's architecture, quality, risks, bugs, and useful improvement opportunities.
 
-## Voraussetzungen
+## Requirements
 
-- Node.js 20 oder neuer.
-- Eine separat installierte und authentifizierte offizielle Codex CLI.
-- Der Befehl `codex` muss im `PATH` verfügbar sein.
-- Ausführungsrechte und Datenschutzfreigabe für das Repository, das analysiert werden soll.
+- Node.js 20 or newer.
+- A separately installed and authenticated official Codex CLI.
+- The `codex` command must be available in `PATH`.
+- Permission and privacy clearance for the repository being analyzed.
 
-RepoVista installiert Codex nicht per Postinstall-Skript und aktiviert keine Telemetrie.
+RepoVista does not install Codex through a postinstall script and does not enable telemetry.
 
 ## Installation
 
-Lokal aus dem Repository:
+From a local checkout:
 
 ```sh
 npm install
@@ -23,27 +23,27 @@ npm run build
 npm link
 ```
 
-Nach einer Veröffentlichung:
+After publication:
 
 ```sh
 npm install -g repovista
 ```
 
-## Nutzung
+## Usage
 
-Im Projektroot ausführen:
+Run from the project root:
 
 ```sh
 repovista
 ```
 
-Der explizite Audit-Befehl ist gleichwertig:
+The explicit audit command is equivalent:
 
 ```sh
 repovista audit
 ```
 
-Beispiele:
+Examples:
 
 ```sh
 repovista audit --language English --model gpt-5.5
@@ -51,9 +51,9 @@ repovista audit --out reports/repovista --keep-logs
 repovista audit --ci --json --fail-on-critical --no-progress
 ```
 
-## Reportstruktur
+## Report Structure
 
-Jeder Lauf erzeugt einen eigenen Timestamp-Ordner:
+Each run creates its own timestamped folder:
 
 ```text
 .repovista/
@@ -68,93 +68,93 @@ Jeder Lauf erzeugt einen eigenen Timestamp-Ordner:
     logs/
 ```
 
-`index.md` ist der Einstiegspunkt. Die Detailreports enthalten Architektur, Codequalität, Risiken/Bugs/Security und Feature-Roadmap. `meta.json` enthält Laufoptionen, Phasenstatus und Preflight-Informationen. `logs/` wird nur bei `--keep-logs` oder `--json` angelegt.
+`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `meta.json` contains run options, phase status, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
 
-## CLI-Optionen
+## CLI Options
 
-| Option | Zweck |
+| Option | Purpose |
 |---|---|
-| `--out <dir>` | Zielordner für Reports, Standard `.repovista` |
-| `--model <name>` | Codex-Modell überschreiben |
-| `--profile <name>` | Codex-Profil aus der Codex-Konfiguration verwenden |
-| `--sandbox <mode>` | Codex-Sandbox, `read-only` oder `workspace-write`, Standard `read-only` |
-| `--language <name>` | Sprache der Reports, Standard `Deutsch` |
-| `--json` | Metadaten und Codex-JSONL-Events speichern |
-| `--include <patterns>` | Zusätzliche Include-Patterns für Inventar/Kontext dokumentieren |
-| `--ignore <patterns>` | Zusätzliche Ignore-Patterns für Inventar und Kontext |
-| `--ci` | CI-freundlicher Modus ohne Fortschrittsausgabe |
-| `--fail-on-critical` | In CI bei kritischen Findings Exit-Code `2` zurückgeben |
-| `--no-progress` | Fortschrittsausgabe reduzieren |
-| `--keep-logs` | Technische Codex-Logs speichern |
-| `--version` | Version anzeigen |
-| `--help` | Hilfe anzeigen |
+| `--out <dir>` | Report output directory, default `.repovista` |
+| `--model <name>` | Override the Codex model |
+| `--profile <name>` | Use a Codex configuration profile |
+| `--sandbox <mode>` | Codex sandbox, `read-only` or `workspace-write`, default `read-only` |
+| `--language <name>` | Report language, default `English` |
+| `--json` | Store metadata and Codex JSONL events |
+| `--include <patterns>` | Document additional include patterns for inventory/context |
+| `--ignore <patterns>` | Additional ignore patterns for inventory and context |
+| `--ci` | CI-friendly mode without progress output |
+| `--fail-on-critical` | Return exit code `2` in CI when critical findings are detected |
+| `--no-progress` | Reduce progress output |
+| `--keep-logs` | Store technical Codex logs |
+| `--version` | Show version |
+| `--help` | Show help |
 
-## Sicherheitsmodell
+## Security Model
 
-RepoVista ist standardmäßig ein Audit-Tool und kein Auto-Fix-Tool.
+RepoVista is an audit tool by default, not an auto-fix tool.
 
-- Codex wird standardmäßig mit `--sandbox read-only` gestartet.
-- `danger-full-access` und Full-Access-Varianten werden im MVP abgelehnt.
-- RepoVista selbst schreibt nur in den Reportordner.
-- Alte `.repovista`-Reports, Dependencies, Build-Artefakte, Caches, Coverage, Medienassets und Archive werden vom Inventar ausgeschlossen.
-- Sensible Werte in gelesenen Metadaten werden maskiert; `.env`-Inhalte werden nicht in Reports übernommen.
-- Es gibt keine automatische Codex-Installation, keine destruktiven Befehle und keine Telemetrie.
+- Codex is started with `--sandbox read-only` by default.
+- `danger-full-access` and full-access variants are rejected in the MVP.
+- RepoVista itself writes only to the report directory.
+- Old `.repovista` reports, dependencies, build artifacts, caches, coverage, media assets, and archives are excluded from the inventory.
+- Sensitive values in read metadata are masked; `.env` contents are not included in reports.
+- There is no automatic Codex installation, no destructive commands, and no telemetry.
 
-Wichtig: Codex kann im Rahmen seiner Analyse auf das Repository zugreifen und Quellcode an den verwendeten Codex-Dienst übergeben. Verwende RepoVista nur in Repositories, für die du die nötigen Rechte und Datenschutzfreigaben hast.
+Important: Codex can access the repository during analysis and may send source code to the configured Codex service. Use RepoVista only in repositories where you have the required permissions and privacy clearance.
 
-## Codex-CLI-Abhängigkeit
+## Codex CLI Dependency
 
-RepoVista prüft vor dem Audit, ob `codex` verfügbar ist. Die Analysephasen werden über `codex exec` gestartet. Der Zielordner ist immer das aktuelle Arbeitsverzeichnis, in dem `repovista` ausgeführt wird.
+RepoVista checks whether `codex` is available before the audit starts. Analysis phases are started through `codex exec`. The target directory is always the current working directory where `repovista` is executed.
 
-RepoVista setzt für Codex:
+RepoVista sets these Codex options:
 
-- `--cd <aktuelles Projektverzeichnis>`
-- `--config approval_policy="never"` für nicht-interaktive Läufe
-- `--sandbox read-only` als Standard
-- `--skip-git-repo-check`, damit auch bewusst nicht-git-basierte Projektordner analysierbar bleiben
-- `--output-last-message <report.md>`, damit die finale Antwort sauber vom technischen Stream getrennt ist
+- `--cd <current project directory>`
+- `--config approval_policy="never"` for non-interactive runs
+- `--sandbox read-only` by default
+- `--skip-git-repo-check`, so intentionally non-git project folders can still be analyzed
+- `--output-last-message <report.md>`, so the final answer is separated cleanly from the technical stream
 
-## CI-Hinweise
+## CI Notes
 
-Für CI/CD:
+For CI/CD:
 
 ```sh
 repovista audit --ci --json --fail-on-critical
 ```
 
-Exit-Codes:
+Exit codes:
 
-- `0`: Audit abgeschlossen, keine kritische CI-Sperre.
-- `1`: Mindestens eine Analysephase ist fehlgeschlagen oder ein fataler Fehler trat auf.
-- `2`: `--ci --fail-on-critical` wurde gesetzt und der Risiko-Report enthält kritische Findings.
+- `0`: Audit completed without a critical CI gate.
+- `1`: At least one analysis phase failed or a fatal error occurred.
+- `2`: `--ci --fail-on-critical` was set and the risk report contains critical findings.
 
-Die Reports können als CI-Artefakte aus dem gewählten `--out`-Ordner gespeichert werden.
+Reports can be stored as CI artifacts from the selected `--out` directory.
 
-## Typische Workflows
+## Typical Workflows
 
-- Fremdes Repository verstehen: `repovista`, danach `.repovista/<run-id>/index.md` lesen.
-- Technische Logs für Fehlersuche behalten: `repovista audit --keep-logs`.
-- Englische Reports erzeugen: `repovista audit --language English`.
-- Bestimmte generierte Ordner zusätzlich ignorieren: `repovista audit --ignore "fixtures/generated/**"`.
+- Understand an unfamiliar repository: run `repovista`, then read `.repovista/<run-id>/index.md`.
+- Keep technical logs for troubleshooting: `repovista audit --keep-logs`.
+- Generate reports in a specific language: `repovista audit --language Spanish`.
+- Ignore additional generated folders: `repovista audit --ignore "fixtures/generated/**"`.
 
 ## Troubleshooting
 
-`Codex CLI wurde nicht gefunden`
-: Installiere und authentifiziere Codex separat. Prüfe danach `codex --version`.
+`Codex CLI was not found`
+: Install and authenticate Codex separately. Then check `codex --version`.
 
-`Codex CLI scheint nicht authentifiziert zu sein`
-: Melde die Codex CLI an und starte den Audit erneut.
+`Codex CLI appears to be unauthenticated`
+: Sign in to the Codex CLI and start the audit again.
 
-`Das aktuelle Verzeichnis sieht nicht wie ein Codeprojekt aus`
-: Führe RepoVista im Projektroot aus. Erkennbare Marker sind unter anderem `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `README.md`, `src/`, `lib/` oder `app/`.
+`The current directory does not look like a code project`
+: Run RepoVista from the project root. Recognized markers include `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `README.md`, `src/`, `lib/`, or `app/`.
 
-`Sandbox-Modus abgelehnt`
-: Verwende `read-only` oder, nur bei bewusster Entscheidung, `workspace-write`. RepoVista ist nicht für automatische Codeänderungen im MVP gedacht.
+`Sandbox mode rejected`
+: Use `read-only` or, only by conscious choice, `workspace-write`. RepoVista is not intended for automatic code changes in the MVP.
 
-Sehr große Repositories
-: RepoVista kürzt das Inventar und markiert ausgelassene Einträge. Codex kann das Repository weiterhin selbst lesen, erhält aber nur kompakten Orientierungskontext.
+Very large repositories
+: RepoVista shortens the inventory and marks omitted entries. Codex can still read the repository itself, but receives compact orientation context.
 
-## Entwicklung
+## Development
 
 ```sh
 npm install
@@ -162,4 +162,4 @@ npm run typecheck
 npm test
 ```
 
-Die Unit-Tests rufen Codex nicht real auf. Der Codex-Runner wird mit gemockten Prozessen getestet.
+The unit tests do not call Codex for real. The Codex runner is tested with mocked processes.

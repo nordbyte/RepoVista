@@ -9,7 +9,7 @@ const baseOptions = {
   command: "audit",
   outDir: ".repovista",
   sandbox: "read-only",
-  language: "Deutsch",
+  language: "English",
   json: false,
   includes: [],
   ignores: [],
@@ -28,7 +28,7 @@ test("preflight fails clearly when codex is missing", async () => {
 
     await assert.rejects(
       () => runPreflight(root, runDir, baseOptions, { commandExists: async () => false }),
-      /Codex CLI wurde nicht gefunden/
+      /Codex CLI was not found/
     );
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -5,7 +5,7 @@ const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
   outDir: ".repovista",
   sandbox: "read-only",
-  language: "Deutsch",
+  language: "English",
   json: false,
   includes: [],
   ignores: [],
@@ -59,7 +59,7 @@ export function parseCliArgs(argv: string[]): CliParseResult {
     }
 
     if (!arg.startsWith("--")) {
-      throw new CliUsageError(`Unbekannte Kurzoption: ${arg}`);
+      throw new CliUsageError(`Unknown short option: ${arg}`);
     }
 
     const withoutPrefix = arg.slice(2);
@@ -70,7 +70,7 @@ export function parseCliArgs(argv: string[]): CliParseResult {
     if (VALUE_OPTIONS.has(name)) {
       const value = inlineValue ?? argv[index + 1];
       if (value === undefined || value.startsWith("--")) {
-        throw new CliUsageError(`Option --${name} benötigt einen Wert.`);
+        throw new CliUsageError(`Option --${name} requires a value.`);
       }
       if (inlineValue === undefined) {
         index += 1;
@@ -80,11 +80,11 @@ export function parseCliArgs(argv: string[]): CliParseResult {
     }
 
     if (!BOOLEAN_OPTIONS.has(name)) {
-      throw new CliUsageError(`Unbekannte Option: --${name}`);
+      throw new CliUsageError(`Unknown option: --${name}`);
     }
 
     if (inlineValue !== undefined) {
-      throw new CliUsageError(`Option --${name} erwartet keinen Wert.`);
+      throw new CliUsageError(`Option --${name} does not take a value.`);
     }
 
     switch (name) {
@@ -114,7 +114,7 @@ export function parseCliArgs(argv: string[]): CliParseResult {
   }
 
   if (positionals.length > 1) {
-    throw new CliUsageError(`Zu viele Positionsargumente: ${positionals.join(" ")}`);
+    throw new CliUsageError(`Too many positional arguments: ${positionals.join(" ")}`);
   }
 
   const command = positionals[0] ?? "audit";
@@ -123,7 +123,7 @@ export function parseCliArgs(argv: string[]): CliParseResult {
   } else if (command === "version") {
     wantsVersion = true;
   } else if (command !== "audit") {
-    throw new CliUsageError(`Unbekannter Befehl: ${command}`);
+    throw new CliUsageError(`Unknown command: ${command}`);
   }
 
   if (wantsVersion) {
@@ -166,7 +166,7 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
 function requireNonEmpty(optionName: string, value: string): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
-    throw new CliUsageError(`Option --${optionName} darf nicht leer sein.`);
+    throw new CliUsageError(`Option --${optionName} must not be empty.`);
   }
   return trimmed;
 }
@@ -185,39 +185,39 @@ export function validateSandbox(value: string): SandboxMode {
 
   if (value === "danger-full-access" || value === "full-access") {
     throw new CliUsageError(
-      "Gefährlicher Sandbox-Modus abgelehnt. RepoVista unterstützt im MVP nur read-only und workspace-write."
+      "Dangerous sandbox mode rejected. RepoVista supports only read-only and workspace-write in the MVP."
     );
   }
 
-  throw new CliUsageError(`Unbekannter Sandbox-Modus: ${value}`);
+  throw new CliUsageError(`Unknown sandbox mode: ${value}`);
 }
 
 export function renderHelp(): string {
-  return `RepoVista - Codex-gestützte Read-only-Repository-Audits
+  return `RepoVista - Codex-powered read-only repository audits
 
 Usage:
   repovista [options]
   repovista audit [options]
 
 Commands:
-  audit                 Vollständigen Audit im aktuellen Verzeichnis ausführen
-  help                  Hilfe anzeigen
-  version               Version anzeigen
+  audit                 Run a full audit in the current directory
+  help                  Show help
+  version               Show version
 
 Options:
-  --out <dir>           Zielordner für Reports (Standard: .repovista)
-  --model <name>        Codex-Modell überschreiben
-  --profile <name>      Codex-Profil aus der Codex-Konfiguration verwenden
-  --sandbox <mode>      Codex-Sandbox: read-only oder workspace-write (Standard: read-only)
-  --language <name>     Sprache der Reports (Standard: Deutsch)
-  --json                Metadaten und Codex-JSONL-Events speichern
-  --include <patterns>  Zusätzliche Include-Patterns für Inventar/Kontext
-  --ignore <patterns>   Zusätzliche Ignore-Patterns
-  --ci                  CI-Modus ohne Fortschrittsausgabe
-  --fail-on-critical    Im CI-Modus bei kritischen Findings mit Exit-Code 2 beenden
-  --no-progress         Fortschrittsausgabe reduzieren
-  --keep-logs           Technische Codex-Logs speichern
-  --version             Version anzeigen
-  --help                Hilfe anzeigen
+  --out <dir>           Report output directory (default: .repovista)
+  --model <name>        Override the Codex model
+  --profile <name>      Use a Codex configuration profile
+  --sandbox <mode>      Codex sandbox: read-only or workspace-write (default: read-only)
+  --language <name>     Report language (default: English)
+  --json                Store metadata and Codex JSONL events
+  --include <patterns>  Additional include patterns for inventory/context
+  --ignore <patterns>   Additional ignore patterns
+  --ci                  CI mode without progress output
+  --fail-on-critical    Exit with code 2 in CI when critical findings are detected
+  --no-progress         Reduce progress output
+  --keep-logs           Store technical Codex logs
+  --version             Show version
+  --help                Show help
 `;
 }

@@ -12,10 +12,10 @@ export class Logger {
   }
 
   warn(message: string): void {
-    process.stderr.write(`Warnung: ${message}\n`);
+    process.stderr.write(`Warning: ${message}\n`);
   }
 
   error(message: string): void {
-    process.stderr.write(`Fehler: ${message}\n`);
+    process.stderr.write(`Error: ${message}\n`);
   }
 }

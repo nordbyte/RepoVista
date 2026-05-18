@@ -96,7 +96,7 @@ export async function runCodexPhase(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      void writeCodexFailureReport(request, `Codex konnte nicht gestartet werden: ${message}`, undefined, undefined).then(() => {
+      void writeCodexFailureReport(request, `Codex could not be started: ${message}`, undefined, undefined).then(() => {
         void finish({ success: false, error: message });
       });
       return;
@@ -114,7 +114,7 @@ export async function runCodexPhase(
 
     child.on("error", (error) => {
       const message = error.message;
-      void writeCodexFailureReport(request, `Codex konnte nicht gestartet werden: ${message}`, stdoutText, stderrText).then(() => {
+      void writeCodexFailureReport(request, `Codex could not be started: ${message}`, stdoutText, stderrText).then(() => {
         void finish({ success: false, error: message });
       });
     });
@@ -134,7 +134,7 @@ export async function runCodexPhase(
 
         const hasReport = await hasUsableReport(request.reportPath);
         if (!hasReport) {
-          const message = "Codex-Lauf war erfolgreich, hat aber keine verwertbare finale Antwort erzeugt.";
+          const message = "Codex run succeeded but did not produce a usable final answer.";
           await writeCodexFailureReport(request, message, stdoutText, stderrText);
           await finish({ success: false, exitCode: code, error: message });
           return;
@@ -174,17 +174,17 @@ async function writeCodexFailureReport(
 
 ## Status
 
-Fehlgeschlagen.
+Failed.
 
-## Fehler
+## Error
 
 ${message}
 
-## Hinweise
+## Notes
 
-- Der Zielcode wurde von RepoVista nicht verändert.
-- Prüfe, ob Codex CLI installiert und authentifiziert ist.
-- Wenn das Projekt kein Git-Repository ist, nutzt RepoVista bereits \`--skip-git-repo-check\`.
+- RepoVista did not modify the target code.
+- Check whether Codex CLI is installed and authenticated.
+- If the project is not a Git repository, RepoVista already uses \`--skip-git-repo-check\`.
 
 ${stderr ? `## Codex stderr\n\n\`\`\`text\n${truncate(stderr)}\n\`\`\`\n` : ""}
 ${stdout ? `## Codex stdout\n\n\`\`\`text\n${truncate(stdout)}\n\`\`\`\n` : ""}
@@ -195,9 +195,9 @@ ${stdout ? `## Codex stdout\n\n\`\`\`text\n${truncate(stdout)}\n\`\`\`\n` : ""}
 function classifyCodexError(stderrText: string, code: number | null): string {
   const lower = stderrText.toLowerCase();
   if (lower.includes("auth") || lower.includes("login") || lower.includes("api key")) {
-    return "Codex CLI scheint nicht authentifiziert zu sein. Führe die Codex-Anmeldung aus und starte RepoVista erneut.";
+    return "Codex CLI appears to be unauthenticated. Sign in to the Codex CLI and start RepoVista again.";
   }
-  return `Codex-Lauf wurde mit Exit-Code ${code ?? "unbekannt"} beendet.`;
+  return `Codex run exited with code ${code ?? "unknown"}.`;
 }
 
 function appendBounded(current: string, addition: string): string {
@@ -206,5 +206,5 @@ function appendBounded(current: string, addition: string): string {
 }
 
 function truncate(value: string): string {
-  return value.length <= MAX_ERROR_TEXT ? value : `${value.slice(0, MAX_ERROR_TEXT)}\n... gekürzt ...`;
+  return value.length <= MAX_ERROR_TEXT ? value : `${value.slice(0, MAX_ERROR_TEXT)}\n... truncated ...`;
 }

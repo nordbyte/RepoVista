@@ -178,10 +178,10 @@ export async function createProjectInventory(
 
   const warnings: string[] = [];
   if (state.truncated) {
-    warnings.push(`Inventar gekürzt: mehr als ${maxFiles} relevante Dateien gefunden.`);
+    warnings.push(`Inventory shortened: more than ${maxFiles} relevant files found.`);
   }
   if (state.files.length > 3000) {
-    warnings.push("Das Repository ist groß. RepoVista kürzt den Dateibaum und übergibt Codex nur kompakten Kontext.");
+    warnings.push("The repository is large. RepoVista shortens the file tree and passes only compact context to Codex.");
   }
 
   const markdown = renderInventory({
@@ -357,60 +357,60 @@ function renderInventory(input: {
   const packageScripts = readPackageScripts(input.packageJson.data);
   const hints = detectProjectHints(input.files, packageScripts);
 
-  return `# RepoVista Projektinventar
+  return `# RepoVista Project Inventory
 
-## Lauf
+## Run
 
-- Projektroot: \`${input.projectRoot}\`
-- Zeitpunkt: ${input.now.toISOString()}
-- Relevante Dateien im Inventar: ${input.files.length}
-- Ausgelassene Dateien: ${input.omittedFileCount}
-- Hinweis: Inhalte sensibler Dateien werden nicht aufgenommen; erkannte sensible Werte werden maskiert.
+- Project root: \`${input.projectRoot}\`
+- Timestamp: ${input.now.toISOString()}
+- Relevant files in inventory: ${input.files.length}
+- Omitted files: ${input.omittedFileCount}
+- Note: Sensitive file contents are not collected; detected sensitive values are masked.
 
 ${renderWarnings(input.warnings)}
 
-## Paketmanager und Lockfiles
+## Package Managers and Lockfiles
 
-${renderList(input.packageManagers.length ? input.packageManagers : ["Nicht eindeutig erkannt"])}
+${renderList(input.packageManagers.length ? input.packageManagers : ["Not clearly detected"])}
 
 Lockfiles:
 
-${renderList(input.lockfiles.length ? input.lockfiles : ["Keine relevanten Lockfiles erkannt"])}
+${renderList(input.lockfiles.length ? input.lockfiles : ["No relevant lockfiles detected"])}
 
-## Erkannte Frameworks und Buildtools
+## Detected Frameworks and Build Tools
 
-${renderList(input.frameworks.length ? input.frameworks : ["Nicht eindeutig aus package.json ableitbar"])}
+${renderList(input.frameworks.length ? input.frameworks : ["Not clearly inferable from package.json"])}
 
-## Programmiersprachen nach Dateiendungen
+## Programming Languages by File Extension
 
-${renderKeyValueTable(input.languages, "Sprache", "Dateien")}
+${renderKeyValueTable(input.languages, "Language", "Files")}
 
-## Relevante package.json-Skripte
+## Relevant package.json Scripts
 
-${renderKeyValueTable(packageScripts, "Skript", "Befehl")}
+${renderKeyValueTable(packageScripts, "Script", "Command")}
 
-## Test-, Build- und Lint-Hinweise
+## Test, Build, and Lint Signals
 
-${renderList(hints.length ? hints : ["Keine eindeutigen Hinweise erkannt"])}
+${renderList(hints.length ? hints : ["No clear signals detected"])}
 
-## Wichtige Konfigurationsdateien
+## Important Configuration Files
 
-${renderList(input.configFiles.length ? input.configFiles : ["Keine bekannten Konfigurationsdateien erkannt"])}
+${renderList(input.configFiles.length ? input.configFiles : ["No known configuration files detected"])}
 
-## Wichtige Verzeichnisse
+## Important Directories
 
-${renderList(input.importantDirectories.length ? input.importantDirectories : ["Keine relevanten Top-Level-Verzeichnisse erkannt"])}
+${renderList(input.importantDirectories.length ? input.importantDirectories : ["No relevant top-level directories detected"])}
 
-## Dokumentation, APIs, Tests, Migrationen und Deployment
+## Documentation, APIs, Tests, Migrations, and Deployment
 
 ${renderList(detectSpecialFiles(input.files))}
 
-## Zusätzliche Include-/Ignore-Patterns
+## Additional Include/Ignore Patterns
 
-- Include: ${input.includes.length ? input.includes.map((item) => `\`${item}\``).join(", ") : "keine"}
-- Ignore: ${input.ignores.length ? input.ignores.map((item) => `\`${item}\``).join(", ") : "keine"}
+- Include: ${input.includes.length ? input.includes.map((item) => `\`${item}\``).join(", ") : "none"}
+- Ignore: ${input.ignores.length ? input.ignores.map((item) => `\`${item}\``).join(", ") : "none"}
 
-## Gekürzter Dateibaum
+## Shortened File Tree
 
 \`\`\`text
 ${renderTree(input.files, input.maxTreeEntries)}
@@ -433,25 +433,25 @@ function detectProjectHints(files: ScannedFile[], scripts: Record<string, string
   const hints = new Set<string>();
   for (const name of Object.keys(scripts)) {
     if (/test/i.test(name)) {
-      hints.add(`Test-Skript: \`npm run ${name}\``);
+      hints.add(`Test script: \`npm run ${name}\``);
     }
     if (/build/i.test(name)) {
-      hints.add(`Build-Skript: \`npm run ${name}\``);
+      hints.add(`Build script: \`npm run ${name}\``);
     }
     if (/lint/i.test(name)) {
-      hints.add(`Lint-Skript: \`npm run ${name}\``);
+      hints.add(`Lint script: \`npm run ${name}\``);
     }
   }
 
   const paths = files.map((file) => file.relativePath);
   if (paths.some((file) => /^test[s]?\//.test(file) || /\.test\.[cm]?[jt]sx?$/.test(file))) {
-    hints.add("Testdateien oder Testverzeichnis erkannt");
+    hints.add("Test files or test directory detected");
   }
   if (paths.some((file) => /^\.github\/workflows\//.test(file))) {
-    hints.add("GitHub-Actions-Workflow erkannt");
+    hints.add("GitHub Actions workflow detected");
   }
   if (paths.some((file) => /Dockerfile$|docker-compose\.ya?ml$/.test(file))) {
-    hints.add("Docker-/Container-Konfiguration erkannt");
+    hints.add("Docker/container configuration detected");
   }
   return Array.from(hints).sort();
 }
@@ -474,14 +474,14 @@ function detectSpecialFiles(files: ScannedFile[]): string[] {
     );
   });
 
-  return matches.length ? matches.slice(0, 80) : ["Keine eindeutigen Spezialdateien erkannt"];
+  return matches.length ? matches.slice(0, 80) : ["No clear special files detected"];
 }
 
 function renderWarnings(warnings: string[]): string {
   if (!warnings.length) {
-    return "## Warnungen\n\n- Keine";
+    return "## Warnings\n\n- None";
   }
-  return `## Warnungen\n\n${renderList(warnings)}`;
+  return `## Warnings\n\n${renderList(warnings)}`;
 }
 
 function renderList(items: string[]): string {
@@ -491,7 +491,7 @@ function renderList(items: string[]): string {
 function renderKeyValueTable(values: Record<string, string | number>, leftTitle: string, rightTitle: string): string {
   const entries = Object.entries(values);
   if (!entries.length) {
-    return `| ${leftTitle} | ${rightTitle} |\n|---|---|\n| Keine Daten | - |`;
+    return `| ${leftTitle} | ${rightTitle} |\n|---|---|\n| No data | - |`;
   }
 
   return [
@@ -514,7 +514,7 @@ function renderTree(files: ScannedFile[], maxEntries: number): string {
     lines.push(`${"  ".repeat(depth)}- ${path.basename(relativePath)}`);
   }
   if (paths.length > visible.length) {
-    lines.push(`... ${paths.length - visible.length} weitere Einträge ausgelassen`);
+    lines.push(`... ${paths.length - visible.length} additional entries omitted`);
   }
   return lines.join("\n");
 }

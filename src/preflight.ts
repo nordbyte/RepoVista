@@ -47,38 +47,38 @@ export async function runPreflight(
   const warnings: string[] = [];
   const commandExists = dependencies.commandExists ?? defaultCommandExists;
 
-  await assertDirectoryAccess(projectRoot, "Projektverzeichnis", false);
-  await assertDirectoryAccess(runDir, "Reportverzeichnis", true);
+  await assertDirectoryAccess(projectRoot, "Project directory", false);
+  await assertDirectoryAccess(runDir, "Report directory", true);
 
   const codexAvailable = await commandExists("codex");
   if (!codexAvailable) {
     throw new PreflightError(
-      "Codex CLI wurde nicht gefunden. Installiere und authentifiziere die offizielle Codex CLI, sodass der Befehl `codex` im PATH verfügbar ist."
+      "Codex CLI was not found. Install and authenticate the official Codex CLI so the `codex` command is available in PATH."
     );
   }
 
   const projectRecognized = await isRecognizableProject(projectRoot);
   if (!projectRecognized) {
     throw new PreflightError(
-      "Das aktuelle Verzeichnis sieht nicht wie ein Codeprojekt aus. Führe RepoVista im Projektroot aus oder ergänze erkennbare Projektdateien."
+      "The current directory does not look like a code project. Run RepoVista from the project root or add recognizable project files."
     );
   }
 
   const gitRepository = await hasGitRepository(projectRoot);
   if (!gitRepository) {
     warnings.push(
-      "Das Zielverzeichnis ist kein erkennbares Git-Repository. RepoVista übergibt Codex --skip-git-repo-check, damit der Audit trotzdem read-only ausgeführt werden kann."
+      "The target directory is not a recognizable Git repository. RepoVista passes --skip-git-repo-check so the audit can still run read-only."
     );
   }
 
   if (options.sandbox !== "read-only") {
     warnings.push(
-      `Sandbox-Modus ${options.sandbox} wurde explizit gewählt. Der sichere Standard ist read-only.`
+      `Sandbox mode ${options.sandbox} was selected explicitly. The safe default is read-only.`
     );
   }
 
   if (path.resolve(projectRoot, options.outDir) === projectRoot) {
-    throw new PreflightError("Der Reportordner darf nicht identisch mit dem Projektroot sein.");
+    throw new PreflightError("The report directory must not be identical to the project root.");
   }
 
   return {
@@ -115,15 +115,15 @@ async function assertDirectoryAccess(directory: string, label: string, requireWr
   try {
     const directoryStat = await stat(directory);
     if (!directoryStat.isDirectory()) {
-      throw new PreflightError(`${label} ist kein Verzeichnis: ${directory}`);
+      throw new PreflightError(`${label} is not a directory: ${directory}`);
     }
     await access(directory, requireWritable ? constants.R_OK | constants.W_OK : constants.R_OK);
   } catch (error) {
     if (error instanceof PreflightError) {
       throw error;
     }
-    const accessDescription = requireWritable ? "nicht lesbar oder nicht beschreibbar" : "nicht lesbar";
-    throw new PreflightError(`${label} ist ${accessDescription}: ${directory}`);
+    const accessDescription = requireWritable ? "not readable or not writable" : "not readable";
+    throw new PreflightError(`${label} is ${accessDescription}: ${directory}`);
   }
 }
 

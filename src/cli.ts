@@ -25,17 +25,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return result.exitCode;
   } catch (error) {
     if (error instanceof CliUsageError) {
-      process.stderr.write(`Fehler: ${error.message}\n\n${renderHelp()}`);
+      process.stderr.write(`Error: ${error.message}\n\n${renderHelp()}`);
       return 1;
     }
 
     if (error instanceof RepoVistaError) {
-      process.stderr.write(`Fehler: ${error.message}\n`);
+      process.stderr.write(`Error: ${error.message}\n`);
       return 1;
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`Unerwarteter Fehler: ${message}\n`);
+    process.stderr.write(`Unexpected error: ${message}\n`);
     return 1;
   }
 }

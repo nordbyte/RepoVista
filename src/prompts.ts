@@ -18,52 +18,52 @@ const CONTEXT_LIMIT = 18000;
 export const ANALYSIS_PHASES: PhaseDefinition[] = [
   {
     id: "architecture",
-    title: "Architektur-Analyse",
+    title: "Architecture Analysis",
     reportFile: "01-architecture-report.md",
     buildPrompt: buildArchitecturePrompt
   },
   {
     id: "code-quality",
-    title: "Codequalitäts-Analyse",
+    title: "Code Quality Analysis",
     reportFile: "02-code-quality-report.md",
     buildPrompt: buildCodeQualityPrompt
   },
   {
     id: "risk-and-bug",
-    title: "Risiko-, Bug- und Security-Analyse",
+    title: "Risk, Bug, and Security Analysis",
     reportFile: "03-risk-and-bug-report.md",
     buildPrompt: buildRiskPrompt
   },
   {
     id: "feature-roadmap",
-    title: "Feature- und Verbesserungs-Roadmap",
+    title: "Feature and Improvement Roadmap",
     reportFile: "04-feature-roadmap.md",
     buildPrompt: buildRoadmapPrompt
   },
   {
     id: "summary",
-    title: "Gesamtübersicht",
+    title: "Executive Summary",
     reportFile: "index.md",
     buildPrompt: buildSummaryPrompt
   }
 ];
 
 function baseInstructions(context: PromptContext, role: string): string {
-  return `Du bist ${role}. Analysiere das Repository im aktuellen Arbeitsverzeichnis: ${context.projectRoot}.
+  return `You are a ${role}. Analyze the repository in the current working directory: ${context.projectRoot}.
 
-Sicherheits- und Arbeitsregeln:
-- Arbeite strikt read-only. Verändere keine Dateien im Zielprojekt.
-- Ignoriere den RepoVista-Reportordner \`${context.reportFolderName}\` und alte RepoVista-Reports vollständig als Projektcode.
-- Führe keine destruktiven Befehle aus.
-- Aktiviere keine unnötigen Netzwerkzugriffe.
-- Nenne konkrete Pfade, Dateien, Module oder Konfigurationen, wenn möglich.
-- Markiere Unsicherheiten klar als Hypothese oder offene Frage.
-- Erfinde keine Fakten. Wenn etwas nicht belegbar ist, sage das.
-- Priorisiere Findings und Empfehlungen nachvollziehbar.
-- Schreibe den finalen Report in ${context.language}.
-- Liefere ausschließlich den Markdown-Report als finale Antwort.
+Safety and working rules:
+- Work strictly read-only. Do not modify files in the target project.
+- Ignore the RepoVista report directory \`${context.reportFolderName}\` and all old RepoVista reports completely as project code.
+- Do not run destructive commands.
+- Do not enable unnecessary network access.
+- Name concrete paths, files, modules, or configuration when possible.
+- Clearly mark uncertainty as a hypothesis or open question.
+- Do not invent facts. If something is not supported by evidence, say so.
+- Prioritize findings and recommendations clearly.
+- Write the final report in ${context.language}.
+- Return only the Markdown report as the final answer.
 
-Lokales Projektinventar von RepoVista:
+Local project inventory from RepoVista:
 
 ${clip(context.inventoryMarkdown)}
 `;
@@ -72,110 +72,110 @@ ${clip(context.inventoryMarkdown)}
 function buildArchitecturePrompt(context: PromptContext): string {
   return `${baseInstructions(context, "Staff Software Architect")}
 
-Aufgabe: Erstelle einen ausführlichen Architektur-Report.
+Task: Create a detailed architecture report.
 
-Untersuche:
-- Zweck und vermutete Hauptfunktion der Anwendung.
-- Tech-Stack.
-- zentrale Module, Komponenten, Services und APIs.
-- Datenflüsse und Kontrollflüsse.
-- Konfigurationsstruktur.
-- Build-, Test- und Deployment-Struktur.
-- Architektur-Muster.
-- Kopplung, Kohäsion und Verantwortlichkeiten.
-- besonders wichtige Dateien.
-- Einstiegspunkte für neue Entwickler.
+Analyze:
+- The purpose and likely main function of the application.
+- Tech stack.
+- Central modules, components, services, and APIs.
+- Data flows and control flows.
+- Configuration structure.
+- Build, test, and deployment structure.
+- Architecture patterns.
+- Coupling, cohesion, and responsibilities.
+- Especially important files.
+- Entry points for new developers.
 
-Der Report muss diese Abschnitte enthalten:
+The report must contain these sections:
 1. Executive Summary
-2. Projektzweck
-3. Tech-Stack
-4. Modul- und Komponentenübersicht
-5. Datenfluss und Kontrollfluss
-6. Wichtige Dateien und ihre Rolle
-7. Externe Abhängigkeiten und Integrationen
-8. Architektur-Stärken
-9. Architektur-Schwächen
-10. Risiken für Wartbarkeit und Skalierung
-11. Empfehlungen
-12. Offene Fragen und Unsicherheiten
+2. Project Purpose
+3. Tech Stack
+4. Module and Component Overview
+5. Data Flow and Control Flow
+6. Important Files and Their Role
+7. External Dependencies and Integrations
+8. Architecture Strengths
+9. Architecture Weaknesses
+10. Maintainability and Scaling Risks
+11. Recommendations
+12. Open Questions and Uncertainties
 `;
 }
 
 function buildCodeQualityPrompt(context: PromptContext): string {
   return `${baseInstructions(context, "Senior Code Reviewer")}
 
-Vorherige Architektur-Erkenntnisse:
+Previous architecture findings:
 
 ${renderPrevious(context, ["01-architecture-report.md"])}
 
-Aufgabe: Bewerte Codequalität, Stärken, Schwächen und Wartbarkeit aus Senior-Review-Perspektive.
+Task: Evaluate code quality, strengths, weaknesses, and maintainability from a senior review perspective.
 
-Untersuche:
-- Lesbarkeit, Struktur und Naming.
-- Fehlerbehandlung und Testbarkeit.
-- Modularität, Duplikate und unnötige Komplexität.
-- Dependency-Nutzung, API-Design und Typisierung.
-- Konfigurationsqualität und Wartbarkeit.
+Analyze:
+- Readability, structure, and naming.
+- Error handling and testability.
+- Modularity, duplication, and unnecessary complexity.
+- Dependency usage, API design, and typing.
+- Configuration quality and maintainability.
 
-Der Report muss diese Abschnitte enthalten:
+The report must contain these sections:
 1. Executive Summary
-2. Größte Stärken
-3. Größte Schwächen
-4. Code-Smells
-5. Wartbarkeitsprobleme
-6. Testabdeckung und Teststrategie
-7. Technische Schulden
-8. Priorisierte Empfehlungen
+2. Biggest Strengths
+3. Biggest Weaknesses
+4. Code Smells
+5. Maintainability Problems
+6. Test Coverage and Test Strategy
+7. Technical Debt
+8. Prioritized Recommendations
 9. Quick Wins
-10. Mittelfristige Refactorings
-11. Größere Architekturmaßnahmen
+10. Medium-Term Refactorings
+11. Larger Architecture Measures
 
-Für relevante Schwächen nenne Datei oder Pfad, Problem, Auswirkung, Empfehlung und Priorität.
+For relevant weaknesses, name the file or path, problem, impact, recommendation, and priority.
 `;
 }
 
 function buildRiskPrompt(context: PromptContext): string {
-  return `${baseInstructions(context, "defensiver Application-Security- und Bug-Audit-Reviewer")}
+  return `${baseInstructions(context, "defensive application-security and bug-audit reviewer")}
 
-Vorherige Erkenntnisse:
+Previous findings:
 
 ${renderPrevious(context, ["01-architecture-report.md", "02-code-quality-report.md"])}
 
-Aufgabe: Finde potenzielle Bugs, Sicherheitsrisiken und robuste Fehlerquellen. Handle defensiv; keine Exploit-Anleitungen gegen reale externe Ziele.
+Task: Identify potential bugs, security risks, and robust failure modes. Stay defensive; do not provide exploit instructions against real external targets.
 
-Untersuche:
-- Input-Validation, Authentifizierung und Autorisierung.
-- Secrets und Konfiguration.
-- unsichere Datei- und Pfadverarbeitung.
-- Injection-Risiken.
-- XSS, CSRF, SSRF und ähnliche Risiken, falls relevant.
-- unsichere Dependency-Nutzung.
-- Race Conditions, fehlerhafte Async-Logik und Error-Handling-Pfade.
-- Datenverlust-Risiken.
-- Logging sensibler Daten.
-- fehlende Tests für kritische Pfade.
-- falsche Annahmen in Businesslogik.
+Analyze:
+- Input validation, authentication, and authorization.
+- Secrets and configuration.
+- Unsafe file and path handling.
+- Injection risks.
+- XSS, CSRF, SSRF, and similar risks where relevant.
+- Unsafe dependency usage.
+- Race conditions, faulty async logic, and error-handling paths.
+- Data-loss risks.
+- Logging of sensitive data.
+- Missing tests for critical paths.
+- Incorrect assumptions in business logic.
 
-Der Report muss diese Abschnitte enthalten:
+The report must contain these sections:
 1. Executive Summary
-2. Kritische Befunde
-3. Hohe Befunde
-4. Mittlere Befunde
-5. Niedrige Befunde
-6. Potenzielle Bugs
-7. Sicherheitsrisiken
-8. Fehlende Tests
-9. Empfohlene nächste Schritte
+2. Critical Findings
+3. High Findings
+4. Medium Findings
+5. Low Findings
+6. Potential Bugs
+7. Security Risks
+8. Missing Tests
+9. Recommended Next Steps
 
-Für jeden Befund nenne Titel, Schweregrad, Kategorie, Datei oder Pfad, Evidenz aus dem Code, Problembegründung, konkreten Fix-Vorschlag und geschätzten Aufwand. Markiere unsichere Befunde ausdrücklich als Hypothese.
+For each finding, include title, severity, category, file or path, evidence from the code, problem rationale, concrete fix proposal, and estimated effort. Mark uncertain findings explicitly as hypotheses.
 `;
 }
 
 function buildRoadmapPrompt(context: PromptContext): string {
   return `${baseInstructions(context, "product-minded Senior Engineer")}
 
-Vorherige Erkenntnisse:
+Previous findings:
 
 ${renderPrevious(context, [
     "01-architecture-report.md",
@@ -183,33 +183,33 @@ ${renderPrevious(context, [
     "03-risk-and-bug-report.md"
   ])}
 
-Aufgabe: Leite aus Code, Architektur und bisherigen Reports eine konkrete Feature- und Verbesserungs-Roadmap ab.
+Task: Derive a concrete feature and improvement roadmap from the code, architecture, and previous reports.
 
-Untersuche:
-- Welche bestehenden Funktionen sinnvoll verbessert werden können.
-- Welche Features wahrscheinlich fehlen.
-- Welche Verbesserungen den größten Nutzen hätten.
-- Welche Features zur vorhandenen Architektur passen.
-- Welche Features zuerst Refactoring benötigen.
-- Welche technischen Verbesserungen Stabilität, Sicherheit oder Developer Experience erhöhen.
+Analyze:
+- Which existing features should be improved.
+- Which features are likely missing.
+- Which improvements would have the highest value.
+- Which features fit the current architecture.
+- Which features require refactoring first.
+- Which technical improvements would improve stability, security, or developer experience.
 
-Der Report muss diese Abschnitte enthalten:
+The report must contain these sections:
 1. Executive Summary
-2. Sinnvolle Verbesserungen bestehender Funktionen
-3. Sinnvolle neue Features
-4. Fehlende technische Grundlagen
-5. Developer-Experience-Verbesserungen
-6. Security- und Reliability-Verbesserungen
-7. Priorisierte Roadmap
+2. Useful Improvements to Existing Features
+3. Useful New Features
+4. Missing Technical Foundations
+5. Developer Experience Improvements
+6. Security and Reliability Improvements
+7. Prioritized Roadmap
 
-Für jeden Vorschlag nenne Titel, Beschreibung, Begründung aus Code oder Architektur, Nutzen, Aufwand, Risiko, betroffene Dateien oder Module, mögliche Implementierungsschritte und Priorität. Vermeide generische Vorschläge.
+For each proposal, include title, description, rationale from code or architecture, benefit, effort, risk, affected files or modules, possible implementation steps, and priority. Avoid generic proposals.
 `;
 }
 
 function buildSummaryPrompt(context: PromptContext): string {
-  return `${baseInstructions(context, "technischer Redakteur und Tech-Lead")}
+  return `${baseInstructions(context, "technical editor and tech lead")}
 
-Detailreports:
+Detail reports:
 
 ${renderPrevious(context, [
     "01-architecture-report.md",
@@ -218,27 +218,27 @@ ${renderPrevious(context, [
     "04-feature-roadmap.md"
   ])}
 
-Aufgabe: Erstelle die finale Gesamtübersicht als Einstiegspunkt \`index.md\`.
+Task: Create the final overview as the entry-point \`index.md\`.
 
-Der Report muss diese Abschnitte enthalten:
-1. Kurzfazit
-2. Was das Projekt macht
-3. Architektur in wenigen präzisen Absätzen
-4. Top-Stärken
-5. Top-Schwächen
-6. Kritischste Risiken
-7. Wahrscheinlichste Bugs
-8. Beste Quick Wins
-9. Wichtigste Feature-Chancen
-10. Empfohlene Reihenfolge der nächsten Schritte
-11. Verweise auf die Detailreports
+The report must contain these sections:
+1. Short Conclusion
+2. What the Project Does
+3. Architecture in a Few Precise Paragraphs
+4. Top Strengths
+5. Top Weaknesses
+6. Most Critical Risks
+7. Most Likely Bugs
+8. Best Quick Wins
+9. Most Important Feature Opportunities
+10. Recommended Order of Next Steps
+11. Links to the Detail Reports
 
-Verlinke die Detailreports mit diesen relativen Markdown-Links:
-- [Projektinventar](00-inventory.md)
-- [Architektur-Report](01-architecture-report.md)
-- [Codequalitäts-Report](02-code-quality-report.md)
-- [Risiko-, Bug- und Security-Report](03-risk-and-bug-report.md)
-- [Feature-Roadmap](04-feature-roadmap.md)
+Link the detail reports with these relative Markdown links:
+- [Project Inventory](00-inventory.md)
+- [Architecture Report](01-architecture-report.md)
+- [Code Quality Report](02-code-quality-report.md)
+- [Risk, Bug, and Security Report](03-risk-and-bug-report.md)
+- [Feature Roadmap](04-feature-roadmap.md)
 `;
 }
 
@@ -246,7 +246,7 @@ function renderPrevious(context: PromptContext, reportFiles: string[]): string {
   const sections = reportFiles.map((fileName) => {
     const content = context.previousReports[fileName];
     if (!content) {
-      return `## ${fileName}\n\nNoch nicht verfügbar oder fehlgeschlagen.`;
+      return `## ${fileName}\n\nNot yet available or failed.`;
     }
     return `## ${fileName}\n\n${clip(content)}`;
   });
@@ -257,5 +257,5 @@ function clip(content: string): string {
   if (content.length <= CONTEXT_LIMIT) {
     return content;
   }
-  return `${content.slice(0, CONTEXT_LIMIT)}\n\n... Kontext von RepoVista gekürzt ...`;
+  return `${content.slice(0, CONTEXT_LIMIT)}\n\n... RepoVista context truncated ...`;
 }

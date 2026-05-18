@@ -30,7 +30,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const logger = new Logger(options.progress);
   const createLogs = options.keepLogs || options.json;
   if (path.resolve(projectRoot, options.outDir) === projectRoot) {
-    throw new PreflightError("Der Reportordner darf nicht identisch mit dem Projektroot sein.");
+    throw new PreflightError("The report directory must not be identical to the project root.");
   }
   const paths = await prepareRunDirectory(projectRoot, options.outDir, createRunId(now), createLogs);
 
@@ -38,14 +38,14 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const phaseStatuses = meta.phases;
 
   try {
-    logger.step("Preflight-Prüfungen");
+    logger.step("Preflight checks");
     const preflight = await runPreflight(projectRoot, paths.runDir, options, dependencies);
     meta.preflight = preflight;
     for (const warning of preflight.warnings) {
       logger.warn(warning);
     }
 
-    logger.step("Projektinventar erstellen");
+    logger.step("Creating project inventory");
     const inventory = await createProjectInventory(projectRoot, {
       outDir: options.outDir,
       includes: options.includes,
@@ -99,7 +99,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       try {
         previousReports[phase.reportFile] = await readReport(phaseReportPath);
       } catch {
-        previousReports[phase.reportFile] = `# ${phase.title}\n\nReport konnte nicht gelesen werden.`;
+        previousReports[phase.reportFile] = `# ${phase.title}\n\nReport could not be read.`;
       }
     }
 
@@ -110,9 +110,9 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   }
 
   if (meta.exitCode === 0) {
-    logger.info(`RepoVista-Audit abgeschlossen: ${paths.runDir}`);
+    logger.info(`RepoVista audit completed: ${paths.runDir}`);
   } else {
-    logger.warn(`RepoVista-Audit abgeschlossen mit Exit-Code ${meta.exitCode}: ${paths.runDir}`);
+    logger.warn(`RepoVista audit completed with exit code ${meta.exitCode}: ${paths.runDir}`);
   }
 
   return {
@@ -191,12 +191,11 @@ function determineExitCode(options: AuditOptions, phases: PhaseReportStatus[], r
 
 export function hasCriticalFindings(report: string): boolean {
   const normalized = report.toLowerCase();
-  if (/kritische?\s+befunde?\s*\n\s*(?:-\s+)?(?:keine|none|nicht erkannt|keine belastbaren)/i.test(report)) {
+  if (/critical\s+findings?\s*\n\s*(?:-\s+)?(?:none|no critical|not detected)/i.test(report)) {
     return false;
   }
   return (
-    normalized.includes("schweregrad: kritisch") ||
     normalized.includes("severity: critical") ||
-    /(^|\n)#+\s+kritische?\s+befunde?[\s\S]*?(^|\n)(?:-|\d+\.)\s+(?!keine|none|nicht erkannt)/i.test(report)
+    /(^|\n)#+\s+critical\s+findings?[\s\S]*?(^|\n)(?:-|\d+\.)\s+(?!none|no critical|not detected)/i.test(report)
   );
 }

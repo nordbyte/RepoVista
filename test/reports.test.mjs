@@ -29,7 +29,7 @@ test("metadata is written as formatted JSON", async () => {
       startedAt: "2026-05-18T14:57:32.123Z",
       options: {
         outDir: ".repovista",
-        language: "Deutsch",
+        language: "English",
         json: true,
         includes: [],
         ignores: [],
