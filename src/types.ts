@@ -2,11 +2,14 @@ export type SandboxMode = "read-only" | "workspace-write";
 
 export type AiProviderId = "codex" | "claude";
 
-export type CliAction = "audit" | "settings" | "help" | "version";
+export type ParallelMode = "off" | "auto" | number;
+
+export type CliAction = "audit" | "init" | "plan" | "settings" | "help" | "version";
 
 export interface AuditOptions {
   command: "audit";
   provider: AiProviderId;
+  parallel: ParallelMode;
   outDir: string;
   resumeDir?: string;
   model?: string;
@@ -51,6 +54,16 @@ export interface PhaseReportStatus {
   error?: string;
   qualityPassed?: boolean;
   qualityWarnings?: string[];
+  shards?: PhaseShardStatus[];
+}
+
+export interface PhaseShardStatus {
+  id: string;
+  title: string;
+  reportFile: string;
+  status: "pending" | "success" | "failed" | "skipped";
+  durationMs?: number;
+  error?: string;
 }
 
 export interface EvidenceCommandResult {
@@ -130,6 +143,7 @@ export interface AuditMeta {
   completedAt?: string;
   options: {
     provider: AiProviderId;
+    parallel: ParallelMode;
     outDir: string;
     resumeDir?: string;
     language: string;
@@ -177,6 +191,7 @@ export interface AuditMeta {
     gitRepository: boolean;
     warnings: string[];
   };
+  parallel?: ParallelExecutionMeta;
   evidence?: EvidencePack;
   phases: PhaseReportStatus[];
   findings: StructuredFinding[];
@@ -185,6 +200,61 @@ export interface AuditMeta {
     summaryJson?: string;
   };
   exitCode: number;
+}
+
+export interface ProjectFileSummary {
+  relativePath: string;
+  extension: string;
+  size: number;
+  language: string;
+}
+
+export interface ProjectArea {
+  id: string;
+  title: string;
+  description: string;
+  paths: string[];
+  primaryLanguages: string[];
+  fileCount: number;
+  bytes: number;
+}
+
+export interface WorkShard {
+  id: string;
+  title: string;
+  description: string;
+  paths: string[];
+  primaryLanguages: string[];
+  estimatedFiles: number;
+  estimatedBytes: number;
+  focus: string;
+}
+
+export interface ProjectMap {
+  version: 1;
+  projectRoot: string;
+  createdAt: string;
+  updatedAt: string;
+  outDir: string;
+  fileCount: number;
+  totalBytes: number;
+  languages: Record<string, number>;
+  frameworks: string[];
+  packageManagers: string[];
+  areas: ProjectArea[];
+  recommendedParallelism: number;
+  recommendedShards: WorkShard[];
+  warnings: string[];
+}
+
+export interface ParallelExecutionMeta {
+  mode: ParallelMode;
+  projectMapPath?: string;
+  initialized: boolean;
+  recommendedParallelism: number;
+  effectiveParallelism: number;
+  shards: WorkShard[];
+  warnings: string[];
 }
 
 export interface ProviderRunRequest {

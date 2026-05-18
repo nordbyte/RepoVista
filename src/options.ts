@@ -1,10 +1,11 @@
 import { CliUsageError } from "./errors.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, CliParseResult, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, CliParseResult, ParallelMode, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
   provider: "codex",
+  parallel: "off",
   outDir: ".repovista",
   sandbox: "read-only",
   language: "English",
@@ -26,6 +27,7 @@ export const DEFAULT_OPTIONS: AuditOptions = {
 
 const VALUE_OPTIONS = new Set([
   "provider",
+  "parallel",
   "out",
   "resume",
   "model",
@@ -53,6 +55,7 @@ const BOOLEAN_OPTIONS = new Set([
   "strict-reports",
   "no-strict-reports",
   "no-progress",
+  "no-parallel",
   "keep-logs",
   "version",
   "help"
@@ -150,6 +153,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "no-progress":
         options.progress = false;
         break;
+      case "no-parallel":
+        options.parallel = "off";
+        break;
       case "keep-logs":
         options.keepLogs = true;
         break;
@@ -171,7 +177,7 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     wantsHelp = true;
   } else if (command === "version") {
     wantsVersion = true;
-  } else if (command !== "audit" && command !== "settings") {
+  } else if (command !== "audit" && command !== "init" && command !== "plan" && command !== "settings") {
     throw new CliUsageError(`Unknown command: ${command}`);
   }
 
@@ -181,6 +187,14 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
 
   if (wantsHelp) {
     return { action: "help", options };
+  }
+
+  if (command === "init") {
+    return { action: "init", options };
+  }
+
+  if (command === "plan") {
+    return { action: "plan", options };
   }
 
   if (command === "settings") {
@@ -194,6 +208,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
   switch (name) {
     case "provider":
       options.provider = validateProvider(value);
+      break;
+    case "parallel":
+      options.parallel = parseParallelMode(value);
       break;
     case "out":
       options.outDir = requireNonEmpty(name, value);
@@ -244,6 +261,18 @@ export function validateProvider(value: string): AiProviderId {
     return value;
   }
   throw new CliUsageError(`Unknown provider: ${value}. Supported providers: ${REPORT_PROVIDER_IDS.join(", ")}.`);
+}
+
+export function parseParallelMode(value: string): ParallelMode {
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === "off" || trimmed === "auto") {
+    return trimmed;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 5) {
+    throw new CliUsageError("Option --parallel must be off, auto, or an integer from 1 to 5.");
+  }
+  return parsed;
 }
 
 function requireNonEmpty(optionName: string, value: string): string {
@@ -301,15 +330,21 @@ export function renderHelp(): string {
 Usage:
   repovista [options]
   repovista audit [options]
+  repovista init [options]
+  repovista plan [options]
 
 Commands:
   audit                 Run a full audit in the current directory
+  init                  Initialize or refresh the RepoVista project map
+  plan                  Show the recommended parallel execution plan
   settings              Edit persisted default settings in an interactive menu
   help                  Show help
   version               Show version
 
 Options:
   --provider <name>     Report provider: codex or claude (default: codex)
+  --parallel <mode>     Parallel audit mode: off, auto, or 1-5 threads (default: off)
+  --no-parallel         Disable saved parallel default
   --out <dir>           Report output directory (default: .repovista)
   --resume <run-dir>    Resume or complete an existing RepoVista run directory
   --model <name>        Override the provider model

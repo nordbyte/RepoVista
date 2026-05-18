@@ -8,6 +8,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.action, "audit");
   assert.equal(parsed.options.outDir, ".repovista");
   assert.equal(parsed.options.provider, "codex");
+  assert.equal(parsed.options.parallel, "off");
   assert.equal(parsed.options.sandbox, "read-only");
   assert.equal(parsed.options.language, "English");
   assert.equal(parsed.options.fastMode, false);
@@ -19,6 +20,8 @@ test("explicit audit command parses supported options", () => {
     "audit",
     "--provider",
     "claude",
+    "--parallel",
+    "3",
     "--out",
     "reports",
     "--model=gpt-5.5",
@@ -53,6 +56,7 @@ test("explicit audit command parses supported options", () => {
 
   assert.equal(parsed.action, "audit");
   assert.equal(parsed.options.provider, "claude");
+  assert.equal(parsed.options.parallel, 3);
   assert.equal(parsed.options.outDir, "reports");
   assert.equal(parsed.options.model, "gpt-5.5");
   assert.equal(parsed.options.profile, "review");
@@ -85,6 +89,14 @@ test("unknown options fail clearly", () => {
 
 test("unknown provider fails clearly", () => {
   assert.throws(() => parseCliArgs(["--provider", "unknown"]), /Unknown provider/);
+});
+
+test("init and plan commands are recognized", () => {
+  assert.equal(parseCliArgs(["init"]).action, "init");
+  assert.equal(parseCliArgs(["plan", "--parallel", "auto"]).action, "plan");
+  assert.equal(parseCliArgs(["plan", "--parallel", "auto"]).options.parallel, "auto");
+  assert.equal(parseCliArgs(["audit", "--no-parallel"]).options.parallel, "off");
+  assert.throws(() => parseCliArgs(["--parallel", "9"]), /--parallel/);
 });
 
 test("settings command is recognized", () => {

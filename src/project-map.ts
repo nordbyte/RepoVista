@@ -1,0 +1,272 @@
+import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
+import {
+  buildProjectAreas,
+  createWorkShards,
+  languageForPath,
+  recommendParallelism,
+  resolveParallelism
+} from "./work-partitioner.js";
+import type { AuditOptions, ParallelExecutionMeta, ParallelMode, ProjectFileSummary, ProjectMap } from "./types.js";
+
+const PROJECT_MAP_VERSION = 1;
+const MAX_PROJECT_MAP_FILES = 30_000;
+
+export async function initializeProjectMap(
+  projectRoot: string,
+  options: AuditOptions,
+  now = new Date()
+): Promise<{ map: ProjectMap; mapPath: string }> {
+  const map = await createProjectMap(projectRoot, options, now);
+  const mapPath = projectMapPath(projectRoot, options.outDir);
+  await mkdir(path.dirname(mapPath), { recursive: true });
+  await writeProjectMap(mapPath, map);
+  return { map, mapPath };
+}
+
+export async function createProjectMap(
+  projectRoot: string,
+  options: AuditOptions,
+  now = new Date()
+): Promise<ProjectMap> {
+  const files = await scanProjectFiles(projectRoot, options);
+  const packageJson = await readPackageJson(projectRoot);
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const languages = countLanguages(files);
+  const areas = buildProjectAreas(files);
+  const recommendedParallelism = recommendParallelism(files.length, totalBytes, areas);
+  const warnings: string[] = [];
+  if (files.length >= MAX_PROJECT_MAP_FILES) {
+    warnings.push(`Project map was capped at ${MAX_PROJECT_MAP_FILES} files.`);
+  }
+  if (recommendedParallelism > 1) {
+    warnings.push(`RepoVista recommends ${recommendedParallelism} parallel threads for this repository shape.`);
+  }
+
+  return {
+    version: PROJECT_MAP_VERSION,
+    projectRoot,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    outDir: options.outDir,
+    fileCount: files.length,
+    totalBytes,
+    languages,
+    frameworks: detectFrameworks(packageJson),
+    packageManagers: detectPackageManagers(files),
+    areas,
+    recommendedParallelism,
+    recommendedShards: createWorkShards(areas, recommendedParallelism),
+    warnings
+  };
+}
+
+export async function loadProjectMap(projectRoot: string, outDir: string): Promise<{ map: ProjectMap; mapPath: string } | undefined> {
+  const mapPath = projectMapPath(projectRoot, outDir);
+  try {
+    const raw = await readFile(mapPath, "utf8");
+    const parsed = JSON.parse(raw) as ProjectMap;
+    if (parsed.version !== PROJECT_MAP_VERSION || !Array.isArray(parsed.areas)) {
+      return undefined;
+    }
+    return { map: parsed, mapPath };
+  } catch {
+    return undefined;
+  }
+}
+
+export function createParallelExecutionMeta(
+  map: ProjectMap,
+  mapPath: string,
+  mode: ParallelMode
+): ParallelExecutionMeta {
+  const requested = resolveParallelism(mode, map.recommendedParallelism);
+  const shards = createWorkShards(map.areas, requested);
+  const effectiveParallelism = Math.max(1, Math.min(requested, shards.length));
+  return {
+    mode,
+    projectMapPath: mapPath,
+    initialized: true,
+    recommendedParallelism: map.recommendedParallelism,
+    effectiveParallelism,
+    shards,
+    warnings: effectiveParallelism < requested
+      ? [`Requested ${requested} threads, but only ${effectiveParallelism} useful shard(s) were found.`]
+      : []
+  };
+}
+
+export function renderProjectPlan(map: ProjectMap, mode: ParallelMode = "auto"): string {
+  const meta = createParallelExecutionMeta(map, projectMapPath(map.projectRoot, map.outDir), mode);
+  const languageLines = Object.entries(map.languages)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 8)
+    .map(([language, count]) => `- ${language}: ${count}`)
+    .join("\n") || "- Not detected";
+  const areaLines = map.areas
+    .slice(0, 12)
+    .map((area) => `- ${area.title}: ${area.fileCount} files, paths: ${area.paths.join(", ")}`)
+    .join("\n") || "- No areas detected";
+  const shardLines = meta.shards
+    .map((shard) => [
+      `- ${shard.id}: ${shard.title}`,
+      `  paths: ${shard.paths.join(", ") || "n/a"}`,
+      `  focus: ${shard.focus}`
+    ].join("\n"))
+    .join("\n");
+
+  return `RepoVista Project Plan
+
+Project root: ${map.projectRoot}
+Project map: ${projectMapPath(map.projectRoot, map.outDir)}
+Files: ${map.fileCount}
+Recommended threads: ${map.recommendedParallelism}
+Planned threads: ${meta.effectiveParallelism}
+
+Languages:
+${languageLines}
+
+Areas:
+${areaLines}
+
+Thread assignments:
+${shardLines}
+`;
+}
+
+export function projectMapPath(projectRoot: string, outDir: string): string {
+  return path.resolve(projectRoot, outDir, "project-map.json");
+}
+
+async function writeProjectMap(mapPath: string, map: ProjectMap): Promise<void> {
+  await writeFile(mapPath, `${JSON.stringify(map, null, 2)}\n`, "utf8");
+}
+
+async function scanProjectFiles(projectRoot: string, options: AuditOptions): Promise<ProjectFileSummary[]> {
+  const matcher = createIgnoreMatcher({
+    projectRoot,
+    outDir: options.outDir,
+    includePatterns: options.includes,
+    ignorePatterns: options.ignores
+  });
+  const files: ProjectFileSummary[] = [];
+  await walk(projectRoot, "", matcher.shouldIgnore, files);
+  return files;
+}
+
+async function walk(
+  projectRoot: string,
+  relativeDirectory: string,
+  shouldIgnore: (relativePath: string, isDirectory: boolean) => boolean,
+  files: ProjectFileSummary[]
+): Promise<void> {
+  if (files.length >= MAX_PROJECT_MAP_FILES) {
+    return;
+  }
+  const absoluteDirectory = path.join(projectRoot, relativeDirectory);
+  let entries = await readdir(absoluteDirectory, { withFileTypes: true });
+  entries = entries.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of entries) {
+    const relativePath = normalizeRelative(path.join(relativeDirectory, entry.name));
+    if (shouldIgnore(relativePath, entry.isDirectory())) {
+      continue;
+    }
+    const absolutePath = path.join(projectRoot, relativePath);
+    const stats = await lstat(absolutePath);
+    if (stats.isSymbolicLink()) {
+      continue;
+    }
+    if (stats.isDirectory()) {
+      await walk(projectRoot, relativePath, shouldIgnore, files);
+      continue;
+    }
+    if (!stats.isFile()) {
+      continue;
+    }
+    files.push({
+      relativePath,
+      extension: path.extname(relativePath).toLowerCase(),
+      size: stats.size,
+      language: languageForPath(relativePath)
+    });
+    if (files.length >= MAX_PROJECT_MAP_FILES) {
+      return;
+    }
+  }
+}
+
+async function readPackageJson(projectRoot: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const raw = await readFile(path.join(projectRoot, "package.json"), "utf8");
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function countLanguages(files: ProjectFileSummary[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const file of files) {
+    result[file.language] = (result[file.language] ?? 0) + 1;
+  }
+  return result;
+}
+
+function detectPackageManagers(files: ProjectFileSummary[]): string[] {
+  const names = new Set(files.map((file) => path.basename(file.relativePath)));
+  const managers: string[] = [];
+  if (names.has("package-lock.json")) {
+    managers.push("npm");
+  }
+  if (names.has("pnpm-lock.yaml")) {
+    managers.push("pnpm");
+  }
+  if (names.has("yarn.lock")) {
+    managers.push("Yarn");
+  }
+  if (names.has("bun.lockb")) {
+    managers.push("Bun");
+  }
+  if (names.has("Cargo.lock") || names.has("Cargo.toml")) {
+    managers.push("Cargo");
+  }
+  return managers;
+}
+
+function detectFrameworks(packageJson: Record<string, unknown> | undefined): string[] {
+  const dependencies = {
+    ...readStringRecord(packageJson?.dependencies),
+    ...readStringRecord(packageJson?.devDependencies)
+  };
+  const known = new Map([
+    ["@types/node", "Node.js"],
+    ["typescript", "TypeScript"],
+    ["react", "React"],
+    ["vue", "Vue"],
+    ["svelte", "Svelte"],
+    ["next", "Next.js"],
+    ["vite", "Vite"],
+    ["vitest", "Vitest"],
+    ["jest", "Jest"],
+    ["eslint", "ESLint"]
+  ]);
+  return Object.keys(dependencies)
+    .map((name) => known.get(name))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+}
+
+function readStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") {
+      result[key] = item;
+    }
+  }
+  return result;
+}

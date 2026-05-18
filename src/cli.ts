@@ -5,6 +5,7 @@ import path from "node:path";
 import { runAudit } from "./audit.js";
 import { CliUsageError, RepoVistaError } from "./errors.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
+import { runInitCommand, runPlanCommand } from "./project-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
 import { applySettingsToDefaults, loadSettings } from "./settings-config.js";
 
@@ -30,6 +31,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     const settings = await loadSettings();
     const optionsWithSettings = parseCliArgs(argv, applySettingsToDefaults(DEFAULT_OPTIONS, settings));
+    if (optionsWithSettings.action === "init") {
+      process.stdout.write(await runInitCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "plan") {
+      process.stdout.write(await runPlanCommand(optionsWithSettings.options));
+      return 0;
+    }
     const result = await runAudit(optionsWithSettings.options, { version });
     return result.exitCode;
   } catch (error) {

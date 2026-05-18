@@ -8,9 +8,9 @@ import {
 } from "./provider-models.js";
 import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
-import type { AiProviderId, SandboxMode } from "./types.js";
+import type { AiProviderId, ParallelMode, SandboxMode } from "./types.js";
 
-type MenuScreen = "main" | "provider" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
+type MenuScreen = "main" | "provider" | "parallel" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
@@ -23,7 +23,7 @@ interface MenuState {
 }
 
 type MainItem =
-  | { id: "provider" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "parallel" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
   | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "outDir" | "includes" | "ignores" | "checkCommands"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
@@ -32,6 +32,7 @@ const LANGUAGE_OPTIONS = ["English", "German", "Spanish", "French", "Italian", "
 const SANDBOX_OPTIONS: SandboxMode[] = ["read-only", "workspace-write"];
 const CHECK_TIMEOUT_OPTIONS = [60, 300, 600, 900, 1800, 3600];
 const PHASE_TIMEOUT_OPTIONS = [900, 1800, 3600, 5400, 7200];
+const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
 
 export async function runSettingsMenu(
   input = process.stdin as ReadStream,
@@ -124,6 +125,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
   const provider = getReportProvider(selectedProvider(settings));
   return [
     `Provider: ${provider.displayName}`,
+    `Parallel mode: ${formatParallel(settings.parallel ?? "off")}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${settings.reasoning ?? "model default"}`,
     `Codex profile: ${settings.profile ?? "none"}`,
@@ -185,6 +187,7 @@ function activateCurrentItem(state: MenuState): void {
   const item = MAIN_ITEMS[state.cursor];
   switch (item.id) {
     case "provider":
+    case "parallel":
     case "model":
     case "reasoning":
     case "sandbox":
@@ -241,6 +244,12 @@ function toggleCurrentSelection(state: MenuState): void {
       state.settings.model = undefined;
       state.settings.reasoning = undefined;
     }
+    return;
+  }
+
+  if (state.screen === "parallel") {
+    const selected = PARALLEL_OPTIONS[state.cursor];
+    state.settings.parallel = state.settings.parallel === selected ? undefined : selected;
     return;
   }
 
@@ -319,6 +328,8 @@ function currentItems(state: MenuState): string[] {
         const provider = getReportProvider(providerId);
         return checkbox(providerId === selectedProvider(state.settings), `${provider.displayName} (${providerId})`);
       });
+    case "parallel":
+      return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === (state.settings.parallel ?? "off"), formatParallel(parallel)));
     case "model":
       return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
@@ -447,8 +458,13 @@ function formatSeconds(seconds: number): string {
   return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`;
 }
 
+function formatParallel(parallel: ParallelMode): string {
+  return typeof parallel === "number" ? `${parallel} threads` : parallel;
+}
+
 const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
+  { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(settings.parallel ?? "off")}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${settings.reasoning ?? "model default"}` },
   { id: "profile", type: "text", label: (settings) => `Codex profile: ${settings.profile ?? "none"}` },

@@ -2,10 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isReportProviderId } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, ParallelMode, SandboxMode } from "./types.js";
 
 export interface RepoVistaSettings {
   provider?: AiProviderId;
+  parallel?: ParallelMode;
   model?: string;
   profile?: string;
   reasoning?: string;
@@ -60,6 +61,7 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
   return {
     ...defaults,
     provider: settings.provider ?? defaults.provider,
+    parallel: settings.parallel ?? defaults.parallel,
     outDir: settings.outDir ?? defaults.outDir,
     model: settings.model ?? defaults.model,
     profile: settings.profile ?? defaults.profile,
@@ -88,6 +90,12 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
 
   if (typeof settings.provider === "string" && isReportProviderId(settings.provider)) {
     sanitized.provider = settings.provider;
+  }
+
+  if (settings.parallel === "off" || settings.parallel === "auto") {
+    sanitized.parallel = settings.parallel;
+  } else if (typeof settings.parallel === "number" && Number.isInteger(settings.parallel) && settings.parallel >= 1 && settings.parallel <= 5) {
+    sanitized.parallel = settings.parallel;
   }
 
   for (const key of ["model", "profile", "reasoning", "language", "outDir"] as const) {

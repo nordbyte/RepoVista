@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { hasCriticalFindings, runAudit } from "../dist/index.js";
+import { DEFAULT_OPTIONS, hasCriticalFindings, initializeProjectMap, runAudit } from "../dist/index.js";
 
 test("audit creates the full report structure with mocked Codex phases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-"));
@@ -148,6 +148,150 @@ test("audit passes the selected provider through phases and metadata", async () 
     assert.match(inventory, /Provider: Claude Code CLI/);
     assert.match(inventory, /Model: sonnet/);
     assert.match(inventory, /Reasoning: high/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("audit can split shardable phases across parallel provider sessions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-parallel-"));
+  try {
+    await mkdir(path.join(root, "src", "alpha"), { recursive: true });
+    await mkdir(path.join(root, "src", "beta"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "alpha", "a.ts"), "export const a = 1;\n", "utf8");
+    await writeFile(path.join(root, "src", "beta", "b.ts"), "export const b = 1;\n", "utf8");
+    await initializeProjectMap(root, DEFAULT_OPTIONS, new Date("2026-05-18T14:57:32.123Z"));
+
+    let active = 0;
+    let maxActive = 0;
+    const seen = [];
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: 2,
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        seen.push(request.phaseId);
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, request.phaseId.includes("thread") ? 20 : 1));
+        active -= 1;
+        await writeFile(request.reportPath, `# ${request.phaseTitle}\n\nReport for ${request.phaseId} references src/alpha/a.ts and src/beta/b.ts.\n`, "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(maxActive >= 2);
+    assert.ok(seen.some((phaseId) => phaseId === "architecture-thread-1"));
+    assert.ok(seen.some((phaseId) => phaseId === "architecture-thread-2"));
+    assert.ok(seen.some((phaseId) => phaseId === "architecture-synthesis"));
+    assert.equal(result.meta.parallel.effectiveParallelism, 2);
+    assert.equal(result.meta.phases.find((phase) => phase.id === "architecture").shards.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("parallel resume reuses completed shard reports before synthesis", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-parallel-resume-"));
+  try {
+    await mkdir(path.join(root, "src", "alpha"), { recursive: true });
+    await mkdir(path.join(root, "src", "beta"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "alpha", "a.ts"), "export const a = 1;\n", "utf8");
+    await writeFile(path.join(root, "src", "beta", "b.ts"), "export const b = 1;\n", "utf8");
+    await initializeProjectMap(root, DEFAULT_OPTIONS, new Date("2026-05-18T14:57:32.123Z"));
+    const resumeDir = path.join(root, ".repovista", "manual-run");
+    await mkdir(path.join(resumeDir, "shards", "architecture"), { recursive: true });
+    await writeFile(path.join(resumeDir, "shards", "architecture", "thread-1.md"), "# Thread 1\n\nExisting shard.\n", "utf8");
+    await writeFile(path.join(resumeDir, "shards", "architecture", "thread-2.md"), "# Thread 2\n\nExisting shard.\n", "utf8");
+
+    const seen = [];
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: 2,
+      outDir: ".repovista",
+      resumeDir,
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        seen.push(request.phaseId);
+        assert.equal(request.phaseId, "architecture-synthesis");
+        await writeFile(request.reportPath, "# Architecture Analysis Synthesis\n\nExisting shards were synthesized from src/alpha/a.ts and src/beta/b.ts.\n", "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(seen, ["architecture-synthesis"]);
+    assert.equal(result.meta.phases.find((phase) => phase.id === "architecture").shards.every((shard) => shard.durationMs === 0), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

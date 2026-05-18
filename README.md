@@ -54,11 +54,20 @@ Edit persisted defaults in an interactive terminal menu:
 repovista settings
 ```
 
+Initialize the repository before using parallel planning:
+
+```sh
+repovista init
+repovista plan
+```
+
 Examples:
 
 ```sh
 repovista audit --language English --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
+repovista audit --parallel auto
+repovista audit --parallel 3
 repovista audit --out reports/repovista --keep-logs
 repovista audit --ci --json --fail-on-critical --no-progress
 repovista audit --run-checks --strict-reports
@@ -72,6 +81,7 @@ Each run creates its own timestamped folder:
 
 ```text
 .repovista/
+  project-map.json
   2026-05-18T14-57-32-123Z/
     00-inventory.md
     01-architecture-report.md
@@ -82,16 +92,19 @@ Each run creates its own timestamped folder:
     index.md
     meta.json
     summary.json
+    shards/
     logs/
 ```
 
-`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report. `summary.json` contains machine-readable run, phase, finding, provider, and evidence summaries. `meta.json` records provider execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, report quality warnings, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
+`project-map.json` is written by `repovista init` and stores the repository areas, recommended thread count, and default shard assignments. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report. `summary.json` contains machine-readable run, phase, finding, provider, parallel, and evidence summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality warnings, and preflight information. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## CLI Options
 
 | Option | Purpose |
 |---|---|
 | `--provider <name>` | Report provider, `codex` or `claude`, default `codex` |
+| `--parallel <mode>` | Parallel audit mode, `off`, `auto`, or `1`-`5` threads, default `off` |
+| `--no-parallel` | Disable a saved parallel default |
 | `--out <dir>` | Report output directory, default `.repovista` |
 | `--resume <run-dir>` | Resume or complete an existing RepoVista run directory |
 | `--model <name>` | Override the provider model |
@@ -162,6 +175,20 @@ Claude Code can be selected with `--provider claude`. RepoVista uses non-interac
 - `--model <model>` when a model is set, for example `sonnet`, `opus`, or a full Claude model name
 - `--effort <effort>` when reasoning is set; Claude Code currently supports `low`, `medium`, `high`, `xhigh`, and `max`
 
+## Project Initialization and Parallel Audits
+
+Run `repovista init` once from the project root before enabling parallel audits. It writes `.repovista/project-map.json` with a compact project map: detected areas, languages, frameworks, package managers, file counts, and recommended thread assignments.
+
+`repovista plan` reads that project map and prints the current recommendation. Use it after larger refactors or directory changes to decide whether `--parallel auto` is useful.
+
+Parallel execution is provider-neutral. Codex and Claude Code both run as independent provider sessions. RepoVista uses a map/reduce flow for shardable detail phases:
+
+- Map: each thread receives one shard with explicit path ownership and writes a partial report under `shards/<phase>/<thread>.md`.
+- Reduce: one synthesis session combines successful shard reports into the normal phase report, such as `01-architecture-report.md`.
+- Summary: `index.md` stays single-threaded because it depends on the final detail reports.
+
+Parallel mode requires an initialized project map. If the map is missing, run `repovista init` first or use `--parallel off`. Resume can reuse existing successful shard reports from the run directory.
+
 ## Evidence and Quality Gates
 
 Before provider phases start, RepoVista writes an evidence pack into `00-inventory.md`. It records Node.js, npm, package metadata, Git branch/commit/dirty state, selected provider CLI version, and optional local check results.
@@ -182,7 +209,7 @@ Settings are stored in `~/.config/repovista/settings.json` by default. Set `REPO
 
 CLI flags always override saved settings for the current run.
 
-The settings menu can persist provider, model, reasoning, Codex profile, Codex fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, JSON/log settings, CI mode, and critical-finding behavior.
+The settings menu can persist provider, parallel mode, model, reasoning, Codex profile, Codex fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, JSON/log settings, CI mode, and critical-finding behavior.
 
 ## CI Notes
 
@@ -203,6 +230,8 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 ## Typical Workflows
 
 - Understand an unfamiliar repository: run `repovista`, then read `.repovista/<run-id>/index.md`.
+- Initialize and inspect parallel planning: `repovista init && repovista plan`.
+- Run a parallel audit after initialization: `repovista audit --parallel auto`.
 - Prepare a higher-signal report: run `repovista audit --run-checks --strict-reports`.
 - Continue an interrupted run: `repovista audit --resume .repovista/<run-id>`.
 - Rerun only the risk report and summary: `repovista audit --resume .repovista/<run-id> --phase risk-and-bug --phase summary`.
