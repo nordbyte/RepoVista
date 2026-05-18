@@ -43,6 +43,12 @@ The explicit audit command is equivalent:
 repovista audit
 ```
 
+Edit persisted defaults in an interactive terminal menu:
+
+```sh
+repovista settings
+```
+
 Examples:
 
 ```sh
@@ -77,6 +83,9 @@ Each run creates its own timestamped folder:
 | `--out <dir>` | Report output directory, default `.repovista` |
 | `--model <name>` | Override the Codex model |
 | `--profile <name>` | Use a Codex configuration profile |
+| `--reasoning <effort>` | Override Codex reasoning effort |
+| `--fast` | Use Codex fast service tier when supported |
+| `--no-fast` | Disable Codex fast service tier |
 | `--sandbox <mode>` | Codex sandbox, `read-only` or `workspace-write`, default `read-only` |
 | `--language <name>` | Report language, default `English` |
 | `--json` | Store metadata and Codex JSONL events |
@@ -113,6 +122,18 @@ RepoVista sets these Codex options:
 - `--sandbox read-only` by default
 - `--skip-git-repo-check`, so intentionally non-git project folders can still be analyzed
 - `--output-last-message <report.md>`, so the final answer is separated cleanly from the technical stream
+- `--config model_reasoning_effort="<effort>"` when a reasoning default or CLI override is set
+- `--config service_tier="priority"` when fast mode is enabled
+
+## Settings
+
+`repovista settings` opens an interactive menu. Use arrow keys to move, Space to select or clear an option, and Enter to return to the previous menu or save from the main menu.
+
+The model and reasoning menus are populated from the installed Codex CLI via `codex debug models`. If that command is unavailable, RepoVista falls back to a bundled list for the current supported Codex models.
+
+Settings are stored in `~/.config/repovista/settings.json` by default. Set `REPOVISTA_CONFIG=/path/to/settings.json` to use a different settings file.
+
+CLI flags always override saved settings for the current run.
 
 ## CI Notes
 
@@ -133,6 +154,7 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 ## Typical Workflows
 
 - Understand an unfamiliar repository: run `repovista`, then read `.repovista/<run-id>/index.md`.
+- Configure persistent defaults: run `repovista settings`, choose a model with Space, return with Enter, then save.
 - Keep technical logs for troubleshooting: `repovista audit --keep-logs`.
 - Generate reports in a specific language: `repovista audit --language Spanish`.
 - Ignore additional generated folders: `repovista audit --ignore "fixtures/generated/**"`.

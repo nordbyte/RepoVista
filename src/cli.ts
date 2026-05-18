@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runAudit } from "./audit.js";
 import { CliUsageError, RepoVistaError } from "./errors.js";
-import { parseCliArgs, renderHelp } from "./options.js";
+import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
+import { runSettingsMenu } from "./settings-menu.js";
+import { applySettingsToDefaults, loadSettings } from "./settings-config.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
@@ -21,7 +23,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return 0;
     }
 
-    const result = await runAudit(parsed.options, { version });
+    if (parsed.action === "settings") {
+      await runSettingsMenu();
+      return 0;
+    }
+
+    const settings = await loadSettings();
+    const optionsWithSettings = parseCliArgs(argv, applySettingsToDefaults(DEFAULT_OPTIONS, settings));
+    const result = await runAudit(optionsWithSettings.options, { version });
     return result.exitCode;
   } catch (error) {
     if (error instanceof CliUsageError) {

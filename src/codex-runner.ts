@@ -37,6 +37,14 @@ export function buildCodexExecArgs(request: CodexRunRequest): string[] {
     args.push("--profile", request.profile);
   }
 
+  if (request.reasoning) {
+    args.push("--config", `model_reasoning_effort="${request.reasoning}"`);
+  }
+
+  if (request.fastMode) {
+    args.push("--config", 'service_tier="priority"');
+  }
+
   if (request.jsonEvents) {
     args.push("--json");
   }

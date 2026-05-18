@@ -24,7 +24,9 @@ test("codex args use read-only sandbox, target cwd and output-last-message", () 
     jsonEvents: true,
     keepLogs: false,
     model: "gpt-5.5",
-    profile: "default"
+    profile: "default",
+    reasoning: "high",
+    fastMode: true
   });
 
   assert.deepEqual(args.slice(0, 2), ["exec", "--cd"]);
@@ -38,6 +40,8 @@ test("codex args use read-only sandbox, target cwd and output-last-message", () 
   assert.ok(args.includes("--json"));
   assert.ok(args.includes("--model"));
   assert.ok(args.includes("--profile"));
+  assert.ok(args.includes('model_reasoning_effort="high"'));
+  assert.ok(args.includes('service_tier="priority"'));
 });
 
 test("codex runner writes success report via mocked process", async () => {

@@ -9,6 +9,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.options.outDir, ".repovista");
   assert.equal(parsed.options.sandbox, "read-only");
   assert.equal(parsed.options.language, "English");
+  assert.equal(parsed.options.fastMode, false);
   assert.equal(parsed.options.progress, true);
 });
 
@@ -20,6 +21,9 @@ test("explicit audit command parses supported options", () => {
     "--model=gpt-5.5",
     "--profile",
     "review",
+    "--reasoning",
+    "high",
+    "--fast",
     "--sandbox",
     "workspace-write",
     "--language",
@@ -38,6 +42,8 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.outDir, "reports");
   assert.equal(parsed.options.model, "gpt-5.5");
   assert.equal(parsed.options.profile, "review");
+  assert.equal(parsed.options.reasoning, "high");
+  assert.equal(parsed.options.fastMode, true);
   assert.equal(parsed.options.sandbox, "workspace-write");
   assert.equal(parsed.options.language, "English");
   assert.equal(parsed.options.json, true);
@@ -55,4 +61,9 @@ test("danger-full-access sandbox is rejected", () => {
 
 test("unknown options fail clearly", () => {
   assert.throws(() => parseCliArgs(["--unknown"]), /Unknown option/);
+});
+
+test("settings command is recognized", () => {
+  const parsed = parseCliArgs(["settings"]);
+  assert.equal(parsed.action, "settings");
 });

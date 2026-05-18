@@ -1,12 +1,14 @@
 export type SandboxMode = "read-only" | "workspace-write";
 
-export type CliAction = "audit" | "help" | "version";
+export type CliAction = "audit" | "settings" | "help" | "version";
 
 export interface AuditOptions {
   command: "audit";
   outDir: string;
   model?: string;
   profile?: string;
+  reasoning?: string;
+  fastMode: boolean;
   sandbox: SandboxMode;
   language: string;
   json: boolean;
@@ -63,6 +65,8 @@ export interface AuditMeta {
   codex: {
     model?: string;
     profile?: string;
+    reasoning?: string;
+    fastMode: boolean;
     sandbox: SandboxMode;
   };
   preflight: {
@@ -84,6 +88,8 @@ export interface CodexRunRequest {
   logsDir?: string;
   model?: string;
   profile?: string;
+  reasoning?: string;
+  fastMode: boolean;
   sandbox: SandboxMode;
   jsonEvents: boolean;
   keepLogs: boolean;

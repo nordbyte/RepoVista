@@ -1,0 +1,98 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {
+  applySettingsToDefaults,
+  DEFAULT_OPTIONS,
+  parseCodexModelCatalog,
+  reasoningOptionsForModel,
+  sanitizeSettings,
+  saveSettings
+} from "../dist/index.js";
+
+test("settings sanitize persisted defaults", () => {
+  const sanitized = sanitizeSettings({
+    model: " gpt-5.5 ",
+    reasoning: " high ",
+    fastMode: true,
+    sandbox: "read-only",
+    language: " English ",
+    outDir: " .repovista ",
+    json: true,
+    keepLogs: true,
+    progress: false,
+    ci: true,
+    failOnCritical: true,
+    // @ts-expect-error runtime validation test
+    unknown: "ignored"
+  });
+
+  assert.deepEqual(sanitized, {
+    model: "gpt-5.5",
+    reasoning: "high",
+    fastMode: true,
+    sandbox: "read-only",
+    language: "English",
+    outDir: ".repovista",
+    json: true,
+    keepLogs: true,
+    progress: false,
+    ci: true,
+    failOnCritical: true
+  });
+});
+
+test("settings apply to audit defaults while preserving include and ignore arrays", () => {
+  const options = applySettingsToDefaults(DEFAULT_OPTIONS, {
+    model: "gpt-5.5",
+    reasoning: "xhigh",
+    fastMode: true,
+    language: "Spanish",
+    keepLogs: true
+  });
+
+  assert.equal(options.model, "gpt-5.5");
+  assert.equal(options.reasoning, "xhigh");
+  assert.equal(options.fastMode, true);
+  assert.equal(options.language, "Spanish");
+  assert.equal(options.keepLogs, true);
+  assert.deepEqual(options.includes, []);
+  assert.deepEqual(options.ignores, []);
+});
+
+test("settings are saved as JSON", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-settings-"));
+  try {
+    const settingsPath = path.join(root, "settings.json");
+    await saveSettings({ model: "gpt-5.5", fastMode: true }, settingsPath);
+    const parsed = JSON.parse(await readFile(settingsPath, "utf8"));
+    assert.equal(parsed.model, "gpt-5.5");
+    assert.equal(parsed.fastMode, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("codex model catalog parsing exposes current model and reasoning options", () => {
+  const models = parseCodexModelCatalog(JSON.stringify({
+    models: [
+      {
+        slug: "gpt-5.5",
+        display_name: "GPT-5.5",
+        default_reasoning_level: "medium",
+        supported_reasoning_levels: [
+          { effort: "low", description: "fast" },
+          { effort: "high", description: "deep" }
+        ],
+        additional_speed_tiers: ["fast"],
+        service_tiers: [{ id: "priority" }]
+      }
+    ]
+  }));
+
+  assert.equal(models[0].slug, "gpt-5.5");
+  assert.equal(models[0].supportsFastMode, true);
+  assert.deepEqual(reasoningOptionsForModel(models, "gpt-5.5").map((item) => item.effort), ["low", "high"]);
+});

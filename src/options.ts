@@ -1,11 +1,12 @@
 import { CliUsageError } from "./errors.js";
 import type { AuditOptions, CliParseResult, SandboxMode } from "./types.js";
 
-const DEFAULT_OPTIONS: AuditOptions = {
+export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
   outDir: ".repovista",
   sandbox: "read-only",
   language: "English",
+  fastMode: false,
   json: false,
   includes: [],
   ignores: [],
@@ -19,6 +20,7 @@ const VALUE_OPTIONS = new Set([
   "out",
   "model",
   "profile",
+  "reasoning",
   "sandbox",
   "language",
   "include",
@@ -29,17 +31,19 @@ const BOOLEAN_OPTIONS = new Set([
   "json",
   "ci",
   "fail-on-critical",
+  "fast",
+  "no-fast",
   "no-progress",
   "keep-logs",
   "version",
   "help"
 ]);
 
-export function parseCliArgs(argv: string[]): CliParseResult {
+export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OPTIONS): CliParseResult {
   const options: AuditOptions = {
-    ...DEFAULT_OPTIONS,
-    includes: [],
-    ignores: []
+    ...defaults,
+    includes: [...defaults.includes],
+    ignores: [...defaults.ignores]
   };
   const positionals: string[] = [];
   let wantsHelp = false;
@@ -98,6 +102,12 @@ export function parseCliArgs(argv: string[]): CliParseResult {
       case "fail-on-critical":
         options.failOnCritical = true;
         break;
+      case "fast":
+        options.fastMode = true;
+        break;
+      case "no-fast":
+        options.fastMode = false;
+        break;
       case "no-progress":
         options.progress = false;
         break;
@@ -122,7 +132,7 @@ export function parseCliArgs(argv: string[]): CliParseResult {
     wantsHelp = true;
   } else if (command === "version") {
     wantsVersion = true;
-  } else if (command !== "audit") {
+  } else if (command !== "audit" && command !== "settings") {
     throw new CliUsageError(`Unknown command: ${command}`);
   }
 
@@ -132,6 +142,10 @@ export function parseCliArgs(argv: string[]): CliParseResult {
 
   if (wantsHelp) {
     return { action: "help", options };
+  }
+
+  if (command === "settings") {
+    return { action: "settings", options };
   }
 
   return { action: "audit", options };
@@ -147,6 +161,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
       break;
     case "profile":
       options.profile = requireNonEmpty(name, value);
+      break;
+    case "reasoning":
+      options.reasoning = requireNonEmpty(name, value);
       break;
     case "sandbox":
       options.sandbox = validateSandbox(value);
@@ -201,6 +218,7 @@ Usage:
 
 Commands:
   audit                 Run a full audit in the current directory
+  settings              Edit persisted default settings in an interactive menu
   help                  Show help
   version               Show version
 
@@ -208,6 +226,9 @@ Options:
   --out <dir>           Report output directory (default: .repovista)
   --model <name>        Override the Codex model
   --profile <name>      Use a Codex configuration profile
+  --reasoning <effort>  Override Codex reasoning effort
+  --fast                Use Codex fast service tier when supported
+  --no-fast             Disable Codex fast service tier
   --sandbox <mode>      Codex sandbox: read-only or workspace-write (default: read-only)
   --language <name>     Report language (default: English)
   --json                Store metadata and Codex JSONL events

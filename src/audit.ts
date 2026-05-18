@@ -89,6 +89,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         logsDir: paths.logsDir,
         model: options.model,
         profile: options.profile,
+        reasoning: options.reasoning,
+        fastMode: options.fastMode,
         sandbox: options.sandbox,
         jsonEvents: options.json,
         keepLogs: options.keepLogs
@@ -152,6 +154,8 @@ function createInitialMeta(
     codex: {
       model: options.model,
       profile: options.profile,
+      reasoning: options.reasoning,
+      fastMode: options.fastMode,
       sandbox: options.sandbox
     },
     preflight: {
