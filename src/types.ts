@@ -195,6 +195,7 @@ export interface AuditMeta {
   evidence?: EvidencePack;
   phases: PhaseReportStatus[];
   findings: StructuredFinding[];
+  findingCounts?: Record<string, number>;
   outputs?: {
     findingsJson?: string;
     summaryJson?: string;

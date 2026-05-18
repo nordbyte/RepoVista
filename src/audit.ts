@@ -443,17 +443,19 @@ function shardReportPath(shardDirectory: string, shardId: string): string {
 async function createRunPaths(projectRoot: string, options: AuditOptions, now: Date, createLogs: boolean): Promise<RunPaths> {
   if (options.resumeDir) {
     try {
-      return await useExistingRunDirectory(projectRoot, options.resumeDir, createLogs);
+      return await useExistingRunDirectory(projectRoot, options.resumeDir, createLogs, options.outDir);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new PreflightError(`Could not resume RepoVista run: ${message}`);
     }
   }
 
-  if (path.resolve(projectRoot, options.outDir) === projectRoot) {
-    throw new PreflightError("The report directory must not be identical to the project root.");
+  try {
+    return await prepareRunDirectory(projectRoot, options.outDir, createRunId(now), createLogs);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PreflightError(`Could not create RepoVista run: ${message}`);
   }
-  return prepareRunDirectory(projectRoot, options.outDir, createRunId(now), createLogs);
 }
 
 function createInitialMeta(
@@ -662,6 +664,8 @@ async function writeStructuredOutputs(
 ): Promise<void> {
   const findingsPath = reportPath(paths.runDir, "findings.json");
   const summaryPath = reportPath(paths.runDir, "summary.json");
+  const findingCounts = findingCountsBySeverity(findings);
+  meta.findingCounts = findingCounts;
   await writeJsonFile(findingsPath, findings);
   await writeJsonFile(summaryPath, {
     tool: meta.tool,
@@ -683,7 +687,7 @@ async function writeStructuredOutputs(
       }
     },
     phases: meta.phases,
-    findingCounts: findingCountsBySeverity(findings)
+    findingCounts
   });
   meta.outputs = {
     findingsJson: findingsPath,

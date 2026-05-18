@@ -114,6 +114,25 @@ test("report quality gates and finding extractor expose structured signals", () 
   assert.deepEqual(findings[0].paths, ["README.md", "src/secrets.ts"]);
 });
 
+test("finding extractor prefers explicit paths and avoids prose path noise", () => {
+  const findings = extractFindings(`# Risk
+
+## High Findings
+
+- Title: Report and resume paths can write into project code
+- Severity: High
+- Category: Data loss
+- Affected paths: src/reports.ts, src/audit.ts, .github/workflows/security.yml
+- Evidence: The app applies path logic in applicable branches and appends report files; src/reports.ts creates run directories.
+- Recommended fix: validate report roots before writing
+- Confidence: High
+`);
+
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].title, "Report and resume paths can write into project code");
+  assert.deepEqual(findings[0].paths, [".github/workflows/security.yml", "src/audit.ts", "src/reports.ts"]);
+});
+
 test("audit writes structured findings and summary json", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-structured-"));
   try {

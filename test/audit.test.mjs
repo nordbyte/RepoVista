@@ -238,6 +238,7 @@ test("parallel resume reuses completed shard reports before synthesis", async ()
     await initializeProjectMap(root, DEFAULT_OPTIONS, new Date("2026-05-18T14:57:32.123Z"));
     const resumeDir = path.join(root, ".repovista", "manual-run");
     await mkdir(path.join(resumeDir, "shards", "architecture"), { recursive: true });
+    await writeFile(path.join(resumeDir, "00-inventory.md"), "# Inventory\n\nExisting run.\n", "utf8");
     await writeFile(path.join(resumeDir, "shards", "architecture", "thread-1.md"), "# Thread 1\n\nExisting shard.\n", "utf8");
     await writeFile(path.join(resumeDir, "shards", "architecture", "thread-2.md"), "# Thread 2\n\nExisting shard.\n", "utf8");
 
@@ -326,6 +327,55 @@ test("audit rejects project root as report folder before creating run directorie
     );
 
     assert.deepEqual((await readdir(root)).sort(), ["package.json"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("audit rejects unsafe report and resume paths before writing reports", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-paths-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await mkdir(path.join(root, "reports", "run"), { recursive: true });
+    await mkdir(path.join(root, ".repovista", "not-a-run"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "reports", "run", "00-inventory.md"), "# Inventory\n", "utf8");
+    const options = {
+      command: "audit",
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    };
+    const dependencies = {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true
+    };
+
+    await assert.rejects(
+      () => runAudit({ ...options, outDir: "../repovista-reports" }, dependencies),
+      /inside the project root/i
+    );
+    await assert.rejects(
+      () => runAudit({ ...options, outDir: "src/reports" }, dependencies),
+      /protected project path/i
+    );
+    await assert.rejects(
+      () => runAudit({ ...options, resumeDir: path.join(root, "reports", "run") }, dependencies),
+      /inside the report directory/i
+    );
+    await assert.rejects(
+      () => runAudit({ ...options, resumeDir: path.join(root, ".repovista", "not-a-run") }, dependencies),
+      /does not look like a RepoVista run directory/i
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

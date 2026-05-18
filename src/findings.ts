@@ -6,7 +6,8 @@ const CONFIDENCE_PATTERN = /\bconfidence\s*:\s*([^\n]+)/i;
 const EVIDENCE_PATTERN = /\bevidence\s*:\s*([^\n]+)/i;
 const RECOMMENDATION_PATTERN = /\b(?:recommended fix|recommendation|concrete fix proposal)\s*:\s*([^\n]+)/i;
 const PATH_FIELD_PATTERN = /\b(?:file|path|affected paths?|affected files?)\s*:\s*([^\n]+)/i;
-const PATH_PATTERN = /(?:\.?\/)?(?:src|test|tests|lib|app|scripts|docs|\.github|package\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)[/\w.-]*/g;
+const PATH_TOKEN_PATTERN = /`([^`]+)`|(?:^|[\s([:,])((?:\.?\/)?(?:(?:src|test|tests|lib|app|scripts|docs|\.github)\/[\w./-]+|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)))(?=$|[\s)\],.;:])/g;
+const PATH_ROOTS = new Set(["src", "test", "tests", "lib", "app", "scripts", "docs", ".github"]);
 
 export function extractFindings(report: string, source = "03-risk-and-bug-report.md"): StructuredFinding[] {
   const blocks = splitFindingBlocks(report);
@@ -97,14 +98,14 @@ function extractTitle(block: string): string | undefined {
       return cleanTitle(heading);
     }
 
-    const bullet = /^\s*(?:[-*]|\d+\.)\s+(.+?)\s*$/.exec(line)?.[1];
-    if (bullet && !SEVERITY_PATTERN.test(bullet)) {
-      return cleanTitle(bullet);
-    }
-
     const titleField = /\btitle\s*:\s*(.+)$/i.exec(line)?.[1];
     if (titleField) {
       return cleanTitle(titleField);
+    }
+
+    const bullet = /^\s*(?:[-*]|\d+\.)\s+(.+?)\s*$/.exec(line)?.[1];
+    if (bullet && !SEVERITY_PATTERN.test(bullet)) {
+      return cleanTitle(bullet);
     }
   }
 
@@ -114,14 +115,25 @@ function extractTitle(block: string): string | undefined {
 function extractPaths(block: string): string[] {
   const explicit = PATH_FIELD_PATTERN.exec(block)?.[1];
   const values = new Set<string>();
-  for (const source of [explicit, block]) {
-    if (!source) {
-      continue;
-    }
-    for (const match of source.matchAll(PATH_PATTERN)) {
-      values.add(stripPunctuation(match[0]));
+
+  if (explicit) {
+    for (const candidate of splitPathField(explicit)) {
+      const normalized = normalizePathCandidate(candidate, true);
+      if (normalized) {
+        values.add(normalized);
+      }
     }
   }
+
+  if (!values.size) {
+    for (const match of block.matchAll(PATH_TOKEN_PATTERN)) {
+      const normalized = normalizePathCandidate(match[1] ?? match[2], false);
+      if (normalized) {
+        values.add(normalized);
+      }
+    }
+  }
+
   return Array.from(values).filter(Boolean).sort();
 }
 
@@ -131,7 +143,7 @@ function cleanField(value: string | undefined): string | undefined {
 }
 
 function cleanTitle(value: string): string {
-  return stripPunctuation(value.replace(/\bseverity\s*:.+$/i, "").trim()) || "Untitled finding";
+  return stripPunctuation(value.replace(/^\s*title\s*:\s*/i, "").replace(/\bseverity\s*:.+$/i, "").trim()) || "Untitled finding";
 }
 
 function stripPunctuation(value: string): string {
@@ -140,4 +152,36 @@ function stripPunctuation(value: string): string {
 
 function capitalize(value: string): string {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function splitPathField(value: string): string[] {
+  return value
+    .split(/,|;|\s+and\s+/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizePathCandidate(value: string | undefined, allowRootDirectory: boolean): string | undefined {
+  const stripped = stripPunctuation((value ?? "")
+    .replace(/^['"`(]+|['"`)\]]+$/g, "")
+    .replace(/^\.\//, "")
+    .trim());
+  if (!stripped || /\s/.test(stripped) || stripped.includes("..")) {
+    return undefined;
+  }
+
+  const normalized = stripped.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const firstSegment = normalized.split("/")[0];
+  if (PATH_ROOTS.has(firstSegment)) {
+    if (normalized.includes("/") || allowRootDirectory) {
+      return normalized;
+    }
+    return undefined;
+  }
+
+  if (/^(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)$/.test(normalized)) {
+    return normalized;
+  }
+
+  return undefined;
 }

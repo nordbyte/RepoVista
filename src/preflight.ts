@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { PreflightError } from "./errors.js";
 import { getReportProvider } from "./providers/index.js";
+import { validateReportRoot } from "./reports.js";
 import type { AiProviderId, AuditOptions } from "./types.js";
 
 export interface PreflightResult {
@@ -58,6 +59,7 @@ export async function runPreflight(
 
   await assertDirectoryAccess(projectRoot, "Project directory", false);
   await assertDirectoryAccess(runDir, "Report directory", true);
+  await validateReportRoot(projectRoot, options.outDir);
 
   const providerAvailable = await commandExists(provider.executable);
   if (!providerAvailable) {
@@ -84,10 +86,6 @@ export async function runPreflight(
     warnings.push(
       `Sandbox mode ${options.sandbox} was selected explicitly. The safe default is read-only.`
     );
-  }
-
-  if (path.resolve(projectRoot, options.outDir) === projectRoot) {
-    throw new PreflightError("The report directory must not be identical to the project root.");
   }
 
   return {

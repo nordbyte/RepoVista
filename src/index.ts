@@ -13,7 +13,7 @@ export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";
 export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateProvider, validateSandbox } from "./options.js";
 export { runPreflight } from "./preflight.js";
-export { prepareRunDirectory, useExistingRunDirectory, writeMeta } from "./reports.js";
+export { prepareRunDirectory, useExistingRunDirectory, validateReportRoot, writeMeta } from "./reports.js";
 export { validateReportQuality } from "./quality-gates.js";
 export { createRunId } from "./run-id.js";
 export { isSensitiveKey, maskObject, maskSensitiveText, maskSensitiveValue } from "./secrets.js";
