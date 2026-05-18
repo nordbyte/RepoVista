@@ -52,6 +52,11 @@ export function findingCountsBySeverity(findings: StructuredFinding[]): Record<s
 
 function splitFindingBlocks(report: string): string[] {
   const lines = report.split(/\r?\n/);
+  const titleFieldBlocks = splitTitleFieldBlocks(lines);
+  if (titleFieldBlocks.length) {
+    return titleFieldBlocks;
+  }
+
   const headingBlocks: string[] = [];
   let headingBlock: string[] = [];
 
@@ -89,6 +94,28 @@ function splitFindingBlocks(report: string): string[] {
   }
 
   return blocks;
+}
+
+function splitTitleFieldBlocks(lines: string[]): string[] {
+  const blocks: string[] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    const startsTitleBlock = /^\s*(?:[-*]\s+)?title\s*:/i.test(line);
+    if (startsTitleBlock && current.length) {
+      blocks.push(current.join("\n"));
+      current = [];
+    }
+    if (startsTitleBlock || current.length) {
+      current.push(line);
+    }
+  }
+
+  if (current.length) {
+    blocks.push(current.join("\n"));
+  }
+
+  return blocks.filter((block) => SEVERITY_PATTERN.test(block));
 }
 
 function extractTitle(block: string): string | undefined {

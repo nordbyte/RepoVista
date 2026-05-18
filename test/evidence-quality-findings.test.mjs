@@ -117,6 +117,10 @@ test("report quality gates and finding extractor expose structured signals", () 
 test("finding extractor prefers explicit paths and avoids prose path noise", () => {
   const findings = extractFindings(`# Risk
 
+## 1. Executive Summary
+
+One high issue is listed below.
+
 ## High Findings
 
 - Title: Report and resume paths can write into project code
