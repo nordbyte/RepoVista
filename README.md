@@ -159,7 +159,7 @@ Codex is the default provider:
 - `--skip-git-repo-check`, so intentionally non-git project folders can still be analyzed
 - `--output-last-message <report.md>`, so the final answer is separated cleanly from the technical stream
 - `--config model_reasoning_effort="<effort>"` when a reasoning default or CLI override is set
-- `--config service_tier="priority"` when fast mode is enabled
+- `--config service_tier="fast"` when fast mode is enabled
 - A default 30-minute timeout per phase, configurable with `--timeout`
 
 Claude Code can be selected with `--provider claude`. RepoVista uses non-interactive print mode and writes Claude's final stdout to the report file:

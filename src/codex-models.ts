@@ -57,7 +57,7 @@ export function parseCodexModelCatalog(raw: string): CodexModelInfo[] {
       supportedReasoning: item.supported_reasoning_levels ?? [],
       supportsFastMode: Boolean(
         item.additional_speed_tiers?.includes("fast") ||
-        item.service_tiers?.some((tier) => tier.id === "priority")
+        item.service_tiers?.some((tier) => tier.id === "fast" || tier.id === "priority")
       )
     }));
 }

@@ -41,7 +41,7 @@ test("codex args use read-only sandbox, target cwd and output-last-message", () 
   assert.ok(args.includes("--model"));
   assert.ok(args.includes("--profile"));
   assert.ok(args.includes('model_reasoning_effort="high"'));
-  assert.ok(args.includes('service_tier="priority"'));
+  assert.ok(args.includes('service_tier="fast"'));
 });
 
 test("claude args use print mode, model, effort and non-persistent sessions", () => {

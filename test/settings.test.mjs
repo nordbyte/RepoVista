@@ -117,7 +117,7 @@ test("codex model catalog parsing exposes current model and reasoning options", 
           { effort: "high", description: "deep" }
         ],
         additional_speed_tiers: ["fast"],
-        service_tiers: [{ id: "priority" }]
+        service_tiers: [{ id: "fast" }]
       }
     ]
   }));

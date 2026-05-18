@@ -41,7 +41,7 @@ export function buildCodexExecArgs(request: ProviderRunRequest): string[] {
   }
 
   if (request.fastMode) {
-    args.push("--config", 'service_tier="priority"');
+    args.push("--config", 'service_tier="fast"');
   }
 
   if (request.jsonEvents) {
