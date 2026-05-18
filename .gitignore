@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.repovista/
+.agents/
+.codex/
+coverage/
+.tmp/
+*.log
+repovista.md
