@@ -147,7 +147,6 @@ export async function runCodexPhase(
 
     if (request.timeoutSeconds > 0) {
       timeoutTimer = setTimeout(() => terminateChild("timeout"), request.timeoutSeconds * 1000);
-      timeoutTimer.unref();
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
