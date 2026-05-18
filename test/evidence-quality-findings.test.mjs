@@ -78,6 +78,8 @@ test("evidence pack records git, codex and local check results", async () => {
 
     assert.equal(evidence.packageJson.name, "demo");
     assert.equal(evidence.git.dirty, true);
+    assert.equal(evidence.aiProvider.id, "codex");
+    assert.equal(evidence.aiProvider.version, "codex-cli 0.130.0");
     assert.equal(evidence.codex.version, "codex-cli 0.130.0");
     assert.equal(hasFailedChecks(evidence), true);
     assert.match(renderEvidenceMarkdown(evidence), /Evidence Pack/);

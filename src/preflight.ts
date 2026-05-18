@@ -3,10 +3,18 @@ import { constants } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { PreflightError } from "./errors.js";
-import type { AuditOptions } from "./types.js";
+import { getReportProvider } from "./providers/index.js";
+import type { AiProviderId, AuditOptions } from "./types.js";
 
 export interface PreflightResult {
   codexAvailable: boolean;
+  providerAvailable: boolean;
+  provider: {
+    id: AiProviderId;
+    displayName: string;
+    executable: string;
+    available: boolean;
+  };
   projectRecognized: boolean;
   gitRepository: boolean;
   warnings: string[];
@@ -46,14 +54,15 @@ export async function runPreflight(
 ): Promise<PreflightResult> {
   const warnings: string[] = [];
   const commandExists = dependencies.commandExists ?? defaultCommandExists;
+  const provider = getReportProvider(options.provider ?? "codex");
 
   await assertDirectoryAccess(projectRoot, "Project directory", false);
   await assertDirectoryAccess(runDir, "Report directory", true);
 
-  const codexAvailable = await commandExists("codex");
-  if (!codexAvailable) {
+  const providerAvailable = await commandExists(provider.executable);
+  if (!providerAvailable) {
     throw new PreflightError(
-      "Codex CLI was not found. Install and authenticate the official Codex CLI so the `codex` command is available in PATH."
+      `${provider.displayName} was not found. Install and authenticate ${provider.displayName} so the \`${provider.executable}\` command is available in PATH.`
     );
   }
 
@@ -67,7 +76,7 @@ export async function runPreflight(
   const gitRepository = await hasGitRepository(projectRoot);
   if (!gitRepository) {
     warnings.push(
-      "The target directory is not a recognizable Git repository. RepoVista passes --skip-git-repo-check so the audit can still run read-only."
+      "The target directory is not a recognizable Git repository. RepoVista can still run a read-only audit from the current directory."
     );
   }
 
@@ -82,7 +91,14 @@ export async function runPreflight(
   }
 
   return {
-    codexAvailable,
+    codexAvailable: provider.id === "codex" && providerAvailable,
+    providerAvailable,
+    provider: {
+      id: provider.id,
+      displayName: provider.displayName,
+      executable: provider.executable,
+      available: providerAvailable
+    },
     projectRecognized,
     gitRepository,
     warnings

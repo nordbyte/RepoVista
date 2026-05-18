@@ -1,9 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AuditOptions, SandboxMode } from "./types.js";
+import { isReportProviderId } from "./providers/index.js";
+import type { AiProviderId, AuditOptions, SandboxMode } from "./types.js";
 
 export interface RepoVistaSettings {
+  provider?: AiProviderId;
   model?: string;
   profile?: string;
   reasoning?: string;
@@ -57,6 +59,7 @@ export async function saveSettings(settings: RepoVistaSettings, settingsPath = g
 export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVistaSettings): AuditOptions {
   return {
     ...defaults,
+    provider: settings.provider ?? defaults.provider,
     outDir: settings.outDir ?? defaults.outDir,
     model: settings.model ?? defaults.model,
     profile: settings.profile ?? defaults.profile,
@@ -82,6 +85,10 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
 
 export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings {
   const sanitized: RepoVistaSettings = {};
+
+  if (typeof settings.provider === "string" && isReportProviderId(settings.provider)) {
+    sanitized.provider = settings.provider;
+  }
 
   for (const key of ["model", "profile", "reasoning", "language", "outDir"] as const) {
     const value = settings[key];

@@ -3,13 +3,16 @@ import path from "node:path";
 import { renderEvidenceMarkdown } from "./evidence.js";
 import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
 import { maskObject, maskSensitiveText } from "./secrets.js";
-import type { EvidencePack, SandboxMode } from "./types.js";
+import type { AiProviderId, EvidencePack, SandboxMode } from "./types.js";
 
 export interface InventoryOptions {
   outDir: string;
   includes: string[];
   ignores: string[];
-  codex?: {
+  ai?: {
+    provider: AiProviderId;
+    displayName: string;
+    executable: string;
     model?: string;
     profile?: string;
     reasoning?: string;
@@ -192,7 +195,7 @@ export async function createProjectInventory(
     warnings.push(`Inventory shortened: more than ${maxFiles} relevant files found.`);
   }
   if (state.files.length > 3000) {
-    warnings.push("The repository is large. RepoVista shortens the file tree and passes only compact context to Codex.");
+    warnings.push("The repository is large. RepoVista shortens the file tree and passes only compact context to the selected provider.");
   }
 
   const markdown = renderInventory({
@@ -210,7 +213,7 @@ export async function createProjectInventory(
     importantDirectories,
     includes: options.includes,
     ignores: options.ignores,
-    codex: options.codex,
+    ai: options.ai,
     evidence: options.evidence,
     maxTreeEntries
   });
@@ -365,7 +368,10 @@ function renderInventory(input: {
   importantDirectories: string[];
   includes: string[];
   ignores: string[];
-  codex?: {
+  ai?: {
+    provider: AiProviderId;
+    displayName: string;
+    executable: string;
     model?: string;
     profile?: string;
     reasoning?: string;
@@ -432,9 +438,9 @@ ${renderList(detectSpecialFiles(input.files))}
 - Include: ${input.includes.length ? input.includes.map((item) => `\`${item}\``).join(", ") : "none"}
 - Ignore: ${input.ignores.length ? input.ignores.map((item) => `\`${item}\``).join(", ") : "none"}
 
-## Codex Execution Settings
+## AI Provider Execution Settings
 
-${renderCodexSettings(input.codex)}
+${renderAiSettings(input.ai)}
 
 ## Shortened File Tree
 
@@ -444,20 +450,31 @@ ${renderTree(input.files, input.maxTreeEntries)}
 `;
 }
 
-function renderCodexSettings(codex: {
+function renderAiSettings(ai: {
+  provider: AiProviderId;
+  displayName: string;
+  executable: string;
   model?: string;
   profile?: string;
   reasoning?: string;
   fastMode: boolean;
   sandbox: SandboxMode;
 } | undefined): string {
+  const defaultModel = ai?.provider === "codex"
+    ? "Codex configured default"
+    : `${ai?.displayName ?? "Codex CLI"} configured default`;
+  const permissionLine = ai?.provider === "claude"
+    ? `- Claude permission mode: ${ai.sandbox === "read-only" ? "plan" : "default"}`
+    : "- Codex approval policy: never";
   return [
-    `- Model: ${codex?.model ?? "Codex configured default"}`,
-    `- Reasoning: ${codex?.reasoning ?? "model default"}`,
-    `- Fast mode: ${codex?.fastMode ? "on" : "off"}`,
-    `- Profile: ${codex?.profile ?? "none"}`,
-    `- Sandbox: ${codex?.sandbox ?? "read-only"}`,
-    "- Approval policy: never"
+    `- Provider: ${ai?.displayName ?? "Codex CLI"}`,
+    `- Executable: ${ai?.executable ?? "codex"}`,
+    `- Model: ${ai?.model ?? defaultModel}`,
+    `- Reasoning: ${ai?.reasoning ?? "model default"}`,
+    `- Codex fast mode: ${ai?.fastMode ? "on" : "off"}`,
+    `- Codex profile: ${ai?.profile ?? "none"}`,
+    `- Sandbox: ${ai?.sandbox ?? "read-only"}`,
+    permissionLine
   ].join("\n");
 }
 

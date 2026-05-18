@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { getReportProvider } from "./providers/index.js";
 import { maskSensitiveText } from "./secrets.js";
 import type { AuditOptions, EvidenceCommandResult, EvidencePack } from "./types.js";
 
@@ -29,9 +30,10 @@ export async function collectEvidence(
   dependencies: EvidenceDependencies = {}
 ): Promise<EvidencePack> {
   const runCommand = dependencies.runCommand ?? defaultRunCommand;
+  const provider = getReportProvider(options.provider ?? "codex");
   const packageJson = await readPackageSummary(projectRoot);
   const npm = await runCommand("npm", ["--version"], { cwd: projectRoot, timeoutSeconds: 10 });
-  const codex = await runCommand("codex", ["--version"], { cwd: projectRoot, timeoutSeconds: 10 });
+  const providerVersion = await runCommand(provider.executable, provider.versionArgs, { cwd: projectRoot, timeoutSeconds: 10 });
   const git = await collectGitEvidence(projectRoot, runCommand);
   const configuredCommands = options.checkCommands ?? [];
   const checkTimeoutSeconds = options.checkTimeoutSeconds ?? 300;
@@ -58,10 +60,23 @@ export async function collectEvidence(
         }
       : undefined,
     git,
-    codex: {
-      available: codex.exitCode === 0,
-      version: codex.exitCode === 0 ? (codex.stdout ?? "").trim() : undefined,
-      error: codex.exitCode === 0 ? undefined : codex.error ?? codex.stderr
+    codex: provider.id === "codex"
+      ? {
+          available: providerVersion.exitCode === 0,
+          version: providerVersion.exitCode === 0 ? (providerVersion.stdout ?? "").trim() : undefined,
+          error: providerVersion.exitCode === 0 ? undefined : providerVersion.error ?? providerVersion.stderr
+        }
+      : {
+          available: false,
+          error: "Codex CLI was not selected for this run."
+        },
+    aiProvider: {
+      id: provider.id,
+      displayName: provider.displayName,
+      executable: provider.executable,
+      available: providerVersion.exitCode === 0,
+      version: providerVersion.exitCode === 0 ? (providerVersion.stdout ?? "").trim() : undefined,
+      error: providerVersion.exitCode === 0 ? undefined : providerVersion.error ?? providerVersion.stderr
     },
     checks: {
       enabled: options.runChecks,
@@ -104,13 +119,15 @@ export function renderEvidenceMarkdown(evidence: EvidencePack): string {
 
 ${renderGitStatus(evidence)}
 
-### Codex CLI
+### AI Provider CLI
 
 | Signal | Value |
 |---|---|
-| Available | ${evidence.codex.available ? "yes" : "no"} |
-| Version | ${escapeTableCell(evidence.codex.version ?? "not detected")} |
-${evidence.codex.error ? `\nCodex error: \`${escapeInline(evidence.codex.error)}\`\n` : ""}
+| Provider | ${escapeTableCell(evidence.aiProvider.displayName)} |
+| Command | \`${escapeTableCell(evidence.aiProvider.executable)}\` |
+| Available | ${evidence.aiProvider.available ? "yes" : "no"} |
+| Version | ${escapeTableCell(evidence.aiProvider.version ?? "not detected")} |
+${evidence.aiProvider.error ? `\nProvider error: \`${escapeInline(evidence.aiProvider.error)}\`\n` : ""}
 ### Local Checks
 
 ${renderChecks(evidence)}

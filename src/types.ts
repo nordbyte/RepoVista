@@ -1,9 +1,12 @@
 export type SandboxMode = "read-only" | "workspace-write";
 
+export type AiProviderId = "codex" | "claude";
+
 export type CliAction = "audit" | "settings" | "help" | "version";
 
 export interface AuditOptions {
   command: "audit";
+  provider: AiProviderId;
   outDir: string;
   resumeDir?: string;
   model?: string;
@@ -87,6 +90,14 @@ export interface EvidencePack {
     version?: string;
     error?: string;
   };
+  aiProvider: {
+    id: AiProviderId;
+    displayName: string;
+    executable: string;
+    available: boolean;
+    version?: string;
+    error?: string;
+  };
   checks: {
     enabled: boolean;
     timeoutSeconds: number;
@@ -118,6 +129,7 @@ export interface AuditMeta {
   startedAt: string;
   completedAt?: string;
   options: {
+    provider: AiProviderId;
     outDir: string;
     resumeDir?: string;
     language: string;
@@ -142,8 +154,25 @@ export interface AuditMeta {
     fastMode: boolean;
     sandbox: SandboxMode;
   };
+  ai: {
+    provider: AiProviderId;
+    displayName: string;
+    executable: string;
+    model: string;
+    profile: string;
+    reasoning: string;
+    fastMode: boolean;
+    sandbox: SandboxMode;
+  };
   preflight: {
     codexAvailable: boolean;
+    providerAvailable: boolean;
+    provider: {
+      id: AiProviderId;
+      displayName: string;
+      executable: string;
+      available: boolean;
+    };
     projectRecognized: boolean;
     gitRepository: boolean;
     warnings: string[];
@@ -158,7 +187,8 @@ export interface AuditMeta {
   exitCode: number;
 }
 
-export interface CodexRunRequest {
+export interface ProviderRunRequest {
+  provider: AiProviderId;
   phaseId: string;
   phaseTitle: string;
   prompt: string;
@@ -175,7 +205,7 @@ export interface CodexRunRequest {
   timeoutSeconds: number;
 }
 
-export interface CodexRunResult {
+export interface ProviderRunResult {
   phaseId: string;
   success: boolean;
   reportPath: string;
@@ -185,3 +215,9 @@ export interface CodexRunResult {
   stdoutLogPath?: string;
   stderrLogPath?: string;
 }
+
+export type CodexRunRequest = Omit<ProviderRunRequest, "provider"> & {
+  provider?: "codex";
+};
+
+export type CodexRunResult = ProviderRunResult;

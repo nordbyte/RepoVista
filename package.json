@@ -1,7 +1,7 @@
 {
   "name": "repovista",
   "version": "0.1.0",
-  "description": "Read-only Codex-powered repository audit reports from a local CLI.",
+  "description": "Read-only AI-powered repository audit reports from local provider CLIs.",
   "type": "module",
   "bin": {
     "repovista": "./dist/cli.js"
@@ -25,6 +25,8 @@
   },
   "keywords": [
     "codex",
+    "claude",
+    "ai",
     "cli",
     "audit",
     "repository",

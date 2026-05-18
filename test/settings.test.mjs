@@ -14,6 +14,7 @@ import {
 
 test("settings sanitize persisted defaults", () => {
   const sanitized = sanitizeSettings({
+    provider: "claude",
     model: " gpt-5.5 ",
     reasoning: " high ",
     fastMode: true,
@@ -37,6 +38,7 @@ test("settings sanitize persisted defaults", () => {
   });
 
   assert.deepEqual(sanitized, {
+    provider: "claude",
     model: "gpt-5.5",
     reasoning: "high",
     fastMode: true,
@@ -60,6 +62,7 @@ test("settings sanitize persisted defaults", () => {
 
 test("settings apply to audit defaults while preserving include and ignore arrays", () => {
   const options = applySettingsToDefaults(DEFAULT_OPTIONS, {
+    provider: "claude",
     model: "gpt-5.5",
     reasoning: "xhigh",
     fastMode: true,
@@ -72,6 +75,7 @@ test("settings apply to audit defaults while preserving include and ignore array
     strictReports: true
   });
 
+  assert.equal(options.provider, "claude");
   assert.equal(options.model, "gpt-5.5");
   assert.equal(options.reasoning, "xhigh");
   assert.equal(options.fastMode, true);

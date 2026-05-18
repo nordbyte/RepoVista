@@ -1,8 +1,10 @@
 import { CliUsageError } from "./errors.js";
-import type { AuditOptions, CliParseResult, SandboxMode } from "./types.js";
+import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
+import type { AiProviderId, AuditOptions, CliParseResult, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
+  provider: "codex",
   outDir: ".repovista",
   sandbox: "read-only",
   language: "English",
@@ -23,6 +25,7 @@ export const DEFAULT_OPTIONS: AuditOptions = {
 };
 
 const VALUE_OPTIONS = new Set([
+  "provider",
   "out",
   "resume",
   "model",
@@ -189,6 +192,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
 
 function applyValueOption(options: AuditOptions, name: string, value: string): void {
   switch (name) {
+    case "provider":
+      options.provider = validateProvider(value);
+      break;
     case "out":
       options.outDir = requireNonEmpty(name, value);
       break;
@@ -231,6 +237,13 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
       options.phaseTimeoutSeconds = parsePositiveMinutes(name, value);
       break;
   }
+}
+
+export function validateProvider(value: string): AiProviderId {
+  if (isReportProviderId(value)) {
+    return value;
+  }
+  throw new CliUsageError(`Unknown provider: ${value}. Supported providers: ${REPORT_PROVIDER_IDS.join(", ")}.`);
 }
 
 function requireNonEmpty(optionName: string, value: string): string {
@@ -283,7 +296,7 @@ export function validateSandbox(value: string): SandboxMode {
 }
 
 export function renderHelp(): string {
-  return `RepoVista - Codex-powered read-only repository audits
+  return `RepoVista - AI-powered read-only repository audits
 
 Usage:
   repovista [options]
@@ -296,31 +309,32 @@ Commands:
   version               Show version
 
 Options:
+  --provider <name>     Report provider: codex or claude (default: codex)
   --out <dir>           Report output directory (default: .repovista)
   --resume <run-dir>    Resume or complete an existing RepoVista run directory
-  --model <name>        Override the Codex model
+  --model <name>        Override the provider model
   --profile <name>      Use a Codex configuration profile
-  --reasoning <effort>  Override Codex reasoning effort
+  --reasoning <effort>  Override provider reasoning effort
   --fast                Use Codex fast service tier when supported
   --no-fast             Disable Codex fast service tier
-  --sandbox <mode>      Codex sandbox: read-only or workspace-write (default: read-only)
+  --sandbox <mode>      Provider sandbox: read-only or workspace-write (default: read-only)
   --language <name>     Report language (default: English)
-  --json                Store metadata and Codex JSONL events
+  --json                Store metadata and provider logs/events
   --include <patterns>  Additional include patterns for inventory/context
   --ignore <patterns>   Additional ignore patterns
   --phase <id>          Run only selected phase(s); repeatable or comma-separated
-  --run-checks          Run detected or explicit local check commands before Codex
+  --run-checks          Run detected or explicit local check commands before analysis
   --no-run-checks       Disable saved run-checks default
   --check <command>     Add an explicit local check command for --run-checks
   --check-timeout <min> Timeout per local check command (default: 5)
-  --timeout <min>       Timeout per Codex phase (default: 30)
+  --timeout <min>       Timeout per provider phase (default: 30)
   --phase-timeout <min> Alias for --timeout
   --strict-reports      Fail phases when report quality gates warn
   --no-strict-reports   Disable saved strict report default
   --ci                  CI mode without progress output
   --fail-on-critical    Exit with code 2 in CI when critical findings are detected
   --no-progress         Reduce progress output
-  --keep-logs           Store technical Codex logs
+  --keep-logs           Store technical provider logs
   --version             Show version
   --help                Show help
 `;

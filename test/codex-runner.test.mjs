@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildCodexExecArgs, runCodexPhase } from "../dist/index.js";
+import { buildClaudeExecArgs, buildCodexExecArgs, runCodexPhase, runProviderPhase } from "../dist/index.js";
 
 class FakeChild extends EventEmitter {
   stdin = new PassThrough();
@@ -44,6 +44,37 @@ test("codex args use read-only sandbox, target cwd and output-last-message", () 
   assert.ok(args.includes('service_tier="priority"'));
 });
 
+test("claude args use print mode, model, effort and non-persistent sessions", () => {
+  const args = buildClaudeExecArgs({
+    provider: "claude",
+    phaseId: "architecture",
+    phaseTitle: "Architecture",
+    prompt: "prompt",
+    projectRoot: "/repo",
+    reportPath: "/repo/.repovista/run/report.md",
+    sandbox: "read-only",
+    jsonEvents: false,
+    keepLogs: false,
+    model: "sonnet",
+    reasoning: "max",
+    fastMode: false,
+    timeoutSeconds: 60
+  });
+
+  assert.ok(args.includes("--print"));
+  assert.ok(args.includes("--output-format"));
+  assert.ok(args.includes("text"));
+  assert.ok(args.includes("--no-session-persistence"));
+  assert.ok(args.includes("--permission-mode"));
+  assert.ok(args.includes("plan"));
+  assert.ok(args.includes("--add-dir"));
+  assert.ok(args.includes("/repo"));
+  assert.ok(args.includes("--model"));
+  assert.ok(args.includes("sonnet"));
+  assert.ok(args.includes("--effort"));
+  assert.ok(args.includes("max"));
+});
+
 test("codex runner writes success report via mocked process", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-"));
   try {
@@ -77,6 +108,43 @@ test("codex runner writes success report via mocked process", async () => {
     assert.equal(result.success, true);
     assert.equal(await readFile(reportPath, "utf8"), "# Report\n\nOK\n");
     assert.equal(result.stdoutLogPath, path.join(logsDir, "architecture.stdout.jsonl"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("provider runner writes claude stdout as the final report", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-claude-"));
+  try {
+    const reportPath = path.join(root, "report.md");
+    const child = new FakeChild();
+    const spawnAdapter = (command, args, options) => {
+      assert.equal(command, "claude");
+      assert.equal(options.cwd, root);
+      assert.ok(args.includes("--print"));
+      setImmediate(() => {
+        child.stdout.write("# Claude Report\n\nOK\n");
+        child.emit("close", 0);
+      });
+      return child;
+    };
+
+    const result = await runProviderPhase({
+      provider: "claude",
+      phaseId: "architecture",
+      phaseTitle: "Architecture",
+      prompt: "prompt",
+      projectRoot: root,
+      reportPath,
+      sandbox: "read-only",
+      jsonEvents: false,
+      keepLogs: false,
+      fastMode: false,
+      timeoutSeconds: 60
+    }, spawnAdapter);
+
+    assert.equal(result.success, true);
+    assert.equal(await readFile(reportPath, "utf8"), "# Claude Report\n\nOK\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

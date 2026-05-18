@@ -52,3 +52,27 @@ test("preflight accepts a recognizable project and warns for non-git directories
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("preflight checks the selected provider command", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-preflight-claude-"));
+  try {
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    const runDir = path.join(root, ".repovista", "run");
+    await mkdir(runDir, { recursive: true });
+    const seen = [];
+
+    const result = await runPreflight(root, runDir, { ...baseOptions, provider: "claude" }, {
+      commandExists: async (command) => {
+        seen.push(command);
+        return true;
+      }
+    });
+
+    assert.deepEqual(seen, ["claude"]);
+    assert.equal(result.provider.id, "claude");
+    assert.equal(result.providerAvailable, true);
+    assert.equal(result.codexAvailable, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

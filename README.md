@@ -1,17 +1,18 @@
 # RepoVista
 
-RepoVista is an npm-installable CLI tool that orchestrates a structured, read-only Codex audit in the current project directory. It first collects a compact local project inventory, then runs several specialized `codex exec` phases and writes the results as Markdown reports to `.repovista/<run-id>`.
+RepoVista is an npm-installable CLI tool that orchestrates structured, read-only AI audits in the current project directory. It first collects a compact local project inventory, then runs several specialized analysis phases through a provider CLI such as Codex CLI or Claude Code CLI and writes the results as Markdown reports to `.repovista/<run-id>`.
 
 RepoVista is not a replacement for manual reviews, tests, SAST scanners, dependency audits, or security assessments. It is a fast entry point for understanding a repository's architecture, quality, risks, bugs, and useful improvement opportunities.
 
 ## Requirements
 
 - Node.js 20 or newer.
-- A separately installed and authenticated official Codex CLI.
-- The `codex` command must be available in `PATH`.
+- A separately installed and authenticated provider CLI:
+  - Codex CLI with the `codex` command available in `PATH`, or
+  - Claude Code CLI with the `claude` command available in `PATH`.
 - Permission and privacy clearance for the repository being analyzed.
 
-RepoVista does not install Codex through a postinstall script and does not enable telemetry.
+RepoVista does not install provider CLIs through a postinstall script and does not enable telemetry.
 
 ## Installation
 
@@ -53,6 +54,7 @@ Examples:
 
 ```sh
 repovista audit --language English --model gpt-5.5
+repovista audit --provider claude --model sonnet --reasoning high
 repovista audit --out reports/repovista --keep-logs
 repovista audit --ci --json --fail-on-critical --no-progress
 repovista audit --run-checks --strict-reports
@@ -79,37 +81,38 @@ Each run creates its own timestamped folder:
     logs/
 ```
 
-`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, Codex, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report. `summary.json` contains machine-readable run, phase, finding, and evidence summaries. `meta.json` records Codex execution settings, including model, reasoning effort, fast mode, profile, sandbox, phase status, report quality warnings, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
+`index.md` is the entry point. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report. `summary.json` contains machine-readable run, phase, finding, provider, and evidence summaries. `meta.json` records provider execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, report quality warnings, and preflight information. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## CLI Options
 
 | Option | Purpose |
 |---|---|
+| `--provider <name>` | Report provider, `codex` or `claude`, default `codex` |
 | `--out <dir>` | Report output directory, default `.repovista` |
 | `--resume <run-dir>` | Resume or complete an existing RepoVista run directory |
-| `--model <name>` | Override the Codex model |
+| `--model <name>` | Override the provider model |
 | `--profile <name>` | Use a Codex configuration profile |
-| `--reasoning <effort>` | Override Codex reasoning effort |
+| `--reasoning <effort>` | Override provider reasoning effort |
 | `--fast` | Use Codex fast service tier when supported |
 | `--no-fast` | Disable Codex fast service tier |
-| `--sandbox <mode>` | Codex sandbox, `read-only` or `workspace-write`, default `read-only` |
+| `--sandbox <mode>` | Provider sandbox intent, `read-only` or `workspace-write`, default `read-only` |
 | `--language <name>` | Report language, default `English` |
-| `--json` | Store metadata and Codex JSONL events |
+| `--json` | Store metadata and provider logs/events |
 | `--include <patterns>` | Include additional inventory/context patterns, including selected generated folders |
 | `--ignore <patterns>` | Additional ignore patterns for inventory and context |
 | `--phase <id>` | Run only selected phases; repeatable or comma-separated. IDs: `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`, `summary` |
-| `--run-checks` | Run detected or explicit local check commands before Codex and include results in the evidence pack |
+| `--run-checks` | Run detected or explicit local check commands before analysis and include results in the evidence pack |
 | `--no-run-checks` | Disable a saved `runChecks` default |
 | `--check <command>` | Add an explicit local check command for `--run-checks`; repeatable |
 | `--check-timeout <minutes>` | Timeout per local check command, default `5` |
-| `--timeout <minutes>` | Timeout per Codex phase, default `30` |
+| `--timeout <minutes>` | Timeout per provider phase, default `30` |
 | `--phase-timeout <minutes>` | Alias for `--timeout` |
 | `--strict-reports` | Mark phases failed when report quality gates detect missing required sections or weak evidence |
 | `--no-strict-reports` | Disable a saved strict report default |
 | `--ci` | CI-friendly mode without progress output |
 | `--fail-on-critical` | Return exit code `2` in CI when critical findings are detected |
 | `--no-progress` | Reduce progress output |
-| `--keep-logs` | Store technical Codex logs |
+| `--keep-logs` | Store technical provider logs |
 | `--version` | Show version |
 | `--help` | Show help |
 
@@ -117,22 +120,22 @@ Each run creates its own timestamped folder:
 
 RepoVista is an audit tool by default, not an auto-fix tool.
 
-- Codex is started with `--sandbox read-only` by default.
+- Providers are started with read-only intent by default.
 - `danger-full-access` and full-access variants are rejected in the MVP.
 - RepoVista itself writes only to the report directory.
 - `--run-checks` is opt-in because project check commands can execute repository scripts and may create build/test artifacts.
 - Old `.repovista` reports, dependencies, build artifacts, caches, coverage, media assets, and archives are excluded from the inventory.
 - `--include` can intentionally add selected ignored paths back to the inventory, except VCS metadata and the active report directory.
 - Sensitive values in read metadata are masked; `.env` contents are not included in reports.
-- There is no automatic Codex installation, no destructive commands, and no telemetry.
+- There is no automatic provider CLI installation, no destructive commands, and no telemetry.
 
-Important: Codex can access the repository during analysis and may send source code to the configured Codex service. Use RepoVista only in repositories where you have the required permissions and privacy clearance.
+Important: The selected provider CLI can access the repository during analysis and may send source code to its configured AI service. Use RepoVista only in repositories where you have the required permissions and privacy clearance.
 
-## Codex CLI Dependency
+## Provider Adapters
 
-RepoVista checks whether `codex` is available before the audit starts. Analysis phases are started through `codex exec`. The target directory is always the current working directory where `repovista` is executed.
+RepoVista checks whether the selected provider executable is available before the audit starts. The target directory is always the current working directory where `repovista` is executed.
 
-RepoVista sets these Codex options:
+Codex is the default provider:
 
 - `--cd <current project directory>`
 - `--config approval_policy="never"` for non-interactive runs
@@ -143,9 +146,21 @@ RepoVista sets these Codex options:
 - `--config service_tier="priority"` when fast mode is enabled
 - A default 30-minute timeout per phase, configurable with `--timeout`
 
+Claude Code can be selected with `--provider claude`. RepoVista uses non-interactive print mode and writes Claude's final stdout to the report file:
+
+- `--print`
+- `--output-format text`
+- `--input-format text`
+- `--no-session-persistence`
+- `--permission-mode plan` for `read-only`
+- `--permission-mode default` for `workspace-write`
+- `--add-dir <current project directory>`
+- `--model <model>` when a model is set, for example `sonnet`, `opus`, or a full Claude model name
+- `--effort <effort>` when reasoning is set; Claude Code currently supports `low`, `medium`, `high`, `xhigh`, and `max`
+
 ## Evidence and Quality Gates
 
-Before Codex phases start, RepoVista writes an evidence pack into `00-inventory.md`. It records Node.js, npm, package metadata, Git branch/commit/dirty state, Codex CLI version, and optional local check results.
+Before provider phases start, RepoVista writes an evidence pack into `00-inventory.md`. It records Node.js, npm, package metadata, Git branch/commit/dirty state, selected provider CLI version, and optional local check results.
 
 When `--run-checks` is set, RepoVista runs explicit `--check` commands or detected npm scripts in this order when present: `typecheck`, `lint`, `test`, `security:audit`. Results are included in the evidence pack. In CI mode, failed checks make the run exit with code `1`.
 
@@ -157,13 +172,13 @@ The risk report is also parsed into `findings.json`. Findings are extracted best
 
 `repovista settings` opens an interactive menu. Use arrow keys to move, Space to select or clear an option, and Enter to return to the previous menu or save from the main menu.
 
-The model and reasoning menus are populated from the installed Codex CLI via `codex debug models`. If that command is unavailable, RepoVista falls back to a bundled list for the current supported Codex models.
+The provider menu lets you choose Codex CLI or Claude Code CLI. For Codex, model and reasoning menus are populated from the installed Codex CLI via `codex debug models`; if that command is unavailable, RepoVista falls back to a bundled Codex list. For Claude Code, RepoVista offers the common Claude aliases `sonnet`, `opus`, and `haiku`, plus the reasoning efforts exposed by Claude Code: `low`, `medium`, `high`, `xhigh`, and `max`.
 
 Settings are stored in `~/.config/repovista/settings.json` by default. Set `REPOVISTA_CONFIG=/path/to/settings.json` to use a different settings file.
 
 CLI flags always override saved settings for the current run.
 
-The settings menu can persist model, reasoning, profile, fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, JSON/log settings, CI mode, and critical-finding behavior.
+The settings menu can persist provider, model, reasoning, Codex profile, Codex fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, JSON/log settings, CI mode, and critical-finding behavior.
 
 ## CI Notes
 
@@ -188,6 +203,7 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 - Continue an interrupted run: `repovista audit --resume .repovista/<run-id>`.
 - Rerun only the risk report and summary: `repovista audit --resume .repovista/<run-id> --phase risk-and-bug --phase summary`.
 - Configure persistent defaults: run `repovista settings`, choose a model with Space, return with Enter, then save.
+- Run with Claude Code: `repovista audit --provider claude --model sonnet --reasoning high`.
 - Keep technical logs for troubleshooting: `repovista audit --keep-logs`.
 - Generate reports in a specific language: `repovista audit --language Spanish`.
 - Ignore additional generated folders: `repovista audit --ignore "fixtures/generated/**"`.
@@ -200,6 +216,12 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 `Codex CLI appears to be unauthenticated`
 : Sign in to the Codex CLI and start the audit again.
 
+`Claude Code CLI was not found`
+: Install and authenticate Claude Code separately. Then check `claude --version`.
+
+`Claude Code CLI appears to be unauthenticated`
+: Sign in to Claude Code or configure an Anthropic API key and start the audit again.
+
 `The current directory does not look like a code project`
 : Run RepoVista from the project root. Recognized markers include `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `README.md`, `src/`, `lib/`, or `app/`.
 
@@ -207,7 +229,7 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 : Use `read-only` or, only by conscious choice, `workspace-write`. RepoVista is not intended for automatic code changes in the MVP.
 
 Very large repositories
-: RepoVista shortens the inventory and marks omitted entries. Codex can still read the repository itself, but receives compact orientation context.
+: RepoVista shortens the inventory and marks omitted entries. The selected provider can still read the repository itself, but receives compact orientation context.
 
 ## Development
 
@@ -217,4 +239,4 @@ npm run typecheck
 npm test
 ```
 
-The unit tests do not call Codex for real. The Codex runner is tested with mocked processes.
+The unit tests do not call provider CLIs for real. Codex and Claude provider paths are tested with mocked processes.

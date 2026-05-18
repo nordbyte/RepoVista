@@ -1,24 +1,29 @@
 import readline from "node:readline";
 import type { ReadStream, WriteStream } from "node:tty";
 import { RepoVistaError } from "./errors.js";
-import { loadCodexModels, reasoningOptionsForModel, type CodexModelInfo } from "./codex-models.js";
+import {
+  loadProviderModels,
+  reasoningOptionsForProviderModel,
+  type ProviderModelInfo
+} from "./provider-models.js";
+import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
-import type { SandboxMode } from "./types.js";
+import type { AiProviderId, SandboxMode } from "./types.js";
 
-type MenuScreen = "main" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
+type MenuScreen = "main" | "provider" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
   cursor: number;
   settings: RepoVistaSettings;
-  models: CodexModelInfo[];
+  modelsByProvider: Record<AiProviderId, ProviderModelInfo[]>;
   done: boolean;
   saved: boolean;
   settingsPath: string;
 }
 
 type MainItem =
-  | { id: "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
   | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "outDir" | "includes" | "ignores" | "checkCommands"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
@@ -38,12 +43,15 @@ export async function runSettingsMenu(
 
   const settingsPath = getSettingsPath();
   const settings = await loadSettings(settingsPath);
-  const models = await loadCodexModels();
+  const modelsByProvider = {
+    codex: await loadProviderModels("codex"),
+    claude: await loadProviderModels("claude")
+  };
   const state: MenuState = {
     screen: "main",
     cursor: 0,
     settings,
-    models,
+    modelsByProvider,
     done: false,
     saved: false,
     settingsPath
@@ -113,11 +121,13 @@ export async function runSettingsMenu(
 }
 
 export function summarizeSettings(settings: RepoVistaSettings): string[] {
+  const provider = getReportProvider(selectedProvider(settings));
   return [
-    `Model: ${settings.model ?? "Codex default"}`,
+    `Provider: ${provider.displayName}`,
+    `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${settings.reasoning ?? "model default"}`,
-    `Profile: ${settings.profile ?? "none"}`,
-    `Fast mode: ${settings.fastMode ? "on" : "off"}`,
+    `Codex profile: ${settings.profile ?? "none"}`,
+    `Codex fast mode: ${settings.fastMode ? "on" : "off"}`,
     `Sandbox: ${settings.sandbox ?? "read-only"}`,
     `Language: ${settings.language ?? "English"}`,
     `Output directory: ${settings.outDir ?? ".repovista"}`,
@@ -126,7 +136,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Run checks: ${settings.runChecks ? "on" : "off"}`,
     `Check commands: ${formatArray(settings.checkCommands)}`,
     `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}`,
-    `Codex phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}`,
+    `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}`,
     `Strict report gates: ${settings.strictReports ? "on" : "off"}`,
     `JSON: ${settings.json ? "on" : "off"}`,
     `Keep logs: ${settings.keepLogs ? "on" : "off"}`,
@@ -174,6 +184,7 @@ function activateCurrentItem(state: MenuState): void {
 
   const item = MAIN_ITEMS[state.cursor];
   switch (item.id) {
+    case "provider":
     case "model":
     case "reasoning":
     case "sandbox":
@@ -219,11 +230,26 @@ function toggleCurrentSelection(state: MenuState): void {
     return;
   }
 
+  if (state.screen === "provider") {
+    const selected = REPORT_PROVIDER_IDS[state.cursor];
+    if (selected && state.settings.provider !== selected) {
+      state.settings.provider = selected;
+      state.settings.model = undefined;
+      state.settings.reasoning = undefined;
+    } else {
+      state.settings.provider = undefined;
+      state.settings.model = undefined;
+      state.settings.reasoning = undefined;
+    }
+    return;
+  }
+
   if (state.screen === "model") {
-    const selected = state.models[state.cursor]?.slug;
+    const models = currentModels(state);
+    const selected = models[state.cursor]?.slug;
     state.settings.model = state.settings.model === selected ? undefined : selected;
     if (state.settings.model && state.settings.reasoning) {
-      const supported = reasoningOptionsForModel(state.models, state.settings.model).map((item) => item.effort);
+      const supported = reasoningOptionsForProviderModel(selectedProvider(state.settings), models, state.settings.model).map((item) => item.effort);
       if (!supported.includes(state.settings.reasoning)) {
         state.settings.reasoning = undefined;
       }
@@ -232,7 +258,8 @@ function toggleCurrentSelection(state: MenuState): void {
   }
 
   if (state.screen === "reasoning") {
-    const selected = reasoningOptionsForModel(state.models, state.settings.model)[state.cursor]?.effort;
+    const provider = selectedProvider(state.settings);
+    const selected = reasoningOptionsForProviderModel(provider, currentModels(state), state.settings.model)[state.cursor]?.effort;
     state.settings.reasoning = state.settings.reasoning === selected ? undefined : selected;
     return;
   }
@@ -287,10 +314,15 @@ function render(state: MenuState, output: WriteStream): void {
 
 function currentItems(state: MenuState): string[] {
   switch (state.screen) {
+    case "provider":
+      return REPORT_PROVIDER_IDS.map((providerId) => {
+        const provider = getReportProvider(providerId);
+        return checkbox(providerId === selectedProvider(state.settings), `${provider.displayName} (${providerId})`);
+      });
     case "model":
-      return state.models.map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
+      return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
-      return reasoningOptionsForModel(state.models, state.settings.model).map((level) => checkbox(level.effort === state.settings.reasoning, `${level.effort}${level.description ? ` - ${level.description}` : ""}`));
+      return reasoningOptionsForProviderModel(selectedProvider(state.settings), currentModels(state), state.settings.model).map((level) => checkbox(level.effort === state.settings.reasoning, `${level.effort}${level.description ? ` - ${level.description}` : ""}`));
     case "sandbox":
       return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === state.settings.sandbox, sandbox));
     case "language":
@@ -384,6 +416,14 @@ function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
   }
 }
 
+function selectedProvider(settings: RepoVistaSettings): AiProviderId {
+  return settings.provider ?? "codex";
+}
+
+function currentModels(state: MenuState): ProviderModelInfo[] {
+  return state.modelsByProvider[selectedProvider(state.settings)];
+}
+
 function splitList(value: string): string[] {
   return value
     .split(",")
@@ -408,21 +448,22 @@ function formatSeconds(seconds: number): string {
 }
 
 const MAIN_ITEMS: readonly MainItem[] = [
-  { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? "Codex default"}` },
+  { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
+  { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${settings.reasoning ?? "model default"}` },
-  { id: "profile", type: "text", label: (settings) => `Profile: ${settings.profile ?? "none"}` },
-  { id: "fastMode", type: "toggle", label: (settings) => checkbox(Boolean(settings.fastMode), "Fast mode") },
+  { id: "profile", type: "text", label: (settings) => `Codex profile: ${settings.profile ?? "none"}` },
+  { id: "fastMode", type: "toggle", label: (settings) => checkbox(Boolean(settings.fastMode), "Codex fast mode") },
   { id: "sandbox", type: "submenu", label: (settings) => `Sandbox: ${settings.sandbox ?? "read-only"}` },
   { id: "language", type: "submenu", label: (settings) => `Language: ${settings.language ?? "English"}` },
   { id: "outDir", type: "text", label: (settings) => `Output directory: ${settings.outDir ?? ".repovista"}` },
   { id: "includes", type: "text", label: (settings) => `Include patterns: ${formatArray(settings.includes)}` },
   { id: "ignores", type: "text", label: (settings) => `Ignore patterns: ${formatArray(settings.ignores)}` },
-  { id: "runChecks", type: "toggle", label: (settings) => checkbox(Boolean(settings.runChecks), "Run local checks before Codex") },
+  { id: "runChecks", type: "toggle", label: (settings) => checkbox(Boolean(settings.runChecks), "Run local checks before analysis") },
   { id: "checkCommands", type: "text", label: (settings) => `Check commands: ${formatArray(settings.checkCommands)}` },
   { id: "checkTimeout", type: "submenu", label: (settings) => `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}` },
-  { id: "phaseTimeout", type: "submenu", label: (settings) => `Codex phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}` },
+  { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}` },
   { id: "strictReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.strictReports), "Strict report quality gates") },
-  { id: "json", type: "toggle", label: (settings) => checkbox(Boolean(settings.json), "JSON metadata and Codex events") },
+  { id: "json", type: "toggle", label: (settings) => checkbox(Boolean(settings.json), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(Boolean(settings.keepLogs), "Keep technical logs") },
   { id: "progress", type: "toggle", label: (settings) => checkbox(settings.progress !== false, "Progress output") },
   { id: "ci", type: "toggle", label: (settings) => checkbox(Boolean(settings.ci), "CI mode") },

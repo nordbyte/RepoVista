@@ -8,6 +8,8 @@ import { Logger } from "./logger.js";
 import { ANALYSIS_PHASES, type PhaseDefinition, type PromptContext } from "./prompts.js";
 import { validateReportQuality } from "./quality-gates.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
+import { getReportProvider } from "./providers/index.js";
+import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { createRunId } from "./run-id.js";
 import {
   prepareRunDirectory,
@@ -21,19 +23,19 @@ import {
 import type {
   AuditMeta,
   AuditOptions,
-  CodexRunResult,
   EvidencePack,
   PhaseReportStatus,
+  ProviderRunResult,
   RunPaths,
   StructuredFinding
 } from "./types.js";
-import { runCodexPhase, type SpawnAdapter } from "./codex-runner.js";
 
 export interface AuditDependencies extends PreflightDependencies, EvidenceDependencies {
   cwd?: string;
   now?: Date;
   version?: string;
-  runCodex?: typeof runCodexPhase;
+  runProvider?: typeof runProviderPhase;
+  runCodex?: typeof runProviderPhase;
   spawnAdapter?: SpawnAdapter;
 }
 
@@ -78,7 +80,10 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       outDir: options.outDir,
       includes: options.includes,
       ignores: options.ignores,
-      codex: {
+      ai: {
+        provider: options.provider ?? "codex",
+        displayName: getReportProvider(options.provider ?? "codex").displayName,
+        executable: getReportProvider(options.provider ?? "codex").executable,
         model: options.model,
         profile: options.profile,
         reasoning: options.reasoning,
@@ -97,7 +102,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     previousReports["00-inventory.md"] = inventory.markdown;
 
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
-    const runCodex = dependencies.runCodex ?? runCodexPhase;
+    const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
     let detailPhaseRan = false;
 
     for (const phase of ANALYSIS_PHASES) {
@@ -121,7 +126,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         previousReports
       };
       const prompt = phase.buildPrompt(context);
-      const result = await runCodex({
+      const result = await runPhase({
+        provider: options.provider ?? "codex",
         phaseId: phase.id,
         phaseTitle: phase.title,
         prompt,
@@ -194,6 +200,8 @@ function createInitialMeta(
   version: string,
   startedAt: Date
 ): AuditMeta {
+  const provider = getReportProvider(options.provider ?? "codex");
+  const providerDefaults = `${provider.displayName} configured default`;
   return {
     tool: {
       name: "RepoVista",
@@ -204,6 +212,7 @@ function createInitialMeta(
     runId: paths.runId,
     startedAt: startedAt.toISOString(),
     options: {
+      provider: options.provider ?? "codex",
       outDir: options.outDir,
       resumeDir: options.resumeDir,
       language: options.language,
@@ -228,8 +237,25 @@ function createInitialMeta(
       fastMode: options.fastMode,
       sandbox: options.sandbox
     },
+    ai: {
+      provider: provider.id,
+      displayName: provider.displayName,
+      executable: provider.executable,
+      model: options.model ?? providerDefaults,
+      profile: options.profile ?? "none",
+      reasoning: options.reasoning ?? "model default",
+      fastMode: options.fastMode,
+      sandbox: options.sandbox
+    },
     preflight: {
       codexAvailable: false,
+      providerAvailable: false,
+      provider: {
+        id: provider.id,
+        displayName: provider.displayName,
+        executable: provider.executable,
+        available: false
+      },
       projectRecognized: false,
       gitRepository: false,
       warnings: []
@@ -329,7 +355,7 @@ function phaseStatus(statuses: PhaseReportStatus[], phase: PhaseDefinition): Pha
 async function updatePhaseStatus(
   status: PhaseReportStatus,
   phase: PhaseDefinition,
-  result: CodexRunResult,
+  result: ProviderRunResult,
   strictReports: boolean
 ): Promise<void> {
   status.status = result.success ? "success" : "failed";
@@ -379,9 +405,11 @@ async function writeStructuredOutputs(
     reportDir: meta.reportDir,
     startedAt: meta.startedAt,
     completedAt: meta.completedAt,
+    ai: meta.ai,
     codex: meta.codex,
     evidence: {
       git: evidence.git,
+      aiProvider: evidence.aiProvider,
       codex: evidence.codex,
       checks: {
         enabled: evidence.checks.enabled,
