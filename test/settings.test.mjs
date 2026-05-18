@@ -29,6 +29,9 @@ test("settings sanitize persisted defaults", () => {
     checkTimeoutSeconds: 90.2,
     phaseTimeoutSeconds: 1800.6,
     strictReports: true,
+    repairReports: true,
+    repairAttempts: 2,
+    exportFormats: ["sarif", "invalid", "html"],
     json: true,
     keepLogs: true,
     progress: false,
@@ -54,6 +57,9 @@ test("settings sanitize persisted defaults", () => {
     checkTimeoutSeconds: 90,
     phaseTimeoutSeconds: 1801,
     strictReports: true,
+    repairReports: true,
+    repairAttempts: 2,
+    exportFormats: ["sarif", "html"],
     json: true,
     keepLogs: true,
     progress: false,
@@ -75,7 +81,9 @@ test("settings apply to audit defaults while preserving include and ignore array
     ignores: ["fixtures/**"],
     runChecks: true,
     checkCommands: ["npm test"],
-    strictReports: true
+    strictReports: true,
+    repairReports: true,
+    exportFormats: ["sarif"]
   });
 
   assert.equal(options.provider, "claude");
@@ -90,6 +98,8 @@ test("settings apply to audit defaults while preserving include and ignore array
   assert.equal(options.runChecks, true);
   assert.deepEqual(options.checkCommands, ["npm test"]);
   assert.equal(options.strictReports, true);
+  assert.equal(options.repairReports, true);
+  assert.deepEqual(options.exportFormats, ["sarif"]);
 });
 
 test("settings are saved as JSON", async () => {

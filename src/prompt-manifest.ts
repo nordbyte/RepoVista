@@ -4,10 +4,12 @@ import type {
   PromptManifest,
   PromptManifestFile,
   PromptManifestPhase,
+  ProjectFileSummary,
   SemanticFeature
 } from "./types.js";
 
 const CLIP_LIMIT = 18000;
+const DEFAULT_PROJECT_FILE_LIMIT = 500;
 
 export function createPromptManifest(
   runId: string,
@@ -34,6 +36,9 @@ export async function addPromptManifestPhase(
     inventoryPath: string;
     previousReports: Record<string, string>;
     featureMapPath?: string;
+    projectFiles?: ProjectFileSummary[];
+    projectFileLimit?: number;
+    omittedProjectFileCount?: number;
   }
 ): Promise<void> {
   const includedFiles: PromptManifestFile[] = [
@@ -58,13 +63,48 @@ export async function addPromptManifestPhase(
     });
   }
 
+  const projectFileLimit = input.projectFileLimit ?? DEFAULT_PROJECT_FILE_LIMIT;
+  const projectFiles = input.projectFiles ?? [];
+  for (const file of projectFiles.slice(0, projectFileLimit)) {
+    includedFiles.push({
+      path: file.relativePath,
+      role: "project-file",
+      bytes: file.size,
+      includedBytes: 0,
+      truncated: false,
+      readable: true,
+      skippedReason: "file content was not embedded; path metadata was included through the inventory and feature map"
+    });
+  }
+
+  const omittedFiles = projectFiles.slice(projectFileLimit).map<PromptManifestFile>((file) => ({
+    path: file.relativePath,
+    role: "project-file",
+    bytes: file.size,
+    includedBytes: 0,
+    truncated: true,
+    readable: true,
+    skippedReason: "omitted from prompt manifest detail because the project file list limit was reached"
+  }));
+  for (let index = 0; index < (input.omittedProjectFileCount ?? 0); index += 1) {
+    omittedFiles.push({
+      path: `<additional-omitted-file-${index + 1}>`,
+      role: "project-file",
+      bytes: 0,
+      includedBytes: 0,
+      truncated: true,
+      readable: false,
+      skippedReason: "ignored or truncated by repository scan settings"
+    });
+  }
+
   const phase: PromptManifestPhase = {
     phaseId: input.phaseId,
     reportFile: input.reportFile,
     promptBytes: Buffer.byteLength(input.prompt, "utf8"),
     approximateTokens: approximateTokens(input.prompt),
     includedFiles,
-    omittedFiles: []
+    omittedFiles
   };
   manifest.phases.push(phase);
 }

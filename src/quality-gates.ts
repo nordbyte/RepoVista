@@ -1,8 +1,10 @@
 import { extractFindingsWithSource } from "./findings.js";
+import { extractStructuredPhaseReport } from "./phase-schema.js";
 
 export interface ReportQualityResult {
   passed: boolean;
   warnings: string[];
+  score: number;
 }
 
 const REQUIRED_SECTIONS: Record<string, string[]> = {
@@ -71,7 +73,8 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
   if (!trimmed) {
     return {
       passed: false,
-      warnings: ["Report is empty."]
+      warnings: ["Report is empty."],
+      score: 0
     };
   }
 
@@ -109,8 +112,16 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
 
   return {
     passed: warnings.length === 0,
-    warnings
+    warnings,
+    score: qualityScore(markdown, warnings)
   };
+}
+
+function qualityScore(markdown: string, warnings: string[]): number {
+  const evidenceBonus = Math.min(15, countPathEvidence(markdown));
+  const lengthBonus = Math.min(10, Math.floor(markdown.trim().length / 2000));
+  const penalty = warnings.length * 12;
+  return Math.max(0, Math.min(100, 75 + evidenceBonus + lengthBonus - penalty));
 }
 
 function collectHeadingText(markdown: string): string[] {
@@ -197,15 +208,28 @@ function validateRiskFindings(markdown: string): string[] {
 
 function validateRoadmapDepth(markdown: string): string[] {
   const warnings: string[] = [];
-  const proposalCount = countRoadmapProposals(markdown);
+  const structured = extractStructuredPhaseReport(markdown, "feature-roadmap", "quality-gate");
+  const proposalCount = structured.proposals?.length ?? countRoadmapProposals(markdown);
   if (proposalCount < MIN_ROADMAP_PROPOSALS) {
     warnings.push(`Roadmap contains ${proposalCount} proposal(s); expected at least ${MIN_ROADMAP_PROPOSALS}.`);
   }
 
-  const lower = markdown.toLowerCase();
-  for (const field of ROADMAP_PROPOSAL_FIELDS) {
-    if (!lower.includes(field)) {
-      warnings.push(`Roadmap proposals are missing required field signal: ${field}.`);
+  if (structured.proposals?.length) {
+    structured.proposals.forEach((proposal, index) => {
+      for (const field of ROADMAP_PROPOSAL_FIELDS) {
+        const value = proposal[field as keyof typeof proposal];
+        const present = Array.isArray(value) ? value.length > 0 : Boolean(String(value ?? "").trim());
+        if (!present) {
+          warnings.push(`Roadmap proposal ${index + 1} is missing required field: ${field}.`);
+        }
+      }
+    });
+  } else {
+    const lower = markdown.toLowerCase();
+    for (const field of ROADMAP_PROPOSAL_FIELDS) {
+      if (!lower.includes(field)) {
+        warnings.push(`Roadmap proposals are missing required field signal: ${field}.`);
+      }
     }
   }
 

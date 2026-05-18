@@ -7,12 +7,16 @@ import { runCompareCommand } from "./compare.js";
 import { CliUsageError, RepoVistaError } from "./errors.js";
 import {
   runNextFindingCommand,
+  runCreateIssueCommand,
+  runListFindingsCommand,
+  runProviderRevalidateFindingCommand,
   runRevalidateFindingCommand,
   runShowFindingCommand,
   runTriageFindingCommand
 } from "./finding-state.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
+import { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
 import { applySettingsToDefaults, loadSettings } from "./settings-config.js";
 
@@ -33,6 +37,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     if (parsed.action === "settings") {
       await runSettingsMenu();
+      return 0;
+    }
+    if (parsed.action === "settings-get") {
+      process.stdout.write(await runSettingsGetCommand(parsed.options));
+      return 0;
+    }
+    if (parsed.action === "settings-set") {
+      process.stdout.write(await runSettingsSetCommand(parsed.options));
+      return 0;
+    }
+    if (parsed.action === "settings-reset") {
+      process.stdout.write(await runSettingsResetCommand(parsed.options));
       return 0;
     }
 
@@ -57,6 +73,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runNextFindingCommand(optionsWithSettings.options));
       return 0;
     }
+    if (optionsWithSettings.action === "findings") {
+      process.stdout.write(await runListFindingsCommand(optionsWithSettings.options));
+      return 0;
+    }
     if (optionsWithSettings.action === "show") {
       process.stdout.write(await runShowFindingCommand(optionsWithSettings.options));
       return 0;
@@ -66,7 +86,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return 0;
     }
     if (optionsWithSettings.action === "revalidate") {
-      process.stdout.write(await runRevalidateFindingCommand(optionsWithSettings.options));
+      process.stdout.write(optionsWithSettings.options.providerRevalidate
+        ? await runProviderRevalidateFindingCommand(optionsWithSettings.options, { projectRoot: process.cwd() })
+        : await runRevalidateFindingCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "issue") {
+      process.stdout.write(await runCreateIssueCommand(optionsWithSettings.options));
       return 0;
     }
     const result = await runAudit(optionsWithSettings.options, { version });

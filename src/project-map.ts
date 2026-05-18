@@ -1,12 +1,11 @@
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
+import { scanProject, type ProjectScanResult } from "./project-scan.js";
 import { validateReportRoot } from "./reports.js";
 import { buildSemanticFeatures } from "./semantic-features.js";
 import {
   buildProjectAreas,
   createWorkShards,
-  languageForPath,
   recommendParallelism,
   resolveParallelism
 } from "./work-partitioner.js";
@@ -32,9 +31,16 @@ export async function createProjectMap(
   projectRoot: string,
   options: AuditOptions,
   now = new Date(),
-  since?: DiffScope
+  since?: DiffScope,
+  scan?: ProjectScanResult
 ): Promise<ProjectMap> {
-  const files = await scanProjectFiles(projectRoot, options);
+  const projectScan = scan ?? await scanProject(projectRoot, {
+    outDir: options.outDir,
+    includes: options.includes,
+    ignores: options.ignores,
+    maxFiles: MAX_PROJECT_MAP_FILES
+  });
+  const files = projectScan.files;
   const packageJson = await readPackageJson(projectRoot);
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const languages = countLanguages(files);
@@ -44,6 +50,9 @@ export async function createProjectMap(
   const warnings: string[] = [];
   if (files.length >= MAX_PROJECT_MAP_FILES) {
     warnings.push(`Project map was capped at ${MAX_PROJECT_MAP_FILES} files.`);
+  }
+  if (projectScan.truncated) {
+    warnings.push(`Project scan was truncated after ${projectScan.maxFiles} files.`);
   }
   if (recommendedParallelism > 1) {
     warnings.push(`RepoVista recommends ${recommendedParallelism} parallel threads for this repository shape.`);
@@ -159,60 +168,6 @@ export function projectMapPath(projectRoot: string, outDir: string): string {
 
 async function writeProjectMap(mapPath: string, map: ProjectMap): Promise<void> {
   await writeFile(mapPath, `${JSON.stringify(map, null, 2)}\n`, "utf8");
-}
-
-async function scanProjectFiles(projectRoot: string, options: AuditOptions): Promise<ProjectFileSummary[]> {
-  const matcher = createIgnoreMatcher({
-    projectRoot,
-    outDir: options.outDir,
-    includePatterns: options.includes,
-    ignorePatterns: options.ignores
-  });
-  const files: ProjectFileSummary[] = [];
-  await walk(projectRoot, "", matcher.shouldIgnore, files);
-  return files;
-}
-
-async function walk(
-  projectRoot: string,
-  relativeDirectory: string,
-  shouldIgnore: (relativePath: string, isDirectory: boolean) => boolean,
-  files: ProjectFileSummary[]
-): Promise<void> {
-  if (files.length >= MAX_PROJECT_MAP_FILES) {
-    return;
-  }
-  const absoluteDirectory = path.join(projectRoot, relativeDirectory);
-  let entries = await readdir(absoluteDirectory, { withFileTypes: true });
-  entries = entries.sort((left, right) => left.name.localeCompare(right.name));
-
-  for (const entry of entries) {
-    const relativePath = normalizeRelative(path.join(relativeDirectory, entry.name));
-    if (shouldIgnore(relativePath, entry.isDirectory())) {
-      continue;
-    }
-    const absolutePath = path.join(projectRoot, relativePath);
-    const stats = await lstat(absolutePath);
-    if (stats.isSymbolicLink()) {
-      continue;
-    }
-    if (stats.isDirectory()) {
-      await walk(projectRoot, relativePath, shouldIgnore, files);
-      continue;
-    }
-    if (!stats.isFile()) {
-      continue;
-    }
-    files.push({
-      relativePath,
-      extension: path.extname(relativePath).toLowerCase(),
-      size: stats.size,
-      language: languageForPath(relativePath)
-    });
-    if (files.length >= MAX_PROJECT_MAP_FILES) {
-      return;
-    }
-  }
 }
 
 async function readPackageJson(projectRoot: string): Promise<Record<string, unknown> | undefined> {

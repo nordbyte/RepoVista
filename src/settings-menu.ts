@@ -24,8 +24,8 @@ interface MenuState {
 
 type MainItem =
   | { id: "provider" | "parallel" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
-  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
-  | { id: "profile" | "outDir" | "includes" | "ignores" | "checkCommands"; type: "text"; label: (settings: RepoVistaSettings) => string }
+  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
+  | { id: "profile" | "outDir" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
 const LANGUAGE_OPTIONS = ["English", "German", "Spanish", "French", "Italian", "Portuguese"];
@@ -44,10 +44,10 @@ export async function runSettingsMenu(
 
   const settingsPath = getSettingsPath();
   const settings = await loadSettings(settingsPath);
-  const modelsByProvider = {
-    codex: await loadProviderModels("codex"),
-    claude: await loadProviderModels("claude")
-  };
+  const modelsByProvider = Object.fromEntries(await Promise.all(REPORT_PROVIDER_IDS.map(async (providerId) => [
+    providerId,
+    await loadProviderModels(providerId)
+  ])));
   const state: MenuState = {
     screen: "main",
     cursor: 0,
@@ -140,6 +140,8 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}`,
     `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}`,
     `Strict report gates: ${settings.strictReports ? "on" : "off"}`,
+    `Repair reports: ${settings.repairReports ? "on" : "off"}`,
+    `Export formats: ${formatArray(settings.exportFormats)}`,
     `JSON: ${settings.json ? "on" : "off"}`,
     `Keep logs: ${settings.keepLogs ? "on" : "off"}`,
     `Progress output: ${settings.progress === false ? "reduced" : "on"}`,
@@ -205,6 +207,7 @@ function activateCurrentItem(state: MenuState): void {
     case "ci":
     case "failOnCritical":
     case "strictReports":
+    case "repairReports":
       toggleBoolean(state, item.id);
       break;
     case "profile":
@@ -212,6 +215,7 @@ function activateCurrentItem(state: MenuState): void {
     case "includes":
     case "ignores":
     case "checkCommands":
+    case "exportFormats":
       break;
     case "save":
       state.done = true;
@@ -377,6 +381,8 @@ async function editTextSetting(
     state.settings.includes = values.length ? values : undefined;
   } else if (id === "ignores") {
     state.settings.ignores = values.length ? values : undefined;
+  } else if (id === "exportFormats") {
+    state.settings.exportFormats = values.filter((value) => value === "sarif" || value === "html" || value === "jsonl" || value === "github") as RepoVistaSettings["exportFormats"];
   } else {
     state.settings.checkCommands = values.length ? values : undefined;
   }
@@ -409,6 +415,9 @@ function textValueForSetting(settings: RepoVistaSettings, id: Extract<MainItem, 
   if (id === "ignores") {
     return (settings.ignores ?? []).join(", ");
   }
+  if (id === "exportFormats") {
+    return (settings.exportFormats ?? []).join(", ");
+  }
   return (settings.checkCommands ?? []).join(", ");
 }
 
@@ -424,6 +433,8 @@ function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
       return "Ignore patterns, comma-separated, empty clears";
     case "checkCommands":
       return "Check commands, comma-separated, empty clears";
+    case "exportFormats":
+      return "Export formats sarif, html, jsonl, github; comma-separated, empty clears";
   }
 }
 
@@ -432,7 +443,7 @@ function selectedProvider(settings: RepoVistaSettings): AiProviderId {
 }
 
 function currentModels(state: MenuState): ProviderModelInfo[] {
-  return state.modelsByProvider[selectedProvider(state.settings)];
+  return state.modelsByProvider[selectedProvider(state.settings)] ?? [];
 }
 
 function splitList(value: string): string[] {
@@ -479,6 +490,8 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "checkTimeout", type: "submenu", label: (settings) => `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}` },
   { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}` },
   { id: "strictReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.strictReports), "Strict report quality gates") },
+  { id: "repairReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.repairReports), "Repair reports that miss quality gates") },
+  { id: "exportFormats", type: "text", label: (settings) => `Export formats: ${formatArray(settings.exportFormats)}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(Boolean(settings.json), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(Boolean(settings.keepLogs), "Keep technical logs") },
   { id: "progress", type: "toggle", label: (settings) => checkbox(settings.progress !== false, "Progress output") },

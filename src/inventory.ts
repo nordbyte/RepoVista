@@ -1,9 +1,9 @@
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { renderEvidenceMarkdown } from "./evidence.js";
-import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
+import { scanProject, type ProjectScanResult } from "./project-scan.js";
 import { maskObject, maskSensitiveText } from "./secrets.js";
-import type { AiProviderId, EvidencePack, SandboxMode } from "./types.js";
+import type { AiProviderId, EvidencePack, ProjectFileSummary, SandboxMode } from "./types.js";
 
 export interface InventoryOptions {
   outDir: string;
@@ -23,6 +23,7 @@ export interface InventoryOptions {
   maxFiles?: number;
   maxTreeEntries?: number;
   evidence?: EvidencePack;
+  scan?: ProjectScanResult;
 }
 
 export interface InventoryResult {
@@ -33,19 +34,6 @@ export interface InventoryResult {
   languages: Record<string, number>;
   frameworks: string[];
   packageManagers: string[];
-}
-
-interface ScannedFile {
-  relativePath: string;
-  extension: string;
-  size: number;
-}
-
-interface ScanState {
-  files: ScannedFile[];
-  directories: Set<string>;
-  omittedFileCount: number;
-  truncated: boolean;
 }
 
 const DEFAULT_MAX_FILES = 5000;
@@ -157,52 +145,45 @@ export async function createProjectInventory(
   const now = options.now ?? new Date();
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxTreeEntries = options.maxTreeEntries ?? DEFAULT_MAX_TREE_ENTRIES;
-  const matcher = createIgnoreMatcher({
-    projectRoot,
+  const scan = options.scan ?? await scanProject(projectRoot, {
     outDir: options.outDir,
-    includePatterns: options.includes,
-    ignorePatterns: options.ignores
+    includes: options.includes,
+    ignores: options.ignores,
+    maxFiles
   });
-
-  const state: ScanState = {
-    files: [],
-    directories: new Set(),
-    omittedFileCount: 0,
-    truncated: false
-  };
-
-  await walkProject(projectRoot, "", matcher.shouldIgnore, state, maxFiles);
-
+  const files = scan.files.slice(0, maxFiles);
+  const omittedFileCount = scan.omittedFileCount + Math.max(0, scan.files.length - files.length);
+  const truncated = scan.truncated || scan.files.length > files.length;
   const packageJson = await readPackageJson(projectRoot);
-  const packageManagers = detectPackageManagers(state.files, packageJson.exists);
-  const languages = detectLanguages(state.files);
+  const packageManagers = detectPackageManagers(files, packageJson.exists);
+  const languages = detectLanguages(files);
   const frameworks = detectFrameworks(packageJson.data);
-  const configFiles = state.files
+  const configFiles = files
     .map((file) => file.relativePath)
     .filter((relativePath) => CONFIG_FILE_NAMES.has(path.basename(relativePath)))
     .sort();
-  const lockfiles = state.files
+  const lockfiles = files
     .map((file) => file.relativePath)
     .filter((relativePath) => LOCKFILES.has(path.basename(relativePath)))
     .sort();
-  const importantDirectories = Array.from(state.directories)
+  const importantDirectories = scan.directories
     .filter((directory) => !directory.includes("/"))
     .sort()
     .slice(0, 40);
 
   const warnings: string[] = [];
-  if (state.truncated) {
+  if (truncated) {
     warnings.push(`Inventory shortened: more than ${maxFiles} relevant files found.`);
   }
-  if (state.files.length > 3000) {
+  if (files.length > 3000) {
     warnings.push("The repository is large. RepoVista shortens the file tree and passes only compact context to the selected provider.");
   }
 
   const markdown = renderInventory({
     projectRoot,
     now,
-    files: state.files,
-    omittedFileCount: state.omittedFileCount,
+    files,
+    omittedFileCount,
     warnings,
     packageJson,
     packageManagers,
@@ -220,66 +201,13 @@ export async function createProjectInventory(
 
   return {
     markdown,
-    fileCount: state.files.length,
-    omittedFileCount: state.omittedFileCount,
+    fileCount: files.length,
+    omittedFileCount,
     warnings,
     languages,
     frameworks,
     packageManagers
   };
-}
-
-async function walkProject(
-  root: string,
-  relativeDirectory: string,
-  shouldIgnore: (relativePath: string, isDirectory: boolean) => boolean,
-  state: ScanState,
-  maxFiles: number
-): Promise<void> {
-  const absoluteDirectory = path.join(root, relativeDirectory);
-  let entries = await readdir(absoluteDirectory, { withFileTypes: true });
-  entries = entries.sort((left, right) => {
-    if (left.isDirectory() !== right.isDirectory()) {
-      return left.isDirectory() ? -1 : 1;
-    }
-    return left.name.localeCompare(right.name);
-  });
-
-  for (const entry of entries) {
-    const relativePath = normalizeRelative(path.join(relativeDirectory, entry.name));
-    if (shouldIgnore(relativePath, entry.isDirectory())) {
-      state.omittedFileCount += entry.isDirectory() ? 0 : 1;
-      continue;
-    }
-
-    const absolutePath = path.join(root, relativePath);
-    const stats = await lstat(absolutePath);
-    if (stats.isSymbolicLink()) {
-      continue;
-    }
-
-    if (stats.isDirectory()) {
-      state.directories.add(relativePath);
-      await walkProject(root, relativePath, shouldIgnore, state, maxFiles);
-      continue;
-    }
-
-    if (!stats.isFile()) {
-      continue;
-    }
-
-    if (state.files.length >= maxFiles) {
-      state.omittedFileCount += 1;
-      state.truncated = true;
-      continue;
-    }
-
-    state.files.push({
-      relativePath,
-      extension: path.extname(relativePath).toLowerCase(),
-      size: stats.size
-    });
-  }
 }
 
 async function readPackageJson(projectRoot: string): Promise<{ exists: boolean; data?: Record<string, unknown>; error?: string }> {
@@ -301,7 +229,7 @@ async function readPackageJson(projectRoot: string): Promise<{ exists: boolean; 
   }
 }
 
-function detectPackageManagers(files: ScannedFile[], hasPackageJson: boolean): string[] {
+function detectPackageManagers(files: ProjectFileSummary[], hasPackageJson: boolean): string[] {
   const managers = new Set<string>();
   if (hasPackageJson) {
     managers.add("npm-compatible package.json");
@@ -315,7 +243,7 @@ function detectPackageManagers(files: ScannedFile[], hasPackageJson: boolean): s
   return Array.from(managers).sort();
 }
 
-function detectLanguages(files: ScannedFile[]): Record<string, number> {
+function detectLanguages(files: ProjectFileSummary[]): Record<string, number> {
   const languages: Record<string, number> = {};
   for (const file of files) {
     const language = LANGUAGE_BY_EXTENSION.get(file.extension);
@@ -356,7 +284,7 @@ function readObject(value: unknown): Record<string, unknown> {
 function renderInventory(input: {
   projectRoot: string;
   now: Date;
-  files: ScannedFile[];
+  files: ProjectFileSummary[];
   omittedFileCount: number;
   warnings: string[];
   packageJson: { exists: boolean; data?: Record<string, unknown>; error?: string };
@@ -489,7 +417,7 @@ function readPackageScripts(packageJson?: Record<string, unknown>): Record<strin
   return result;
 }
 
-function detectProjectHints(files: ScannedFile[], scripts: Record<string, string>): string[] {
+function detectProjectHints(files: ProjectFileSummary[], scripts: Record<string, string>): string[] {
   const hints = new Set<string>();
   for (const name of Object.keys(scripts)) {
     if (/test/i.test(name)) {
@@ -516,7 +444,7 @@ function detectProjectHints(files: ScannedFile[], scripts: Record<string, string
   return Array.from(hints).sort();
 }
 
-function detectSpecialFiles(files: ScannedFile[]): string[] {
+function detectSpecialFiles(files: ProjectFileSummary[]): string[] {
   const paths = files.map((file) => file.relativePath);
   const matches = paths.filter((file) => {
     const lower = file.toLowerCase();
@@ -565,7 +493,7 @@ function escapeTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
-function renderTree(files: ScannedFile[], maxEntries: number): string {
+function renderTree(files: ProjectFileSummary[], maxEntries: number): string {
   const paths = files.map((file) => file.relativePath).sort();
   const visible = paths.slice(0, maxEntries);
   const lines = ["."];

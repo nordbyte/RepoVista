@@ -1,12 +1,17 @@
+import { execFile } from "node:child_process";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { validateFindingEvidence } from "./evidence-validation.js";
+import { writeFindingExports } from "./exporters.js";
+import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
 import type { AuditOptions, FindingStatus, StructuredFinding } from "./types.js";
 
 const FINDING_STATE_VERSION = 1;
 const STATUS_ORDER: FindingStatus[] = ["open", "uncertain", "fixed", "false-positive", "wont-fix"];
+const execFileAsync = promisify(execFile);
 
 export async function writeFindingState(
   projectRoot: string,
@@ -82,36 +87,73 @@ export async function runNextFindingCommand(options: AuditOptions, projectRoot =
   return renderFinding(candidates[0], { concise: true });
 }
 
+export async function runListFindingsCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
+  const findings = await loadStoredFindings(projectRoot, options.outDir);
+  const status = options.findingStatus;
+  const selected = findings
+    .filter((finding) => options.allFindings || !status || (finding.status ?? "open") === status)
+    .sort(compareFindings);
+
+  if (options.exportFormats.length) {
+    const outRoot = await validateReportRoot(projectRoot, options.outDir);
+    const outputs = await writeFindingExports({
+      outRoot,
+      runDir: outRoot,
+      runId: "finding-state"
+    }, selected, options.exportFormats);
+    return `Exported ${selected.length} RepoVista finding(s):\n${renderList(Object.values(outputs).filter(Boolean) as string[])}\n`;
+  }
+
+  if (options.json) {
+    return `${JSON.stringify(selected, null, 2)}\n`;
+  }
+
+  if (!selected.length) {
+    return `No ${status && !options.allFindings ? `${status} ` : ""}RepoVista findings found in ${await findingStateDirectory(projectRoot, options.outDir)}.\n`;
+  }
+
+  return `${selected.map((finding) => [
+    `${finding.id}  ${finding.severity.toUpperCase()}  ${finding.status ?? "open"}  ${finding.title}`,
+    `  paths: ${finding.paths.join(", ") || "n/a"}`
+  ].join("\n")).join("\n")}\n`;
+}
+
 export async function runShowFindingCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
   const finding = await requireFinding(projectRoot, options);
   return renderFinding(finding, { concise: false });
 }
 
 export async function runTriageFindingCommand(options: AuditOptions, projectRoot = process.cwd(), now = new Date()): Promise<string> {
-  const id = requireFindingId(options);
   const status = options.findingStatus;
   if (!status) {
     throw new RepoVistaError("Command triage requires --status <open|fixed|false-positive|wont-fix|uncertain>.");
   }
   const findings = await loadStoredFindings(projectRoot, options.outDir);
-  const index = findings.findIndex((finding) => finding.id === id);
-  if (index < 0) {
-    throw new RepoVistaError(`Finding not found: ${id}`);
-  }
-  findings[index] = {
-    ...findings[index],
-    status,
-    updatedAt: now.toISOString(),
-    history: appendHistory(findings[index].history, {
-      kind: "triage",
+  const ids = options.allFindings ? new Set(findings.map((finding) => finding.id)) : new Set([requireFindingId(options)]);
+  let changed = 0;
+  const updated = findings.map((finding) => {
+    if (!ids.has(finding.id)) {
+      return finding;
+    }
+    changed += 1;
+    return {
+      ...finding,
       status,
-      note: options.note,
-      commands: [],
-      createdAt: now.toISOString()
-    })
-  };
-  await rewriteFindingState(projectRoot, options.outDir, findings);
-  return `Updated ${id} to ${status}.\n`;
+      updatedAt: now.toISOString(),
+      history: appendHistory(finding.history, {
+        kind: "triage",
+        status,
+        note: options.note,
+        commands: [],
+        createdAt: now.toISOString()
+      })
+    };
+  });
+  if (!changed) {
+    throw new RepoVistaError(options.allFindings ? "No findings found." : `Finding not found: ${requireFindingId(options)}`);
+  }
+  await rewriteFindingState(projectRoot, options.outDir, updated);
+  return `Updated ${changed} RepoVista finding(s) to ${status}.\n`;
 }
 
 export async function runRevalidateFindingCommand(options: AuditOptions, projectRoot = process.cwd(), now = new Date()): Promise<string> {
@@ -157,6 +199,99 @@ export async function runRevalidateFindingCommand(options: AuditOptions, project
   return `Revalidated RepoVista findings:\n${rows}\n`;
 }
 
+export async function runProviderRevalidateFindingCommand(
+  options: AuditOptions,
+  dependencies: {
+    projectRoot?: string;
+    now?: Date;
+    runProvider?: typeof runProviderPhase;
+    spawnAdapter?: SpawnAdapter;
+  } = {}
+): Promise<string> {
+  const projectRoot = dependencies.projectRoot ?? process.cwd();
+  const now = dependencies.now ?? new Date();
+  const runProvider = dependencies.runProvider ?? runProviderPhase;
+  const findings = await loadStoredFindings(projectRoot, options.outDir);
+  const selected = options.allFindings
+    ? findings
+    : [findings.find((finding) => finding.id === requireFindingId(options))].filter((finding): finding is StructuredFinding => Boolean(finding));
+  if (!selected.length) {
+    throw new RepoVistaError(options.allFindings ? "No findings found." : `Finding not found: ${requireFindingId(options)}`);
+  }
+
+  const outRoot = await validateReportRoot(projectRoot, options.outDir);
+  const reportsDir = path.join(outRoot, "revalidations");
+  await mkdir(reportsDir, { recursive: true });
+  const selectedIds = new Set(selected.map((finding) => finding.id));
+  const updated: StructuredFinding[] = [];
+  const rows: string[] = [];
+
+  for (const finding of findings) {
+    if (!selectedIds.has(finding.id)) {
+      updated.push(finding);
+      continue;
+    }
+    const reportPath = path.join(reportsDir, `${safeFileName(finding.id)}-${now.toISOString().replace(/[:.]/g, "-")}.md`);
+    const result = await runProvider({
+      provider: options.provider ?? "codex",
+      phaseId: `finding-revalidate-${finding.id}`,
+      phaseTitle: `Finding Revalidation ${finding.id}`,
+      prompt: buildProviderRevalidationPrompt(finding),
+      projectRoot,
+      reportPath,
+      logsDir: options.keepLogs ? path.join(outRoot, "logs") : undefined,
+      model: options.model,
+      profile: options.profile,
+      reasoning: options.reasoning,
+      fastMode: options.fastMode,
+      sandbox: options.sandbox,
+      jsonEvents: options.json,
+      keepLogs: options.keepLogs,
+      timeoutSeconds: options.phaseTimeoutSeconds ?? 1800
+    }, dependencies.spawnAdapter);
+    const providerStatus = result.success
+      ? parseProviderRevalidationStatus(await safeRead(reportPath))
+      : "uncertain";
+    updated.push({
+      ...finding,
+      status: providerStatus,
+      updatedAt: now.toISOString(),
+      history: appendHistory(finding.history, {
+        kind: "provider-revalidate",
+        status: providerStatus,
+        reasoning: result.success ? `Provider revalidation report: ${reportPath}` : result.error,
+        commands: [],
+        createdAt: now.toISOString()
+      })
+    });
+    rows.push(`- ${finding.id}: ${providerStatus}${result.success ? "" : ` (${result.error ?? "provider failed"})`}`);
+  }
+
+  await rewriteFindingState(projectRoot, options.outDir, updated);
+  return `Provider-revalidated RepoVista findings:\n${rows.join("\n")}\n`;
+}
+
+export async function runCreateIssueCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
+  const finding = await requireFinding(projectRoot, options);
+  const title = `[RepoVista] ${finding.severity.toUpperCase()}: ${finding.title}`;
+  const body = renderIssueBody(finding);
+  if (options.dryRun) {
+    return `GitHub issue dry run:\n\nTitle: ${title}\n\n${body}\n`;
+  }
+
+  try {
+    const { stdout } = await execFileAsync("gh", ["issue", "create", "--title", title, "--body", body], {
+      cwd: projectRoot,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim() ? `${stdout.trim()}\n` : `Created GitHub issue for ${finding.id}.\n`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RepoVistaError(`Could not create GitHub issue with gh: ${message}`);
+  }
+}
+
 export async function loadStoredFindings(projectRoot: string, outDir: string): Promise<StructuredFinding[]> {
   const stateDirectory = await findingStateDirectory(projectRoot, outDir);
   try {
@@ -177,6 +312,96 @@ export async function loadStoredFindings(projectRoot: string, outDir: string): P
     return findings.sort(compareFindings);
   } catch {
     return [];
+  }
+}
+
+function buildProviderRevalidationPrompt(finding: StructuredFinding): string {
+  return `You are revalidating one RepoVista finding in the current repository.
+
+Work strictly read-only. Inspect only the current checkout and decide whether the finding is still open, fixed, or uncertain.
+
+Finding:
+${JSON.stringify(finding, null, 2)}
+
+Return a short Markdown explanation and include this fenced JSON block:
+
+\`\`\`json
+{
+  "status": "open | fixed | uncertain",
+  "reasoning": "<brief evidence-based reason>",
+  "evidenceReferences": ["src/example.ts"]
+}
+\`\`\`
+`;
+}
+
+function parseProviderRevalidationStatus(report: string): FindingStatus {
+  for (const block of report.matchAll(/```json\s*([\s\S]*?)```/gi)) {
+    try {
+      const parsed = JSON.parse(block[1]) as { status?: string };
+      const status = normalizeFindingStatus(parsed.status);
+      if (status) {
+        return status;
+      }
+    } catch {
+      // Ignore non-status JSON blocks.
+    }
+  }
+  if (/\bfixed\b/i.test(report) && !/\bnot fixed|unfixed|still open\b/i.test(report)) {
+    return "fixed";
+  }
+  if (/\bopen|still present|still reproducible\b/i.test(report)) {
+    return "open";
+  }
+  return "uncertain";
+}
+
+function normalizeFindingStatus(value: string | undefined): FindingStatus | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (
+    normalized === "open" ||
+    normalized === "fixed" ||
+    normalized === "false-positive" ||
+    normalized === "wont-fix" ||
+    normalized === "uncertain"
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function renderIssueBody(finding: StructuredFinding): string {
+  return `## RepoVista Finding
+
+- ID: ${finding.id}
+- Severity: ${finding.severity}
+- Status: ${finding.status ?? "open"}
+- Category: ${finding.category ?? "n/a"}
+- Confidence: ${finding.confidence ?? "n/a"}
+
+## Affected Paths
+
+${renderList(finding.paths)}
+
+## Evidence
+
+${finding.evidence ?? "n/a"}
+
+## Problem Rationale
+
+${finding.problemRationale ?? "n/a"}
+
+## Recommended Fix
+
+${finding.recommendation ?? "n/a"}
+`;
+}
+
+async function safeRead(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return "";
   }
 }
 

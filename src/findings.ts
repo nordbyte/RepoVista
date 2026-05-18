@@ -122,6 +122,12 @@ function normalizeSchemaFinding(
   if (severity === "unknown") {
     warnings.push(`Finding ${index + 1} has an unknown severity.`);
   }
+  if (!readString(record.status)) {
+    warnings.push(`Finding ${index + 1} is missing lifecycle status.`);
+  }
+  if (!readString(record.signature)) {
+    warnings.push(`Finding ${index + 1} is missing stable signature.`);
+  }
 
   const paths = readPathArray(record.affectedPaths ?? record.paths ?? record.affectedFiles);
   const evidenceDetails = readEvidenceReferences(record.evidenceReferences ?? record.evidenceDetails ?? record.evidencePaths ?? record.references);

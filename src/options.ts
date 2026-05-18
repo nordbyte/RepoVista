@@ -1,6 +1,6 @@
 import { CliUsageError } from "./errors.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, CliParseResult, FindingStatus, ParallelMode, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, CliParseResult, FindingStatus, ParallelMode, ReportExportFormat, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
@@ -19,10 +19,15 @@ export const DEFAULT_OPTIONS: AuditOptions = {
   checkTimeoutSeconds: 300,
   phaseTimeoutSeconds: 1800,
   strictReports: false,
+  repairReports: false,
+  repairAttempts: 1,
+  exportFormats: [],
   ci: false,
   failOnCritical: false,
   progress: true,
-  keepLogs: false
+  keepLogs: false,
+  providerRevalidate: false,
+  dryRun: false
 };
 
 const VALUE_OPTIONS = new Set([
@@ -42,7 +47,10 @@ const VALUE_OPTIONS = new Set([
   "check-timeout",
   "phase-timeout",
   "timeout",
+  "export",
+  "repair-attempts",
   "since",
+  "base",
   "finding",
   "status",
   "note"
@@ -58,10 +66,16 @@ const BOOLEAN_OPTIONS = new Set([
   "no-run-checks",
   "strict-reports",
   "no-strict-reports",
+  "repair-reports",
+  "no-repair-reports",
   "no-progress",
   "no-parallel",
   "keep-logs",
   "all",
+  "provider-revalidate",
+  "dry-run",
+  "pr",
+  "no-pr",
   "version",
   "help"
 ]);
@@ -78,7 +92,10 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
   const options: AuditOptions = {
     ...defaults,
     includes: [...defaults.includes],
-    ignores: [...defaults.ignores]
+    ignores: [...defaults.ignores],
+    phases: [...defaults.phases],
+    checkCommands: [...defaults.checkCommands],
+    exportFormats: [...defaults.exportFormats]
   };
   const positionals: string[] = [];
   let wantsHelp = false;
@@ -155,6 +172,12 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "no-strict-reports":
         options.strictReports = false;
         break;
+      case "repair-reports":
+        options.repairReports = true;
+        break;
+      case "no-repair-reports":
+        options.repairReports = false;
+        break;
       case "no-progress":
         options.progress = false;
         break;
@@ -167,6 +190,19 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "all":
         options.allFindings = true;
         break;
+      case "provider-revalidate":
+        options.providerRevalidate = true;
+        break;
+      case "dry-run":
+        options.dryRun = true;
+        break;
+      case "pr":
+        options.prMode = true;
+        options.since = options.since ?? options.baseRef ?? "origin/main";
+        break;
+      case "no-pr":
+        options.prMode = false;
+        break;
       case "version":
         wantsVersion = true;
         break;
@@ -176,11 +212,12 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     }
   }
 
-  if (positionals.length > 3) {
+  const command = positionals[0] ?? "audit";
+  const maxPositionals = command === "settings" && positionals[1] === "set" ? 4 : 3;
+  if (positionals.length > maxPositionals) {
     throw new CliUsageError(`Too many positional arguments: ${positionals.join(" ")}`);
   }
 
-  const command = positionals[0] ?? "audit";
   if (command === "help") {
     wantsHelp = true;
   } else if (command === "version") {
@@ -206,11 +243,48 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "compare", options };
   }
 
+  if (command === "settings") {
+    const subcommand = positionals[1];
+    if (!subcommand) {
+      return { action: "settings", options };
+    }
+    if (subcommand === "get") {
+      if (positionals.length > 3) {
+        throw new CliUsageError("Command settings get accepts at most one key.");
+      }
+      options.settingsKey = positionals[2];
+      return { action: "settings-get", options };
+    }
+    if (subcommand === "set") {
+      if (positionals.length !== 4) {
+        throw new CliUsageError("Command settings set requires a key and value.");
+      }
+      options.settingsKey = requireNonEmpty("setting", positionals[2]);
+      options.settingsValue = positionals[3];
+      return { action: "settings-set", options };
+    }
+    if (subcommand === "reset") {
+      if (positionals.length > 3) {
+        throw new CliUsageError("Command settings reset accepts at most one key.");
+      }
+      options.settingsKey = positionals[2];
+      return { action: "settings-reset", options };
+    }
+    throw new CliUsageError("Command settings supports get, set, reset, or no subcommand for the interactive menu.");
+  }
+
   if (command === "next") {
     if (positionals.length > 1) {
       throw new CliUsageError("Command next does not take positional arguments.");
     }
     return { action: "next", options };
+  }
+
+  if (command === "findings") {
+    if (positionals.length > 1) {
+      throw new CliUsageError("Command findings does not take positional arguments.");
+    }
+    return { action: "findings", options };
   }
 
   if (command === "show" || command === "triage" || command === "revalidate") {
@@ -223,6 +297,16 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: command, options };
   }
 
+  if (command === "issue") {
+    if (positionals.length > 2) {
+      throw new CliUsageError("Command issue accepts at most one finding id.");
+    }
+    if (positionals[1]) {
+      options.findingId = requireNonEmpty("finding", positionals[1]);
+    }
+    return { action: "issue", options };
+  }
+
   if (positionals.length > 1) {
     throw new CliUsageError(`Too many positional arguments: ${positionals.join(" ")}`);
   }
@@ -233,10 +317,6 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
 
   if (command === "plan") {
     return { action: "plan", options };
-  }
-
-  if (command === "settings") {
-    return { action: "settings", options };
   }
 
   return { action: "audit", options };
@@ -291,8 +371,21 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "timeout":
       options.phaseTimeoutSeconds = parsePositiveMinutes(name, value);
       break;
+    case "export":
+      options.exportFormats.push(...splitPatterns(value).map(validateExportFormat));
+      options.exportFormats = Array.from(new Set(options.exportFormats));
+      break;
+    case "repair-attempts":
+      options.repairAttempts = parsePositiveInteger(name, value, 3);
+      break;
     case "since":
       options.since = requireNonEmpty(name, value);
+      break;
+    case "base":
+      options.baseRef = requireNonEmpty(name, value);
+      if (options.prMode || !options.since) {
+        options.since = options.baseRef;
+      }
       break;
     case "finding":
       options.findingId = requireNonEmpty(name, value);
@@ -311,11 +404,13 @@ function isCommand(value: string): value is CliParseResult["action"] {
     value === "init" ||
     value === "plan" ||
     value === "settings" ||
+    value === "findings" ||
     value === "compare" ||
     value === "next" ||
     value === "show" ||
     value === "triage" ||
-    value === "revalidate";
+    value === "revalidate" ||
+    value === "issue";
 }
 
 export function validateProvider(value: string): AiProviderId {
@@ -372,6 +467,21 @@ function parsePositiveMinutes(optionName: string, value: string): number {
   return Math.round(parsed * 60);
 }
 
+function parsePositiveInteger(optionName: string, value: string, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) {
+    throw new CliUsageError(`Option --${optionName} must be an integer from 1 to ${max}.`);
+  }
+  return parsed;
+}
+
+function validateExportFormat(value: string): ReportExportFormat {
+  if (value === "sarif" || value === "html" || value === "jsonl" || value === "github") {
+    return value;
+  }
+  throw new CliUsageError("Option --export must contain sarif, html, jsonl, or github.");
+}
+
 export function validateSandbox(value: string): SandboxMode {
   if (value === "read-only" || value === "workspace-write") {
     return value;
@@ -409,31 +519,40 @@ Usage:
   repovista init [options]
   repovista plan [options]
   repovista compare <old-run-dir> <new-run-dir>
+  repovista findings [--status <status>] [--all] [--json] [--export <formats>]
   repovista next [--status <status>]
   repovista show <finding-id>
-  repovista triage <finding-id> --status <status> [--note <text>]
-  repovista revalidate <finding-id|--all>
+  repovista triage <finding-id|--all> --status <status> [--note <text>]
+  repovista revalidate <finding-id|--all> [--provider-revalidate]
+  repovista issue <finding-id> [--dry-run]
+  repovista settings get [key]
+  repovista settings set <key> <value>
+  repovista settings reset [key]
 
 Commands:
   audit                 Run a full audit in the current directory
   init                  Initialize or refresh the RepoVista project map
   plan                  Show the recommended parallel execution plan
   compare               Compare two RepoVista run directories
+  findings              List persisted findings, emit JSON, or export them
   next                  Show the next prioritized finding from the persistent finding state
   show                  Show one persisted finding with evidence and lifecycle history
   triage                Update the lifecycle status of one finding
   revalidate            Re-check finding evidence against the current checkout
-  settings              Edit persisted default settings in an interactive menu
+  issue                 Create a GitHub issue for one finding through gh
+  settings              Edit, read, set, or reset persisted default settings
   help                  Show help
   version               Show version
 
 Options:
-  --provider <name>     Report provider: codex or claude (default: codex)
+  --provider <name>     Report provider: codex, claude, or a loaded plugin (default: codex)
   --parallel <mode>     Parallel audit mode: off, auto, or 1-5 threads (default: off)
   --no-parallel         Disable saved parallel default
   --out <dir>           Report output directory (default: .repovista)
   --resume <run-dir>    Resume or complete an existing RepoVista run directory
   --since <git-ref>     Focus the audit on files changed since the given Git ref
+  --pr                  PR mode; default diff base is origin/main unless --base is set
+  --base <git-ref>      Base ref for --pr or diff-focused audits
   --model <name>        Override the provider model
   --profile <name>      Use a Codex configuration profile
   --reasoning <effort>  Override provider reasoning effort
@@ -453,6 +572,9 @@ Options:
   --phase-timeout <min> Alias for --timeout
   --strict-reports      Fail phases when report quality gates warn
   --no-strict-reports   Disable saved strict report default
+  --repair-reports      Ask the provider to repair reports that miss quality gates
+  --repair-attempts <n> Maximum repair attempts per phase, 1-3 (default: 1)
+  --export <formats>    Export findings: sarif, html, jsonl, github
   --ci                  CI mode without progress output
   --fail-on-critical    Exit with code 2 in CI when critical findings are detected
   --no-progress         Reduce progress output
@@ -461,6 +583,8 @@ Options:
   --status <status>     Finding status: open, fixed, false-positive, wont-fix, uncertain
   --note <text>         Triage note stored in finding history
   --all                 Include all finding statuses or revalidate all findings
+  --provider-revalidate Ask the configured provider to revalidate finding status
+  --dry-run             Preview commands or issue content without writing remotely
   --version             Show version
   --help                Show help
 `;

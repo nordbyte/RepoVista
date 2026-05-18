@@ -7,6 +7,11 @@ export interface PromptContext {
   since?: {
     ref: string;
     changedFiles: string[];
+    fileStatuses?: Array<{
+      path: string;
+      status: string;
+      previousPath?: string;
+    }>;
   };
   features?: Array<{
     id: string;
@@ -122,6 +127,8 @@ The report must contain these sections:
 10. Maintainability and Scaling Risks
 11. Recommendations
 12. Open Questions and Uncertainties
+
+${structuredSchemaInstructions("architecture")}
 `;
 }
 
@@ -155,6 +162,8 @@ The report must contain these sections:
 11. Larger Architecture Measures
 
 For relevant weaknesses, name the file or path, evidence, problem, impact, recommendation, priority, confidence, and implementation hint.
+
+${structuredSchemaInstructions("code-quality")}
 `;
 }
 
@@ -207,11 +216,14 @@ Also include a fenced JSON block near the end of the report. This JSON schema is
 \`\`\`json
 {
   "schemaVersion": 1,
+  "phaseId": "risk-and-bug",
   "findings": [
     {
       "title": "<short title>",
       "severity": "critical | high | medium | low",
       "category": "<bug, security, reliability, maintainability, data loss, etc.>",
+      "status": "open",
+      "signature": "<stable human-readable signature such as severity|category|primary-path|title>",
       "affectedPaths": ["src/example.ts"],
       "evidence": "<specific code/config/test/local-check evidence>",
       "evidenceReferences": [
@@ -233,6 +245,8 @@ Also include a fenced JSON block near the end of the report. This JSON schema is
 \`\`\`
 
 If there are no findings, use '"findings": []' and still say explicitly in each severity section that no findings were detected. Mark uncertain findings explicitly as hypotheses.
+
+${structuredSchemaInstructions("risk-and-bug")}
 `;
 }
 
@@ -267,6 +281,8 @@ The report must contain these sections:
 7. Prioritized Roadmap
 
 Return at least 6 concrete roadmap proposals unless the repository is too small to justify that many; if fewer are appropriate, state why. For each proposal, include title, description, evidence/rationale from code or architecture, benefit, effort, risk, affected files or modules, possible implementation steps, priority, and confidence. Avoid generic proposals.
+
+${structuredSchemaInstructions("feature-roadmap")}
 `;
 }
 
@@ -303,7 +319,66 @@ Link the detail reports with these relative Markdown links:
 - [Code Quality Report](02-code-quality-report.md)
 - [Risk, Bug, and Security Report](03-risk-and-bug-report.md)
 - [Feature Roadmap](04-feature-roadmap.md)
+
+${structuredSchemaInstructions("summary")}
 `;
+}
+
+function structuredSchemaInstructions(phaseId: string): string {
+  if (phaseId === "feature-roadmap") {
+    return `Also include a fenced JSON block near the end of the report. This JSON is RepoVista's primary structured roadmap source:
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "phaseId": "feature-roadmap",
+  "executiveSummary": "<short summary>",
+  "keyPoints": ["<important observed point>"],
+  "evidenceReferences": ["src/example.ts"],
+  "recommendations": ["<cross-cutting recommendation>"],
+  "proposals": [
+    {
+      "title": "<proposal title>",
+      "description": "<what to build or improve>",
+      "evidence": ["<specific file/config/report evidence>"],
+      "benefit": "<user or engineering value>",
+      "effort": "small | medium | large",
+      "risk": "<main delivery or product risk>",
+      "affected": ["src/example.ts"],
+      "steps": ["<first implementation step>"],
+      "priority": "P0 | P1 | P2 | P3",
+      "confidence": "high | medium | low"
+    }
+  ]
+}
+\`\`\``;
+  }
+  if (phaseId === "risk-and-bug") {
+    return `Also include this second fenced JSON block for phase-level structure:
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "phaseId": "risk-and-bug",
+  "executiveSummary": "<short summary>",
+  "keyPoints": ["<important risk pattern>"],
+  "evidenceReferences": ["src/example.ts"],
+  "recommendations": ["<highest-value fix>"]
+}
+\`\`\``;
+  }
+  return `Also include a fenced JSON block near the end of the report. This JSON is RepoVista's primary structured phase source:
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "phaseId": "${phaseId}",
+  "executiveSummary": "<short summary>",
+  "keyPoints": ["<important observed point>"],
+  "evidenceReferences": ["src/example.ts"],
+  "recommendations": ["<actionable recommendation>"]
+}
+\`\`\``;
 }
 
 function renderPrevious(context: PromptContext, reportFiles: string[]): string {
@@ -321,8 +396,10 @@ function renderDiffScope(context: PromptContext): string {
   if (!context.since) {
     return "";
   }
-  const changedFiles = context.since.changedFiles.length
-    ? context.since.changedFiles.map((file) => `- ${file}`).join("\n")
+  const changedFiles = context.since.fileStatuses?.length
+    ? context.since.fileStatuses.map((file) => `- ${file.status}: ${file.previousPath ? `${file.previousPath} -> ` : ""}${file.path}`).join("\n")
+    : context.since.changedFiles.length
+      ? context.since.changedFiles.map((file) => `- ${file}`).join("\n")
     : "- No changed files detected.";
   return `Diff scope from RepoVista:
 

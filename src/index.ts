@@ -5,7 +5,10 @@ export { runCompareCommand, renderRunComparison } from "./compare.js";
 export { loadCodexModels, parseCodexModelCatalog, reasoningOptionsForModel } from "./codex-models.js";
 export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
+export { writeFindingExports } from "./exporters.js";
+export { extractStructuredPhaseReport, hasStructuredPhaseSchema } from "./phase-schema.js";
 export { createProjectMap, createParallelExecutionMeta, initializeProjectMap, loadProjectMap, projectMapPath, renderProjectPlan } from "./project-map.js";
+export { scanProject } from "./project-scan.js";
 export { runInitCommand, runPlanCommand } from "./project-commands.js";
 export { getReportProvider, isReportProviderId, REPORT_PROVIDER_IDS, REPORT_PROVIDERS } from "./providers/index.js";
 export { collectEvidence, hasFailedChecks, renderEvidenceMarkdown } from "./evidence.js";
@@ -13,7 +16,10 @@ export { evidenceReferencesForFinding, validateFindingEvidence, validateFindings
 export {
   findingStateDirectory,
   loadStoredFindings,
+  runCreateIssueCommand,
+  runListFindingsCommand,
   runNextFindingCommand,
+  runProviderRevalidateFindingCommand,
   runRevalidateFindingCommand,
   runShowFindingCommand,
   runTriageFindingCommand,
@@ -30,6 +36,7 @@ export { validateReportQuality } from "./quality-gates.js";
 export { createRunId } from "./run-id.js";
 export { isSensitiveKey, maskObject, maskSensitiveText, maskSensitiveValue } from "./secrets.js";
 export { applySettingsToDefaults, loadSettings, saveSettings, sanitizeSettings } from "./settings-config.js";
+export { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 export { summarizeSettings } from "./settings-menu.js";
 export { findingSignature, stableFindingId, stableId } from "./stable-id.js";
 export type {
@@ -47,11 +54,13 @@ export type {
   FindingEvidenceValidation,
   FindingHistoryEntry,
   FindingStatus,
+  DiffFileStatus,
   ParallelExecutionMeta,
   ParallelMode,
   PhaseReportStatus,
   PromptManifest,
   PromptManifestPhase,
+  ReportExportFormat,
   ProjectArea,
   ProjectFileSummary,
   ProjectMap,
@@ -60,6 +69,8 @@ export type {
   RunPaths,
   SandboxMode,
   SemanticFeature,
+  StructuredPhaseReport,
+  StructuredRoadmapProposal,
   StructuredFinding,
   WorkShard
 } from "./types.js";

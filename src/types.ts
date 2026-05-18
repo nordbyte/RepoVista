@@ -1,19 +1,25 @@
 export type SandboxMode = "read-only" | "workspace-write";
 
-export type AiProviderId = "codex" | "claude";
+export type AiProviderId = string;
 
 export type ParallelMode = "off" | "auto" | number;
+export type ReportExportFormat = "sarif" | "html" | "jsonl" | "github";
 
 export type CliAction =
   | "audit"
   | "init"
   | "plan"
   | "settings"
+  | "settings-get"
+  | "settings-set"
+  | "settings-reset"
+  | "findings"
   | "compare"
   | "next"
   | "show"
   | "triage"
   | "revalidate"
+  | "issue"
   | "help"
   | "version";
 
@@ -40,6 +46,9 @@ export interface AuditOptions {
   checkTimeoutSeconds: number;
   phaseTimeoutSeconds: number;
   strictReports: boolean;
+  repairReports: boolean;
+  repairAttempts: number;
+  exportFormats: ReportExportFormat[];
   ci: boolean;
   failOnCritical: boolean;
   progress: boolean;
@@ -47,10 +56,16 @@ export interface AuditOptions {
   compareOldRun?: string;
   compareNewRun?: string;
   since?: string;
+  prMode?: boolean;
+  baseRef?: string;
   findingId?: string;
   findingStatus?: FindingStatus;
   note?: string;
   allFindings?: boolean;
+  providerRevalidate?: boolean;
+  dryRun?: boolean;
+  settingsKey?: string;
+  settingsValue?: string;
 }
 
 export interface CliParseResult {
@@ -74,6 +89,7 @@ export interface PhaseReportStatus {
   error?: string;
   qualityPassed?: boolean;
   qualityWarnings?: string[];
+  qualityScore?: number;
   shards?: PhaseShardStatus[];
 }
 
@@ -165,6 +181,32 @@ export interface StructuredFinding {
   schemaVersion?: number;
 }
 
+export interface StructuredRoadmapProposal {
+  title: string;
+  description: string;
+  evidence: string[];
+  benefit: string;
+  effort: string;
+  risk: string;
+  affected: string[];
+  steps: string[];
+  priority: string;
+  confidence: string;
+}
+
+export interface StructuredPhaseReport {
+  schemaVersion: 1;
+  phaseId: string;
+  source: string;
+  executiveSummary?: string;
+  keyPoints: string[];
+  evidenceReferences: string[];
+  recommendations: string[];
+  proposals?: StructuredRoadmapProposal[];
+  findings?: StructuredFinding[];
+  warnings: string[];
+}
+
 export interface FindingEvidenceReference {
   path: string;
   startLine?: number;
@@ -191,7 +233,7 @@ export interface FindingEvidenceValidationReference {
 
 export interface FindingHistoryEntry {
   runId?: string;
-  kind: "audit" | "triage" | "revalidate";
+  kind: "audit" | "triage" | "revalidate" | "provider-revalidate";
   status?: FindingStatus;
   note?: string;
   reasoning?: string;
@@ -215,6 +257,8 @@ export interface AuditMeta {
     outDir: string;
     resumeDir?: string;
     since?: string;
+    prMode?: boolean;
+    baseRef?: string;
     language: string;
     json: boolean;
     includes: string[];
@@ -225,6 +269,9 @@ export interface AuditMeta {
     checkTimeoutSeconds: number;
     phaseTimeoutSeconds: number;
     strictReports: boolean;
+    repairReports: boolean;
+    repairAttempts?: number;
+    exportFormats: ReportExportFormat[];
     ci: boolean;
     failOnCritical: boolean;
     progress: boolean;
@@ -271,6 +318,11 @@ export interface AuditMeta {
     promptManifestJson?: string;
     findingStateDir?: string;
     featuresJson?: string;
+    findingsSarif?: string;
+    findingsJsonl?: string;
+    htmlReport?: string;
+    githubAnnotationsJson?: string;
+    structuredReportsJson?: string;
   };
   exitCode: number;
 }
@@ -320,6 +372,13 @@ export interface SemanticFeature {
 export interface DiffScope {
   ref: string;
   changedFiles: string[];
+  fileStatuses?: DiffFileStatus[];
+}
+
+export interface DiffFileStatus {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied" | "unknown";
+  previousPath?: string;
 }
 
 export interface PromptManifestFile {
