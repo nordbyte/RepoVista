@@ -26,6 +26,9 @@ interface RawModelCatalog {
   }>;
 }
 
+const CODEX_DEBUG_MODELS_TIMEOUT_MS = 10_000;
+const MAX_CODEX_DEBUG_MODELS_OUTPUT = 2_000_000;
+
 export const FALLBACK_CODEX_MODELS: CodexModelInfo[] = [
   model("gpt-5.5", "GPT-5.5", "medium", true),
   model("gpt-5.4", "gpt-5.4", "medium", true),
@@ -89,22 +92,64 @@ function runCodexDebugModels(): Promise<string> {
     const child = spawn("codex", ["debug", "models"], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+    const timeoutTimer = setTimeout(() => {
+      child.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        if (!settled) {
+          child.kill("SIGKILL");
+        }
+      }, 5000);
+      forceKillTimer.unref();
+      settleReject(new Error("codex debug models timed out after 10 seconds"));
+    }, CODEX_DEBUG_MODELS_TIMEOUT_MS);
+    timeoutTimer.unref();
 
     child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
+      stdout = appendBounded(stdout, chunk.toString("utf8"));
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+      stderr = appendBounded(stderr, chunk.toString("utf8"));
     });
-    child.on("error", reject);
+    child.on("error", settleReject);
     child.on("close", (code) => {
       if (code === 0) {
-        resolve(stdout);
+        settleResolve(stdout);
       } else {
-        reject(new Error(stderr.trim() || `codex debug models exited with code ${code ?? "unknown"}`));
+        settleReject(new Error(stderr.trim() || `codex debug models exited with code ${code ?? "unknown"}`));
       }
     });
+
+    function settleResolve(value: string): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      resolve(value);
+    }
+
+    function settleReject(error: Error): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      reject(error);
+    }
   });
+}
+
+function appendBounded(current: string, addition: string): string {
+  const next = current + addition;
+  return next.length <= MAX_CODEX_DEBUG_MODELS_OUTPUT ? next : next.slice(next.length - MAX_CODEX_DEBUG_MODELS_OUTPUT);
 }
 
 function model(slug: string, displayName: string, defaultReasoning: string, supportsFastMode: boolean): CodexModelInfo {

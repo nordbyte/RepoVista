@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
 import { getReportProvider } from "./providers/index.js";
+import { maskSensitiveText } from "./secrets.js";
 import type { ProviderRunRequest, ProviderRunResult } from "./types.js";
 
 export type SpawnAdapter = (
@@ -99,9 +100,9 @@ export async function runProviderPhase(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      void writeProviderFailureReport(request, `Could not start ${provider.displayName}: ${message}`, undefined, undefined).then(() => {
-        void finish({ success: false, error: message });
-      });
+      void writeProviderFailureReport(request, `Could not start ${provider.displayName}: ${message}`, undefined, undefined)
+        .then(() => finish({ success: false, error: maskSensitiveText(message) }))
+        .catch(() => finish({ success: false, error: maskSensitiveText(message) }));
       return;
     }
 
@@ -113,8 +114,8 @@ export async function runProviderPhase(
     }
 
     child.stdout.on("data", (chunk: Buffer) => {
-      stdoutLog?.write(chunk);
       const text = chunk.toString("utf8");
+      stdoutLog?.write(maskSensitiveText(text));
       if (provider.outputMode === "stdout") {
         stdoutOutput += text;
       }
@@ -122,15 +123,16 @@ export async function runProviderPhase(
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      stderrLog?.write(chunk);
-      stderrText = appendBounded(stderrText, chunk.toString("utf8"));
+      const text = chunk.toString("utf8");
+      stderrLog?.write(maskSensitiveText(text));
+      stderrText = appendBounded(stderrText, text);
     });
 
     child.on("error", (error) => {
       const message = error.message;
-      void writeProviderFailureReport(request, `Could not start ${provider.displayName}: ${message}`, stdoutText, stderrText).then(() => {
-        void finish({ success: false, error: message });
-      });
+      void writeProviderFailureReport(request, `Could not start ${provider.displayName}: ${message}`, stdoutText, stderrText)
+        .then(() => finish({ success: false, error: maskSensitiveText(message) }))
+        .catch(() => finish({ success: false, error: maskSensitiveText(message) }));
     });
 
     child.on("close", (code, signal) => {
@@ -199,8 +201,9 @@ async function writeProviderFailureReport(
   stderrText: string | undefined
 ): Promise<void> {
   const provider = getReportProvider(request.provider);
-  const stdout = stdoutText?.trim();
-  const stderr = stderrText?.trim();
+  const maskedMessage = maskSensitiveText(message);
+  const stdout = stdoutText ? maskSensitiveText(stdoutText).trim() : undefined;
+  const stderr = stderrText ? maskSensitiveText(stderrText).trim() : undefined;
   const body = `# ${request.phaseTitle}
 
 ## Status
@@ -209,7 +212,7 @@ Failed.
 
 ## Error
 
-${message}
+${maskedMessage}
 
 ## Notes
 

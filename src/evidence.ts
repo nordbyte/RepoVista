@@ -128,7 +128,9 @@ ${renderGitStatus(evidence)}
 | Available | ${evidence.aiProvider.available ? "yes" : "no"} |
 | Version | ${escapeTableCell(evidence.aiProvider.version ?? "not detected")} |
 ${evidence.aiProvider.error ? `\nProvider error: \`${escapeInline(evidence.aiProvider.error)}\`\n` : ""}
-### Local Checks
+### Local Checks (RepoVista Evidence Pack)
+
+These checks were executed by RepoVista before provider analysis when enabled. Provider-side read-only analysis may rely on these results without rerunning them.
 
 ${renderChecks(evidence)}
 `;

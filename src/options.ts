@@ -168,7 +168,7 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     }
   }
 
-  if (positionals.length > 1) {
+  if (positionals.length > 3) {
     throw new CliUsageError(`Too many positional arguments: ${positionals.join(" ")}`);
   }
 
@@ -177,7 +177,7 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     wantsHelp = true;
   } else if (command === "version") {
     wantsVersion = true;
-  } else if (command !== "audit" && command !== "init" && command !== "plan" && command !== "settings") {
+  } else if (command !== "audit" && command !== "init" && command !== "plan" && command !== "settings" && command !== "compare") {
     throw new CliUsageError(`Unknown command: ${command}`);
   }
 
@@ -187,6 +187,19 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
 
   if (wantsHelp) {
     return { action: "help", options };
+  }
+
+  if (command === "compare") {
+    if (positionals.length !== 3) {
+      throw new CliUsageError("Command compare requires two run directories: repovista compare <old> <new>.");
+    }
+    options.compareOldRun = requireNonEmpty("old", positionals[1]);
+    options.compareNewRun = requireNonEmpty("new", positionals[2]);
+    return { action: "compare", options };
+  }
+
+  if (positionals.length > 1) {
+    throw new CliUsageError(`Too many positional arguments: ${positionals.join(" ")}`);
   }
 
   if (command === "init") {
@@ -332,11 +345,13 @@ Usage:
   repovista audit [options]
   repovista init [options]
   repovista plan [options]
+  repovista compare <old-run-dir> <new-run-dir>
 
 Commands:
   audit                 Run a full audit in the current directory
   init                  Initialize or refresh the RepoVista project map
   plan                  Show the recommended parallel execution plan
+  compare               Compare two RepoVista run directories
   settings              Edit persisted default settings in an interactive menu
   help                  Show help
   version               Show version

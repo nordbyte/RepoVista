@@ -241,6 +241,30 @@ test("parallel resume reuses completed shard reports before synthesis", async ()
     await writeFile(path.join(resumeDir, "00-inventory.md"), "# Inventory\n\nExisting run.\n", "utf8");
     await writeFile(path.join(resumeDir, "shards", "architecture", "thread-1.md"), "# Thread 1\n\nExisting shard.\n", "utf8");
     await writeFile(path.join(resumeDir, "shards", "architecture", "thread-2.md"), "# Thread 2\n\nExisting shard.\n", "utf8");
+    await writeFile(path.join(resumeDir, "meta.json"), JSON.stringify({
+      phases: [
+        {
+          id: "architecture",
+          title: "Architecture Analysis",
+          reportFile: "01-architecture-report.md",
+          status: "pending",
+          shards: [
+            {
+              id: "thread-1",
+              title: "Thread 1",
+              reportFile: "shards/architecture/thread-1.md",
+              status: "success"
+            },
+            {
+              id: "thread-2",
+              title: "Thread 2",
+              reportFile: "shards/architecture/thread-2.md",
+              status: "success"
+            }
+          ]
+        }
+      ]
+    }), "utf8");
 
     const seen = [];
     const result = await runAudit({
@@ -434,7 +458,7 @@ test("resume preserves completed phase reports without rerunning Codex", async (
       ...dependencies,
       runCodex: async (request) => {
         runCount += 1;
-        await writeFile(request.reportPath, `# ${request.phaseTitle}\n\nReport for ${request.phaseId} references src/index.ts.\n`, "utf8");
+        await writeFile(request.reportPath, completeMockReport(request.phaseId, request.phaseTitle), "utf8");
         return {
           phaseId: request.phaseId,
           success: true,
@@ -459,3 +483,221 @@ test("resume preserves completed phase reports without rerunning Codex", async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("resume reruns failed or unusable reports even when files exist", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-resume-failed-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    const resumeDir = path.join(root, ".repovista", "failed-run");
+    await mkdir(resumeDir, { recursive: true });
+    await writeFile(path.join(resumeDir, "00-inventory.md"), "# Inventory\n", "utf8");
+    await writeFile(path.join(resumeDir, "01-architecture-report.md"), "# Architecture Analysis\n\n## Status\n\nFailed.\n", "utf8");
+    await writeFile(path.join(resumeDir, "meta.json"), JSON.stringify({
+      phases: [
+        {
+          id: "architecture",
+          title: "Architecture Analysis",
+          reportFile: "01-architecture-report.md",
+          status: "failed"
+        }
+      ]
+    }), "utf8");
+
+    let runCount = 0;
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      outDir: ".repovista",
+      resumeDir,
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runCodex: async (request) => {
+        runCount += 1;
+        await writeFile(request.reportPath, completeMockReport(request.phaseId, request.phaseTitle), "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(runCount, 1);
+    assert.equal(result.meta.phases.find((phase) => phase.id === "architecture").status, "success");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+function completeMockReport(phaseId, phaseTitle) {
+  if (phaseId === "summary") {
+    return `# ${phaseTitle}
+
+## Short Conclusion
+
+The fixture is stable.
+
+## What the Project Does
+
+It demonstrates RepoVista tests.
+
+## Top Strengths
+
+- Small scope.
+
+## Top Weaknesses
+
+- Limited fixture depth.
+
+## Recommended Order of Next Steps
+
+- Keep tests current.
+`;
+  }
+
+  if (phaseId === "risk-and-bug") {
+    return `# ${phaseTitle}
+
+## Executive Summary
+
+No concrete risk was found across src/index.ts, package.json and test/index.test.ts.
+
+## Critical Findings
+
+No critical findings.
+
+## High Findings
+
+No high findings.
+
+## Medium Findings
+
+No medium findings.
+
+## Low Findings
+
+No low findings.
+
+## Recommended Next Steps
+
+- Keep validation around src/index.ts, package.json and tsconfig.json.
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": []
+}
+\`\`\`
+`;
+  }
+
+  if (phaseId === "feature-roadmap") {
+    return `# ${phaseTitle}
+
+## Executive Summary
+
+Roadmap references src/index.ts, package.json, README.md, test/index.test.ts and tsconfig.json.
+
+## Useful Improvements to Existing Features
+
+| Title | Description | Evidence | Benefit | Effort | Risk | Affected | Steps | Priority | Confidence |
+|---|---|---|---|---|---|---|---|---|---|
+| Improve CLI validation | Validate more inputs | src/index.ts | Better errors | small | low | src/index.ts | Add tests | P1 | high |
+| Improve package scripts | Expand scripts | package.json | Better DX | small | low | package.json | Add script | P2 | high |
+| Improve docs | Add examples | README.md | Better onboarding | small | low | README.md | Add docs | P2 | high |
+
+## Useful New Features
+
+| Title | Description | Evidence | Benefit | Effort | Risk | Affected | Steps | Priority | Confidence |
+|---|---|---|---|---|---|---|---|---|---|
+| Add fixtures | More fixtures | test/index.test.ts | Better coverage | medium | low | test/index.test.ts | Add fixture | P2 | medium |
+| Add config hints | Document config | tsconfig.json | Better setup | small | low | tsconfig.json | Add hint | P3 | medium |
+| Add source map | Map source | src/index.ts | Better analysis | medium | medium | src/index.ts | Implement map | P3 | medium |
+
+## Prioritized Roadmap
+
+- P1: Improve CLI validation.
+`;
+  }
+
+  if (phaseId === "code-quality") {
+    return `# ${phaseTitle}
+
+## Executive Summary
+
+The fixture references src/index.ts, package.json, README.md, test/index.test.ts and tsconfig.json.
+
+## Biggest Strengths
+
+- Clear source in src/index.ts.
+
+## Biggest Weaknesses
+
+- Small fixture in test/index.test.ts.
+
+## Test Coverage and Test Strategy
+
+Coverage is represented by test/index.test.ts.
+
+## Prioritized Recommendations
+
+- Keep package.json scripts current.
+`;
+  }
+
+  return `# ${phaseTitle}
+
+## Executive Summary
+
+Architecture references src/index.ts, package.json, README.md, test/index.test.ts and tsconfig.json.
+
+## Project Purpose
+
+Test RepoVista behavior.
+
+## Tech Stack
+
+Node.js and TypeScript via package.json and tsconfig.json.
+
+## Module and Component Overview
+
+The source module is src/index.ts and tests live in test/index.test.ts.
+
+## Data Flow and Control Flow
+
+The fixture has a simple flow from src/index.ts to test/index.test.ts.
+
+## Recommendations
+
+- Keep README.md aligned with package.json.
+`;
+}

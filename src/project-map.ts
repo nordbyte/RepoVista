@@ -1,6 +1,7 @@
 import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
+import { validateReportRoot } from "./reports.js";
 import {
   buildProjectAreas,
   createWorkShards,
@@ -19,7 +20,8 @@ export async function initializeProjectMap(
   now = new Date()
 ): Promise<{ map: ProjectMap; mapPath: string }> {
   const map = await createProjectMap(projectRoot, options, now);
-  const mapPath = projectMapPath(projectRoot, options.outDir);
+  const outRoot = await validateReportRoot(projectRoot, options.outDir);
+  const mapPath = path.join(outRoot, "project-map.json");
   await mkdir(path.dirname(mapPath), { recursive: true });
   await writeProjectMap(mapPath, map);
   return { map, mapPath };
@@ -63,7 +65,8 @@ export async function createProjectMap(
 }
 
 export async function loadProjectMap(projectRoot: string, outDir: string): Promise<{ map: ProjectMap; mapPath: string } | undefined> {
-  const mapPath = projectMapPath(projectRoot, outDir);
+  const outRoot = await validateReportRoot(projectRoot, outDir);
+  const mapPath = path.join(outRoot, "project-map.json");
   try {
     const raw = await readFile(mapPath, "utf8");
     const parsed = JSON.parse(raw) as ProjectMap;

@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   collectEvidence,
   extractFindings,
+  extractFindingsWithSource,
   hasFailedChecks,
   renderEvidenceMarkdown,
   validateReportQuality
@@ -137,6 +138,91 @@ One high issue is listed below.
   assert.deepEqual(findings[0].paths, [".github/workflows/security.yml", "src/audit.ts", "src/reports.ts"]);
 });
 
+test("finding extractor uses schema findings before markdown fallback", () => {
+  const extraction = extractFindingsWithSource(`# Risk
+
+## Critical Findings
+
+- Title: Markdown-only title
+- Severity: Critical
+- Affected paths: src/legacy.ts
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Schema title",
+      "severity": "high",
+      "category": "security",
+      "affectedPaths": ["src/schema.ts"],
+      "evidence": "src/schema.ts validates the report schema",
+      "evidenceReferences": ["src/schema.ts"],
+      "problemRationale": "The schema is the source of truth.",
+      "recommendedFix": "Keep the schema valid.",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
+`);
+
+  assert.equal(extraction.source, "schema");
+  assert.equal(extraction.findings.length, 1);
+  assert.equal(extraction.findings[0].title, "Schema title");
+  assert.equal(extraction.findings[0].severity, "high");
+  assert.deepEqual(extraction.findings[0].paths, ["src/schema.ts"]);
+
+  const quality = validateReportQuality("risk-and-bug", `# Risk
+
+## Executive Summary
+
+One issue.
+
+## Critical Findings
+
+No critical findings.
+
+## High Findings
+
+One high finding.
+
+## Medium Findings
+
+No medium findings.
+
+## Low Findings
+
+No low findings.
+
+## Recommended Next Steps
+
+Fix src/schema.ts, src/index.ts and test/schema.test.ts.
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Schema title",
+      "severity": "high",
+      "category": "security",
+      "affectedPaths": ["src/schema.ts"],
+      "evidence": "src/schema.ts and test/schema.test.ts cover schema extraction",
+      "evidenceReferences": ["src/schema.ts", "test/schema.test.ts"],
+      "problemRationale": "The parser depends on valid structured fields.",
+      "recommendedFix": "Keep schema validation in place.",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
+`);
+  assert.equal(quality.passed, true);
+});
+
 test("audit writes structured findings and summary json", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-structured-"));
   try {
@@ -205,6 +291,26 @@ No low findings.
 ## Recommended Next Steps
 
 - Add tests.
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Unsafe file handling",
+      "severity": "critical",
+      "category": "reliability",
+      "affectedPaths": ["src/index.ts"],
+      "evidence": "src/index.ts is the entry point in this fixture",
+      "evidenceReferences": ["src/index.ts"],
+      "problemRationale": "The entry point lacks the expected validation in this fixture.",
+      "recommendedFix": "add validation",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
 `
           : `# ${request.phaseTitle}
 

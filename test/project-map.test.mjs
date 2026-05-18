@@ -38,3 +38,22 @@ test("project initialization writes a map with thread recommendations", async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("project initialization rejects unsafe output directories", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-project-map-paths-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+
+    await assert.rejects(
+      () => initializeProjectMap(root, { ...DEFAULT_OPTIONS, outDir: "src/reports" }, new Date("2026-05-18T14:57:32.123Z")),
+      /protected project path/i
+    );
+    await assert.rejects(
+      () => initializeProjectMap(root, { ...DEFAULT_OPTIONS, outDir: "../reports" }, new Date("2026-05-18T14:57:32.123Z")),
+      /inside the project root/i
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

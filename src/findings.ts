@@ -1,15 +1,70 @@
 import type { StructuredFinding } from "./types.js";
 
+export interface FindingExtractionResult {
+  findings: StructuredFinding[];
+  source: "schema" | "markdown";
+  schemaFound: boolean;
+  warnings: string[];
+}
+
 const SEVERITY_PATTERN = /\bseverity\s*:\s*(critical|high|medium|low)\b/i;
 const CATEGORY_PATTERN = /\bcategory\s*:\s*([^\n]+)/i;
 const CONFIDENCE_PATTERN = /\bconfidence\s*:\s*([^\n]+)/i;
 const EVIDENCE_PATTERN = /\bevidence\s*:\s*([^\n]+)/i;
 const RECOMMENDATION_PATTERN = /\b(?:recommended fix|recommendation|concrete fix proposal)\s*:\s*([^\n]+)/i;
+const PROBLEM_RATIONALE_PATTERN = /\bproblem rationale\s*:\s*([^\n]+)/i;
+const ESTIMATED_EFFORT_PATTERN = /\bestimated effort\s*:\s*([^\n]+)/i;
 const PATH_FIELD_PATTERN = /\b(?:file|path|affected paths?|affected files?)\s*:\s*([^\n]+)/i;
 const PATH_TOKEN_PATTERN = /`([^`]+)`|(?:^|[\s([:,])((?:\.?\/)?(?:(?:src|test|tests|lib|app|scripts|docs|\.github)\/[\w./-]+|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)))(?=$|[\s)\],.;:])/g;
 const PATH_ROOTS = new Set(["src", "test", "tests", "lib", "app", "scripts", "docs", ".github"]);
 
 export function extractFindings(report: string, source = "03-risk-and-bug-report.md"): StructuredFinding[] {
+  return extractFindingsWithSource(report, source).findings;
+}
+
+export function extractFindingsWithSource(report: string, source = "03-risk-and-bug-report.md"): FindingExtractionResult {
+  const schema = extractSchemaFindings(report, source);
+  if (schema.schemaFound) {
+    return schema;
+  }
+
+  return {
+    findings: extractMarkdownFindings(report, source),
+    source: "markdown",
+    schemaFound: false,
+    warnings: []
+  };
+}
+
+export function extractSchemaFindings(report: string, source = "03-risk-and-bug-report.md"): FindingExtractionResult {
+  const warnings: string[] = [];
+  for (const block of jsonBlocks(report)) {
+    const parsed = parseJsonObject(block);
+    if (!parsed || !Array.isArray(parsed.findings)) {
+      continue;
+    }
+
+    const schemaVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : undefined;
+    const findings = parsed.findings
+      .map((item, index) => normalizeSchemaFinding(item, index, source, schemaVersion, warnings))
+      .filter((item): item is StructuredFinding => Boolean(item));
+    return {
+      findings,
+      source: "schema",
+      schemaFound: true,
+      warnings
+    };
+  }
+
+  return {
+    findings: [],
+    source: "markdown",
+    schemaFound: false,
+    warnings
+  };
+}
+
+function extractMarkdownFindings(report: string, source: string): StructuredFinding[] {
   const blocks = splitFindingBlocks(report);
   const findings: StructuredFinding[] = [];
 
@@ -28,12 +83,113 @@ export function extractFindings(report: string, source = "03-risk-and-bug-report
       category: cleanField(CATEGORY_PATTERN.exec(block)?.[1]),
       paths: extractPaths(block),
       evidence: cleanField(EVIDENCE_PATTERN.exec(block)?.[1]),
+      evidenceReferences: extractPaths(cleanField(EVIDENCE_PATTERN.exec(block)?.[1]) ?? ""),
       recommendation: cleanField(RECOMMENDATION_PATTERN.exec(block)?.[1]),
+      problemRationale: cleanField(PROBLEM_RATIONALE_PATTERN.exec(block)?.[1]),
+      estimatedEffort: cleanField(ESTIMATED_EFFORT_PATTERN.exec(block)?.[1]),
       confidence: cleanField(CONFIDENCE_PATTERN.exec(block)?.[1])
     });
   }
 
   return findings;
+}
+
+function normalizeSchemaFinding(
+  item: unknown,
+  index: number,
+  source: string,
+  schemaVersion: number | undefined,
+  warnings: string[]
+): StructuredFinding | undefined {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    warnings.push(`Finding ${index + 1} is not an object.`);
+    return undefined;
+  }
+
+  const record = item as Record<string, unknown>;
+  const title = readString(record.title);
+  const severity = normalizeSeverity(readString(record.severity));
+  if (!title) {
+    warnings.push(`Finding ${index + 1} is missing title.`);
+  }
+  if (severity === "unknown") {
+    warnings.push(`Finding ${index + 1} has an unknown severity.`);
+  }
+
+  const paths = readPathArray(record.affectedPaths ?? record.paths ?? record.affectedFiles);
+  const evidenceReferences = readPathArray(record.evidenceReferences ?? record.evidencePaths ?? record.references);
+
+  return {
+    id: readString(record.id) ?? `finding-${String(index + 1).padStart(3, "0")}`,
+    source,
+    title: title ?? `${capitalize(severity)} finding`,
+    severity,
+    category: readString(record.category),
+    paths,
+    evidence: readString(record.evidence),
+    evidenceReferences: evidenceReferences.length ? evidenceReferences : extractPaths(readString(record.evidence) ?? ""),
+    recommendation: readString(record.recommendedFix ?? record.recommendation),
+    problemRationale: readString(record.problemRationale ?? record.rationale),
+    estimatedEffort: readString(record.estimatedEffort ?? record.effort),
+    confidence: readString(record.confidence),
+    schemaVersion
+  };
+}
+
+function jsonBlocks(report: string): string[] {
+  const blocks: string[] = [];
+  const fencePattern = /```[ \t]*(?:json|repovista-findings)?[^\n]*\n([\s\S]*?)```/gi;
+  for (const match of report.matchAll(fencePattern)) {
+    blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Non-schema JSON blocks are ignored.
+  }
+  return undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function readPathArray(value: unknown): string[] {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? splitPathField(value)
+      : [];
+  const paths = new Set<string>();
+  for (const rawValue of rawValues) {
+    if (typeof rawValue !== "string") {
+      continue;
+    }
+    const normalized = normalizePathCandidate(rawValue, true);
+    if (normalized) {
+      paths.add(normalized);
+    }
+  }
+  return Array.from(paths).sort();
+}
+
+function normalizeSeverity(value: string | undefined): StructuredFinding["severity"] {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "critical" || normalized === "high" || normalized === "medium" || normalized === "low") {
+    return normalized;
+  }
+  return "unknown";
 }
 
 export function findingCountsBySeverity(findings: StructuredFinding[]): Record<string, number> {

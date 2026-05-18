@@ -72,6 +72,7 @@ repovista audit --ci --json --fail-on-critical --no-progress
 repovista audit --run-checks --strict-reports
 repovista audit --resume .repovista/2026-05-18T14-57-32-123Z
 repovista audit --phase risk-and-bug --phase summary
+repovista compare .repovista/old-run .repovista/new-run
 ```
 
 ## Report Structure
@@ -95,7 +96,17 @@ Each run creates its own timestamped folder:
     logs/
 ```
 
-`project-map.json` is written by `repovista init` and stores the repository areas, recommended thread count, and default shard assignments. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report. `summary.json` contains machine-readable run, phase, finding, provider, parallel, and evidence summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality warnings, and preflight information. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
+`project-map.json` is written by `repovista init` and stores the repository areas, recommended thread count, and default shard assignments. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `findings.json` contains structured risk findings extracted from the risk report's JSON schema block, with Markdown fields as a fallback for older reports. `summary.json` contains machine-readable run, phase, finding, provider, parallel, and evidence summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality warnings, and preflight information. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
+
+## Comparing Reports
+
+Compare two finished run directories without external scripts:
+
+```sh
+repovista compare .repovista/2026-05-18T14-57-32-123Z .repovista/2026-05-18T16-20-41-009Z
+```
+
+The comparison prints Markdown with provider/model/reasoning metadata, finding count deltas, added/resolved/persisting findings, report line and evidence-reference deltas, and phase quality status.
 
 ## CLI Options
 
@@ -186,7 +197,7 @@ Parallel execution is provider-neutral. Codex and Claude Code both run as indepe
 - Reduce: one synthesis session combines successful shard reports into the normal phase report, such as `01-architecture-report.md`.
 - Summary: `index.md` stays single-threaded because it depends on the final detail reports.
 
-Parallel mode requires an initialized project map. If the map is missing, run `repovista init` first or use `--parallel off`. Resume can reuse existing successful shard reports from the run directory.
+Parallel mode requires an initialized project map. If the map is missing, run `repovista init` first or use `--parallel off`. Resume can reuse shard reports only when the previous `meta.json` marked the shard as successful and the shard file is still readable.
 
 ## Evidence and Quality Gates
 
@@ -194,9 +205,9 @@ Before provider phases start, RepoVista writes an evidence pack into `00-invento
 
 When `--run-checks` is set, RepoVista runs explicit `--check` commands or detected npm scripts in this order when present: `typecheck`, `lint`, `test`, `security:audit`. Results are included in the evidence pack. In CI mode, failed checks make the run exit with code `1`.
 
-RepoVista validates each generated Markdown report for expected sections and concrete evidence. Quality warnings are recorded in `meta.json`; with `--strict-reports`, a phase with quality warnings is marked failed.
+RepoVista validates each generated Markdown report for expected sections and concrete evidence. The gates also check minimum report depth signals such as path evidence counts, a minimum roadmap proposal count, required proposal fields, risk finding schema validity, and wording that distinguishes provider-side read-only context from completed Evidence Pack checks. Quality warnings are recorded in `meta.json`; with `--strict-reports`, a phase with quality warnings is marked failed.
 
-The risk report is also parsed into `findings.json`. Findings are extracted best when the report uses the structured fields requested by RepoVista: title, severity, category, affected paths, evidence, recommended fix, effort, and confidence.
+The risk report is also parsed into `findings.json`. The primary source is a fenced JSON schema block with title, severity, category, affected paths, evidence, evidence references, problem rationale, recommended fix, effort, and confidence. Older Markdown field extraction remains as a compatibility fallback.
 
 ## Settings
 
@@ -234,6 +245,7 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 - Prepare a higher-signal report: run `repovista audit --run-checks --strict-reports`.
 - Continue an interrupted run: `repovista audit --resume .repovista/<run-id>`.
 - Rerun only the risk report and summary: `repovista audit --resume .repovista/<run-id> --phase risk-and-bug --phase summary`.
+- Compare two reports: `repovista compare .repovista/<old-run-id> .repovista/<new-run-id>`.
 - Configure persistent defaults: run `repovista settings`, choose a model with Space, return with Enter, then save.
 - Run with Claude Code: `repovista audit --provider claude --model sonnet --reasoning high`.
 - Keep technical logs for troubleshooting: `repovista audit --keep-logs`.

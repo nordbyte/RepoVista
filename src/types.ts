@@ -4,7 +4,7 @@ export type AiProviderId = "codex" | "claude";
 
 export type ParallelMode = "off" | "auto" | number;
 
-export type CliAction = "audit" | "init" | "plan" | "settings" | "help" | "version";
+export type CliAction = "audit" | "init" | "plan" | "settings" | "compare" | "help" | "version";
 
 export interface AuditOptions {
   command: "audit";
@@ -31,6 +31,8 @@ export interface AuditOptions {
   failOnCritical: boolean;
   progress: boolean;
   keepLogs: boolean;
+  compareOldRun?: string;
+  compareNewRun?: string;
 }
 
 export interface CliParseResult {
@@ -127,8 +129,12 @@ export interface StructuredFinding {
   category?: string;
   paths: string[];
   evidence?: string;
+  evidenceReferences?: string[];
   recommendation?: string;
+  problemRationale?: string;
+  estimatedEffort?: string;
   confidence?: string;
+  schemaVersion?: number;
 }
 
 export interface AuditMeta {

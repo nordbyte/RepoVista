@@ -1,3 +1,5 @@
+import { extractFindingsWithSource } from "./findings.js";
+
 export interface ReportQualityResult {
   passed: boolean;
   warnings: string[];
@@ -42,6 +44,27 @@ const REQUIRED_SECTIONS: Record<string, string[]> = {
   ]
 };
 
+const MIN_PATH_EVIDENCE_BY_PHASE: Record<string, number> = {
+  architecture: 5,
+  "code-quality": 5,
+  "risk-and-bug": 3,
+  "feature-roadmap": 5
+};
+
+const MIN_ROADMAP_PROPOSALS = 6;
+const ROADMAP_PROPOSAL_FIELDS = [
+  "title",
+  "description",
+  "evidence",
+  "benefit",
+  "effort",
+  "risk",
+  "affected",
+  "steps",
+  "priority",
+  "confidence"
+];
+
 export function validateReportQuality(phaseId: string, markdown: string): ReportQualityResult {
   const warnings: string[] = [];
   const trimmed = markdown.trim();
@@ -60,16 +83,28 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
     }
   }
 
-  if (phaseId !== "summary" && !hasPathEvidence(markdown)) {
-    warnings.push("Report does not contain concrete file or path evidence.");
+  if (phaseId !== "summary") {
+    const pathEvidenceCount = countPathEvidence(markdown);
+    const minimum = MIN_PATH_EVIDENCE_BY_PHASE[phaseId] ?? 1;
+    if (pathEvidenceCount < minimum) {
+      warnings.push(`Report contains ${pathEvidenceCount} concrete path evidence reference(s); expected at least ${minimum}.`);
+    }
   }
 
-  if (phaseId === "risk-and-bug" && !/severity\s*:/i.test(markdown) && !/no\s+(critical|high|medium|low)\s+findings/i.test(markdown)) {
-    warnings.push("Risk report does not use severity fields or explicit no-finding statements.");
+  if (phaseId === "risk-and-bug") {
+    warnings.push(...validateRiskFindings(markdown));
+  }
+
+  if (phaseId === "feature-roadmap") {
+    warnings.push(...validateRoadmapDepth(markdown));
   }
 
   if (/as an ai|i cannot inspect|i don't have access/i.test(markdown)) {
     warnings.push("Report contains language suggesting the repository was not inspected.");
+  }
+
+  if (/i\s+did\s+not\s+run\s+(?:the\s+)?(?:tests|checks)|tests?\s+were\s+not\s+run/i.test(markdown)) {
+    warnings.push("Report claims tests or checks were not run instead of distinguishing provider context from the RepoVista evidence pack.");
   }
 
   return {
@@ -99,6 +134,97 @@ function normalizeHeading(value: string): string {
     .trim();
 }
 
-function hasPathEvidence(markdown: string): boolean {
-  return /(?:^|[\s`])(?:\.?\/)?(?:src|test|tests|lib|app|scripts|docs|\.github|package\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)[/\w.-]*/m.test(markdown);
+function validateRiskFindings(markdown: string): string[] {
+  const warnings: string[] = [];
+  const extraction = extractFindingsWithSource(markdown);
+  if (!extraction.schemaFound) {
+    warnings.push("Risk report does not include the RepoVista findings JSON schema.");
+    if (!/severity\s*:/i.test(markdown) && !/no\s+(critical|high|medium|low)\s+findings/i.test(markdown)) {
+      warnings.push("Risk report does not use severity fields or explicit no-finding statements.");
+    }
+    return warnings;
+  }
+
+  for (const warning of extraction.warnings) {
+    warnings.push(`Findings schema warning: ${warning}`);
+  }
+
+  for (const finding of extraction.findings) {
+    const label = finding.id || finding.title || "finding";
+    if (!finding.title || /^unknown finding$/i.test(finding.title)) {
+      warnings.push(`Schema finding ${label} is missing title.`);
+    }
+    if (finding.severity === "unknown") {
+      warnings.push(`Schema finding ${label} is missing valid severity.`);
+    }
+    if (!finding.category) {
+      warnings.push(`Schema finding ${label} is missing category.`);
+    }
+    if (!finding.paths.length) {
+      warnings.push(`Schema finding ${label} is missing affectedPaths.`);
+    }
+    if (!finding.evidence) {
+      warnings.push(`Schema finding ${label} is missing evidence.`);
+    }
+    if (!(finding.evidenceReferences?.length || finding.paths.length)) {
+      warnings.push(`Schema finding ${label} is missing concrete evidenceReferences.`);
+    }
+    if (!finding.problemRationale) {
+      warnings.push(`Schema finding ${label} is missing problemRationale.`);
+    }
+    if (!finding.recommendation) {
+      warnings.push(`Schema finding ${label} is missing recommendedFix.`);
+    }
+    if (!finding.estimatedEffort) {
+      warnings.push(`Schema finding ${label} is missing estimatedEffort.`);
+    }
+    if (!finding.confidence) {
+      warnings.push(`Schema finding ${label} is missing confidence.`);
+    }
+  }
+
+  return warnings;
+}
+
+function validateRoadmapDepth(markdown: string): string[] {
+  const warnings: string[] = [];
+  const proposalCount = countRoadmapProposals(markdown);
+  if (proposalCount < MIN_ROADMAP_PROPOSALS) {
+    warnings.push(`Roadmap contains ${proposalCount} proposal(s); expected at least ${MIN_ROADMAP_PROPOSALS}.`);
+  }
+
+  const lower = markdown.toLowerCase();
+  for (const field of ROADMAP_PROPOSAL_FIELDS) {
+    if (!lower.includes(field)) {
+      warnings.push(`Roadmap proposals are missing required field signal: ${field}.`);
+    }
+  }
+
+  return warnings;
+}
+
+function countRoadmapProposals(markdown: string): number {
+  const headingMatches = markdown.match(/^#{3,6}\s+\S.+$/gm);
+  if (headingMatches && headingMatches.length >= MIN_ROADMAP_PROPOSALS) {
+    return headingMatches.length;
+  }
+
+  const tableRows = markdown
+    .split(/\r?\n/)
+    .filter((line) => /^\s*\|.+\|\s*$/.test(line))
+    .filter((line) => !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+    .filter((line) => !/\b(title|proposal)\b/i.test(line) || /\b(priority|confidence|effort|benefit|risk)\b/i.test(line) === false);
+  return tableRows.length;
+}
+
+function countPathEvidence(markdown: string): number {
+  const matches = new Set<string>();
+  const pathPattern = /(?:^|[\s`])((?:\.?\/)?(?:src|test|tests|lib|app|scripts|docs|\.github)[/\w.-]*|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod))(?=$|[\s`)\],.;:])/gm;
+  for (const match of markdown.matchAll(pathPattern)) {
+    const normalized = match[1].replace(/^\.\//, "").replace(/\/+$/g, "");
+    if (normalized) {
+      matches.add(normalized);
+    }
+  }
+  return matches.size;
 }

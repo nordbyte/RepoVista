@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PreflightError } from "./errors.js";
 import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
@@ -72,6 +72,7 @@ interface ParallelPhaseInput {
   spawnAdapter?: SpawnAdapter;
   resume: boolean;
   status: PhaseReportStatus;
+  previousStatus?: PhaseReportStatus;
 }
 
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
@@ -84,10 +85,11 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   const meta = createInitialMeta(projectRoot, paths, options, version, now);
   const previousReports: Record<string, string> = {};
+  const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
 
   try {
     if (options.resumeDir) {
-      await loadExistingReports(paths, previousReports, meta.phases);
+      await loadExistingReports(paths, previousReports, meta.phases, previousMeta);
     }
 
     logger.step("Preflight checks");
@@ -138,6 +140,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
     for (const phase of ANALYSIS_PHASES) {
       const status = phaseStatus(meta.phases, phase);
+      const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
       const shouldRun = await shouldRunPhase(phase, status, paths, options, selectedPhases, detailPhaseRan);
       if (!shouldRun) {
         await markSkippedOrPreserved(status, phase, paths, previousReports);
@@ -169,7 +172,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
             runPhase,
             spawnAdapter: dependencies.spawnAdapter,
             resume: Boolean(options.resumeDir),
-            status
+            status,
+            previousStatus
           })
         : await runSinglePhase({
             phase,
@@ -249,7 +253,7 @@ async function runParallelPhase(input: ParallelPhaseInput): Promise<ProviderRunR
   const shardResults = await runWithConcurrency(input.parallel.shards, input.parallel.effectiveParallelism, async (shard) => {
     const report = shardReportPath(shardDirectory, shard.id);
     const shardStatus = input.status.shards?.find((item) => item.id === shard.id);
-    if (input.resume && await pathExists(report)) {
+    if (input.resume && await canReuseShardReport(input.paths.runDir, report, input.previousStatus, shard.id)) {
       if (shardStatus) {
         shardStatus.status = "success";
         shardStatus.durationMs = 0;
@@ -540,15 +544,25 @@ function createInitialMeta(
 async function loadExistingReports(
   paths: RunPaths,
   previousReports: Record<string, string>,
-  statuses: PhaseReportStatus[]
+  statuses: PhaseReportStatus[],
+  previousMeta: AuditMeta | undefined
 ): Promise<void> {
   for (const phase of ANALYSIS_PHASES) {
+    const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
+    if (previousStatus?.status !== "success") {
+      continue;
+    }
     const filePath = reportPath(paths.runDir, phase.reportFile);
     try {
       const content = await readReport(filePath);
+      if (!isReusablePhaseReport(phase.id, content)) {
+        continue;
+      }
       previousReports[phase.reportFile] = content;
       const status = phaseStatus(statuses, phase);
       status.status = "success";
+      status.durationMs = previousStatus.durationMs;
+      status.shards = previousStatus.shards;
       applyReportQuality(status, phase.id, content, false);
     } catch {
       // Missing reports are normal for an interrupted run.
@@ -593,14 +607,17 @@ async function markSkippedOrPreserved(
   previousReports: Record<string, string>
 ): Promise<void> {
   const filePath = reportPath(paths.runDir, phase.reportFile);
-  try {
-    const content = previousReports[phase.reportFile] ?? await readReport(filePath);
+  const content = previousReports[phase.reportFile];
+  if (content) {
     previousReports[phase.reportFile] = content;
     status.status = status.status === "success" ? "success" : "skipped";
     applyReportQuality(status, phase.id, content, false);
-  } catch {
-    status.status = "skipped";
+    return;
   }
+  if (await pathExists(filePath) && status.status === "success") {
+    return;
+  }
+  status.status = "skipped";
 }
 
 function phaseStatus(statuses: PhaseReportStatus[], phase: PhaseDefinition): PhaseReportStatus {
@@ -654,6 +671,54 @@ async function safeReadReport(filePath: string, title: string): Promise<string> 
   } catch {
     return `# ${title}\n\nReport could not be read.`;
   }
+}
+
+async function readPreviousMeta(runDir: string): Promise<AuditMeta | undefined> {
+  try {
+    const raw = await readFile(path.join(runDir, "meta.json"), "utf8");
+    const parsed = JSON.parse(raw) as AuditMeta;
+    if (parsed && Array.isArray(parsed.phases)) {
+      return parsed;
+    }
+  } catch {
+    // Runs without usable metadata are resumable directories but do not provide reusable phase artifacts.
+  }
+  return undefined;
+}
+
+function findPreviousPhaseStatus(meta: AuditMeta | undefined, phaseId: string): PhaseReportStatus | undefined {
+  return meta?.phases.find((phase) => phase.id === phaseId);
+}
+
+function isReusablePhaseReport(phaseId: string, content: string): boolean {
+  if (!content.trim() || isProviderFailureReport(content)) {
+    return false;
+  }
+  return validateReportQuality(phaseId, content).passed;
+}
+
+async function canReuseShardReport(
+  runDir: string,
+  report: string,
+  previousStatus: PhaseReportStatus | undefined,
+  shardId: string
+): Promise<boolean> {
+  const previousShard = previousStatus?.shards?.find((item) => item.id === shardId);
+  const relativeReport = path.relative(runDir, report).split(path.sep).join("/");
+  if (previousShard?.status !== "success" || previousShard.reportFile !== relativeReport) {
+    return false;
+  }
+
+  try {
+    const content = await readReport(report);
+    return Boolean(content.trim()) && !isProviderFailureReport(content);
+  } catch {
+    return false;
+  }
+}
+
+function isProviderFailureReport(content: string): boolean {
+  return /^## Status\s*$/im.test(content) && /^Failed\.\s*$/im.test(content);
 }
 
 async function writeStructuredOutputs(

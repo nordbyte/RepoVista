@@ -103,3 +103,11 @@ test("settings command is recognized", () => {
   const parsed = parseCliArgs(["settings"]);
   assert.equal(parsed.action, "settings");
 });
+
+test("compare command requires old and new run directories", () => {
+  const parsed = parseCliArgs(["compare", ".repovista/old", ".repovista/new"]);
+  assert.equal(parsed.action, "compare");
+  assert.equal(parsed.options.compareOldRun, ".repovista/old");
+  assert.equal(parsed.options.compareNewRun, ".repovista/new");
+  assert.throws(() => parseCliArgs(["compare", ".repovista/old"]), /requires two run directories/);
+});

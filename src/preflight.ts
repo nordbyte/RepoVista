@@ -46,6 +46,7 @@ const PROJECT_MARKERS = [
   "lib",
   "app"
 ];
+const COMMAND_EXISTS_TIMEOUT_MS = 10_000;
 
 export async function runPreflight(
   projectRoot: string,
@@ -143,10 +144,39 @@ async function assertDirectoryAccess(directory: string, label: string, requireWr
 
 async function defaultCommandExists(command: string): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
     const child = spawn(command, ["--version"], {
       stdio: "ignore"
     });
-    child.on("error", () => resolve(false));
-    child.on("close", (code) => resolve(code === 0));
+    const timeoutTimer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      child.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        if (!settled) {
+          child.kill("SIGKILL");
+        }
+      }, 5000);
+      forceKillTimer.unref();
+      settle(false);
+    }, COMMAND_EXISTS_TIMEOUT_MS);
+    timeoutTimer.unref();
+
+    const settle = (value: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      resolve(value);
+    };
+
+    child.on("error", () => settle(false));
+    child.on("close", (code) => settle(code === 0));
   });
 }

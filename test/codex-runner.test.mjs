@@ -182,6 +182,51 @@ test("codex runner creates an error report on failed process", async () => {
   }
 });
 
+test("provider runner masks sensitive failure output and logs", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-provider-mask-"));
+  try {
+    const reportPath = path.join(root, "report.md");
+    const logsDir = path.join(root, "logs");
+    const child = new FakeChild();
+    const spawnAdapter = () => {
+      setImmediate(() => {
+        child.stdout.write("TOKEN=s3cr3t-value\n");
+        child.stderr.write("request failed for https://user:pass@example.com with API_KEY=abc123\n");
+        child.emit("close", 1);
+      });
+      return child;
+    };
+
+    const result = await runProviderPhase({
+      provider: "codex",
+      phaseId: "risk",
+      phaseTitle: "Risk",
+      prompt: "prompt",
+      projectRoot: root,
+      reportPath,
+      logsDir,
+      sandbox: "read-only",
+      jsonEvents: false,
+      keepLogs: true,
+      timeoutSeconds: 60
+    }, spawnAdapter);
+
+    const report = await readFile(reportPath, "utf8");
+    const stdoutLog = await readFile(result.stdoutLogPath, "utf8");
+    const stderrLog = await readFile(result.stderrLogPath, "utf8");
+
+    assert.equal(result.success, false);
+    assert.doesNotMatch(report, /s3cr3t-value|user:pass|abc123/);
+    assert.doesNotMatch(stdoutLog, /s3cr3t-value/);
+    assert.doesNotMatch(stderrLog, /user:pass|abc123/);
+    assert.match(report, /\[masked\]/);
+    assert.match(stdoutLog, /\[masked\]/);
+    assert.match(stderrLog, /\[masked\]/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("codex runner cancels a phase after timeout", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-timeout-"));
   try {

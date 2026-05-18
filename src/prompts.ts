@@ -61,6 +61,8 @@ Safety and working rules:
 - Do not invent facts. If something is not supported by evidence, say so.
 - Prioritize findings and recommendations clearly.
 - Ground every important claim in concrete evidence from files, configuration, tests, local checks, or Git metadata.
+- RepoVista already collected the Evidence Pack shown below. Treat Evidence Pack check results as completed checks. Do not write that tests or checks were not run when the Evidence Pack ran them; if you ran no extra provider-side commands, write "No additional provider-side commands were run beyond the Evidence Pack."
+- Keep Evidence Pack results separate from your provider-side read-only context. The Evidence Pack is tool-collected evidence; your own session remains read-only.
 - For recommendations, include affected paths/modules, impact, confidence, and an implementation hint.
 - Avoid generic best-practice filler that is not tied to this repository.
 - Write the final report in ${context.language}.
@@ -135,7 +137,7 @@ The report must contain these sections:
 11. Larger Architecture Measures
 
 For relevant weaknesses, name the file or path, evidence, problem, impact, recommendation, priority, confidence, and implementation hint.
-	`;
+`;
 }
 
 function buildRiskPrompt(context: PromptContext): string {
@@ -171,7 +173,7 @@ The report must contain these sections:
 8. Missing Tests
 9. Recommended Next Steps
 
-For each finding, use this field format so RepoVista can extract structured findings:
+For each finding in the Markdown sections, use this field format:
 - Title: <short title>
 - Severity: Critical | High | Medium | Low
 - Category: <bug, security, reliability, maintainability, data loss, etc.>
@@ -182,8 +184,30 @@ For each finding, use this field format so RepoVista can extract structured find
 - Estimated effort: <small, medium, large>
 - Confidence: High | Medium | Low
 
-If a severity section has no findings, say that explicitly. Mark uncertain findings explicitly as hypotheses.
-	`;
+Also include a fenced JSON block near the end of the report. This JSON schema is RepoVista's primary structured findings source, so keep it valid JSON and make it match the Markdown findings exactly:
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "<short title>",
+      "severity": "critical | high | medium | low",
+      "category": "<bug, security, reliability, maintainability, data loss, etc.>",
+      "affectedPaths": ["src/example.ts"],
+      "evidence": "<specific code/config/test/local-check evidence>",
+      "evidenceReferences": ["src/example.ts"],
+      "problemRationale": "<why this is a real risk>",
+      "recommendedFix": "<concrete fix proposal>",
+      "estimatedEffort": "small | medium | large",
+      "confidence": "high | medium | low"
+    }
+  ]
+}
+\`\`\`
+
+If there are no findings, use '"findings": []' and still say explicitly in each severity section that no findings were detected. Mark uncertain findings explicitly as hypotheses.
+`;
 }
 
 function buildRoadmapPrompt(context: PromptContext): string {
@@ -216,8 +240,8 @@ The report must contain these sections:
 6. Security and Reliability Improvements
 7. Prioritized Roadmap
 
-For each proposal, include title, description, evidence/rationale from code or architecture, benefit, effort, risk, affected files or modules, possible implementation steps, priority, and confidence. Avoid generic proposals.
-	`;
+Return at least 6 concrete roadmap proposals unless the repository is too small to justify that many; if fewer are appropriate, state why. For each proposal, include title, description, evidence/rationale from code or architecture, benefit, effort, risk, affected files or modules, possible implementation steps, priority, and confidence. Avoid generic proposals.
+`;
 }
 
 function buildSummaryPrompt(context: PromptContext): string {

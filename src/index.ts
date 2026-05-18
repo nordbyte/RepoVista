@@ -1,6 +1,7 @@
 export { runAudit, hasCriticalFindings } from "./audit.js";
 export { buildCodexExecArgs, runCodexPhase } from "./codex-runner.js";
 export { buildClaudeExecArgs } from "./providers/claude.js";
+export { runCompareCommand, renderRunComparison } from "./compare.js";
 export { loadCodexModels, parseCodexModelCatalog, reasoningOptionsForModel } from "./codex-models.js";
 export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
@@ -8,7 +9,7 @@ export { createProjectMap, createParallelExecutionMeta, initializeProjectMap, lo
 export { runInitCommand, runPlanCommand } from "./project-commands.js";
 export { getReportProvider, isReportProviderId, REPORT_PROVIDER_IDS, REPORT_PROVIDERS } from "./providers/index.js";
 export { collectEvidence, hasFailedChecks, renderEvidenceMarkdown } from "./evidence.js";
-export { extractFindings, findingCountsBySeverity } from "./findings.js";
+export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity } from "./findings.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";
 export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateProvider, validateSandbox } from "./options.js";

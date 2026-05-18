@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runAudit } from "./audit.js";
+import { runCompareCommand } from "./compare.js";
 import { CliUsageError, RepoVistaError } from "./errors.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
@@ -37,6 +38,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "plan") {
       process.stdout.write(await runPlanCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "compare") {
+      process.stdout.write(await runCompareCommand(
+        optionsWithSettings.options.compareOldRun ?? "",
+        optionsWithSettings.options.compareNewRun ?? ""
+      ));
       return 0;
     }
     const result = await runAudit(optionsWithSettings.options, { version });
