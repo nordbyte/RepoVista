@@ -3,7 +3,8 @@ import path from "node:path";
 
 const ROOT = process.cwd();
 const CHECK_ROOTS = [".github", "scripts", "src", "test"];
-const ROOT_FILES = ["package.json", "package-lock.json", "README.md", "repovista.md", "tsconfig.json"];
+const ROOT_FILES = ["package.json", "package-lock.json", "README.md", "tsconfig.json"];
+const OPTIONAL_ROOT_FILES = ["repovista.md"];
 const EXTENSIONS = new Set([".js", ".mjs", ".ts", ".json", ".md", ".yml", ".yaml"]);
 const IGNORED_DIRS = new Set([".git", ".repovista", "dist", "node_modules"]);
 
@@ -11,6 +12,10 @@ const failures = [];
 
 for (const file of ROOT_FILES) {
   await lintFile(path.join(ROOT, file));
+}
+
+for (const file of OPTIONAL_ROOT_FILES) {
+  await lintFileIfPresent(path.join(ROOT, file));
 }
 
 for (const directory of CHECK_ROOTS) {
@@ -64,4 +69,14 @@ async function lintFile(filePath) {
       failures.push(`${relative}:${index + 1}: trailing whitespace`);
     }
   });
+}
+
+async function lintFileIfPresent(filePath) {
+  try {
+    await lintFile(filePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
