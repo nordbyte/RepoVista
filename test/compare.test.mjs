@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { runCompareCommand } from "../dist/index.js";
+import { compareHasRegression, runCompareCommand } from "../dist/index.js";
 
 test("compare command renders finding and report deltas", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-compare-"));
@@ -48,6 +48,14 @@ test("compare command renders finding and report deltas", async () => {
     assert.match(output, /Resolved Findings/);
     assert.match(output, /HIGH: Old issue/);
     assert.match(output, /Report Depth/);
+
+    const jsonOutput = await runCompareCommand(".repovista/old", ".repovista/new", root, { format: "json" });
+    const parsed = JSON.parse(jsonOutput);
+    assert.equal(parsed.regressions.length, 1);
+
+    const htmlOutput = await runCompareCommand(".repovista/old", ".repovista/new", root, { format: "html" });
+    assert.match(htmlOutput, /<!doctype html>/);
+    assert.equal(await compareHasRegression(".repovista/old", ".repovista/new", root), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,5 +1,7 @@
 import { allowedEvidencePaths, collectAuditDiffScope, createInitialMeta, reportFolderName } from "./audit-context.js";
 import { writeStructuredOutputs } from "./audit-outputs.js";
+import { applyBaselineToFindings } from "./baseline.js";
+import { projectScanFingerprint, updateAuditCache } from "./cache.js";
 import { PreflightError } from "./errors.js";
 import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
 import { validateFindingsEvidence } from "./evidence-validation.js";
@@ -15,6 +17,7 @@ import { createParallelExecutionMeta, createProjectMap, loadProjectMap } from ".
 import { scanProject } from "./project-scan.js";
 import { getReportProvider } from "./providers/index.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
+import { applyAuditProfile } from "./profiles.js";
 import { maybeRepairPhaseReport } from "./report-repair.js";
 import {
   expandSelectedPhases,
@@ -24,18 +27,21 @@ import {
   phaseStatus,
   readPreviousMeta,
   safeReadReport,
+  isReusablePhaseReport,
   shouldRunPhase,
   updatePhaseStatus
 } from "./resume-manager.js";
 import { createRunId } from "./run-id.js";
 import {
   prepareRunDirectory,
+  readReport,
   reportPath,
   useExistingRunDirectory,
   writeJsonFile,
   writeMeta,
   writeMarkdownReport
 } from "./reports.js";
+import { resolveWorkspaceScope, workspaceIncludes } from "./workspaces.js";
 import type {
   AuditMeta,
   AuditOptions,
@@ -62,14 +68,21 @@ export interface AuditResult {
 }
 
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
+  options = applyAuditProfile(options);
   const projectRoot = dependencies.cwd ?? process.cwd();
   const now = dependencies.now ?? new Date();
   const version = dependencies.version ?? "0.0.0";
+  const workspaceScope = await resolveWorkspaceScope(projectRoot, options);
+  options = {
+    ...options,
+    includes: workspaceIncludes(options, workspaceScope)
+  };
   const logger = new Logger(options.progress);
   const createLogs = options.keepLogs || options.json;
   const paths = await createRunPaths(projectRoot, options, now, createLogs);
 
   const meta = createInitialMeta(projectRoot, paths, options, version, now);
+  meta.workspace = workspaceScope;
   const previousReports: Record<string, string> = {};
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
 
@@ -100,16 +113,34 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       includes: options.includes,
       ignores: options.ignores
     });
+    const scanFingerprint = projectScanFingerprint(projectScan.files);
+    meta.cache = await updateAuditCache({
+      projectRoot,
+      outDir: options.outDir,
+      runDir: paths.runDir,
+      runId: paths.runId,
+      scanFingerprint,
+      fileCount: projectScan.files.length,
+      enabled: Boolean(options.incremental),
+      now
+    });
+    if (meta.cache.enabled && meta.cache.hit) {
+      logger.info(`Incremental scan cache hit. Previous matching run: ${meta.cache.previousRunId ?? "unknown"}.`);
+    }
+    const incrementalReports = meta.cache.enabled && meta.cache.hit && meta.cache.previousRunDir
+      ? await loadReusableReportsFromRun(meta.cache.previousRunDir)
+      : {};
 
     logger.step("Creating project inventory");
+    const provider = getReportProvider(options.provider ?? "codex");
     const inventory = await createProjectInventory(projectRoot, {
       outDir: options.outDir,
       includes: options.includes,
       ignores: options.ignores,
       ai: {
         provider: options.provider ?? "codex",
-        displayName: getReportProvider(options.provider ?? "codex").displayName,
-        executable: getReportProvider(options.provider ?? "codex").executable,
+        displayName: provider.displayName,
+        executable: provider.executable,
         model: options.model,
         profile: options.profile,
         reasoning: options.reasoning,
@@ -147,6 +178,14 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     for (const phase of ANALYSIS_PHASES) {
       const status = phaseStatus(meta.phases, phase);
       const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
+      if (!options.resumeDir && !selectedPhases && incrementalReports[phase.reportFile]) {
+        const phaseReportPath = reportPath(paths.runDir, phase.reportFile);
+        await writeMarkdownReport(phaseReportPath, incrementalReports[phase.reportFile]);
+        previousReports[phase.reportFile] = incrementalReports[phase.reportFile];
+        await markSkippedOrPreserved(status, phase, paths, previousReports);
+        logger.info(`Incremental cache reused ${phase.reportFile}.`);
+        continue;
+      }
       const shouldRun = await shouldRunPhase(phase, status, paths, options, selectedPhases, detailPhaseRan);
       if (!shouldRun) {
         await markSkippedOrPreserved(status, phase, paths, previousReports);
@@ -222,21 +261,25 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     }
 
     const extractedFindings = extractFindings(previousReports["03-risk-and-bug-report.md"] ?? "");
-    const findings = await validateFindingsEvidence(
+    const validatedFindings = await validateFindingsEvidence(
       projectRoot,
       extractedFindings,
       allowedEvidencePaths(featureMap.features),
-      new Date()
+      now
     );
+    const baseline = await applyBaselineToFindings(projectRoot, options.outDir, validatedFindings, paths.runId, now);
+    const findings = baseline.activeFindings;
+    const suppressedFindings = baseline.suppressedFindings;
     const structuredReports = ANALYSIS_PHASES.map((phase) => extractStructuredPhaseReport(
       previousReports[phase.reportFile] ?? "",
       phase.id,
       phase.reportFile
     ));
     meta.findings = findings;
+    meta.suppressedFindings = suppressedFindings;
     meta.exitCode = determineExitCode(options, meta.phases, previousReports["03-risk-and-bug-report.md"], findings, evidence);
     meta.completedAt = new Date().toISOString();
-    await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports);
+    await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings);
   } catch (error) {
     meta.exitCode = 1;
     throw error;
@@ -300,6 +343,22 @@ async function createRunPaths(projectRoot: string, options: AuditOptions, now: D
     const message = error instanceof Error ? error.message : String(error);
     throw new PreflightError(`Could not create RepoVista run: ${message}`);
   }
+}
+
+async function loadReusableReportsFromRun(runDir: string): Promise<Record<string, string>> {
+  const reports: Record<string, string> = {};
+  for (const phase of ANALYSIS_PHASES) {
+    const filePath = reportPath(runDir, phase.reportFile);
+    try {
+      const content = await readReport(filePath);
+      if (isReusablePhaseReport(phase.id, content)) {
+        reports[phase.reportFile] = content;
+      }
+    } catch {
+      // Missing or unusable reports simply are not reused.
+    }
+  }
+  return reports;
 }
 
 function determineExitCode(

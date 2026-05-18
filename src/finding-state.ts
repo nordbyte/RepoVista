@@ -1,15 +1,23 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { validateFindingEvidence } from "./evidence-validation.js";
 import { writeFindingExports } from "./exporters.js";
+import {
+  findingStateDirectory,
+  loadStoredFindings,
+  rewriteFindingStateAtomic,
+  safeFindingFileName,
+  writeFindingFileAtomic
+} from "./finding-store.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
 import type { AuditOptions, FindingStatus, StructuredFinding } from "./types.js";
 
-const FINDING_STATE_VERSION = 1;
+export { findingStateDirectory, loadStoredFindings } from "./finding-store.js";
+
 const STATUS_ORDER: FindingStatus[] = ["open", "uncertain", "fixed", "false-positive", "wont-fix"];
 const execFileAsync = promisify(execFile);
 
@@ -48,12 +56,12 @@ export async function writeFindingState(
         createdAt: now.toISOString()
       })
     };
-    await writeFindingFile(stateDirectory, merged);
+    await writeFindingFileAtomic(stateDirectory, merged);
   }
 
   for (const previous of existing) {
     if (!seenIds.has(previous.id)) {
-      await writeFindingFile(stateDirectory, {
+      await writeFindingFileAtomic(stateDirectory, {
         ...previous,
         updatedAt: now.toISOString()
       });
@@ -276,11 +284,33 @@ export async function runCreateIssueCommand(options: AuditOptions, projectRoot =
   const title = `[RepoVista] ${finding.severity.toUpperCase()}: ${finding.title}`;
   const body = renderIssueBody(finding);
   if (options.dryRun) {
-    return `GitHub issue dry run:\n\nTitle: ${title}\n\n${body}\n`;
+    return `GitHub issue dry run:\n\nTitle: ${title}\nLabels: ${renderInlineList(options.issueLabels ?? [])}\nAssignees: ${renderInlineList(options.issueAssignees ?? [])}\nUpdate existing: ${options.issueUpdateExisting ? "yes" : "no"}\n\n${body}\n`;
   }
 
   try {
-    const { stdout } = await execFileAsync("gh", ["issue", "create", "--title", title, "--body", body], {
+    const existingIssue = await findExistingIssue(projectRoot, finding.id);
+    if (existingIssue && !options.issueUpdateExisting) {
+      return `GitHub issue already exists for ${finding.id}: ${existingIssue.url}\n`;
+    }
+    if (existingIssue && options.issueUpdateExisting) {
+      const comment = `${body}\n\n_RepoVista updated this issue from finding ${finding.id}._`;
+      await execFileAsync("gh", ["issue", "comment", String(existingIssue.number), "--body", comment], {
+        cwd: projectRoot,
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024
+      });
+      await applyIssueMetadata(projectRoot, existingIssue.number, options);
+      return `Updated GitHub issue for ${finding.id}: ${existingIssue.url}\n`;
+    }
+
+    const args = ["issue", "create", "--title", title, "--body", body];
+    for (const label of options.issueLabels ?? []) {
+      args.push("--label", label);
+    }
+    for (const assignee of options.issueAssignees ?? []) {
+      args.push("--assignee", assignee);
+    }
+    const { stdout } = await execFileAsync("gh", args, {
       cwd: projectRoot,
       timeout: 30_000,
       maxBuffer: 1024 * 1024
@@ -289,29 +319,6 @@ export async function runCreateIssueCommand(options: AuditOptions, projectRoot =
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new RepoVistaError(`Could not create GitHub issue with gh: ${message}`);
-  }
-}
-
-export async function loadStoredFindings(projectRoot: string, outDir: string): Promise<StructuredFinding[]> {
-  const stateDirectory = await findingStateDirectory(projectRoot, outDir);
-  try {
-    const entries = await readdir(stateDirectory, { withFileTypes: true });
-    const findings: StructuredFinding[] = [];
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!entry.isFile() || !entry.name.endsWith(".json")) {
-        continue;
-      }
-      const parsed = JSON.parse(await readFile(path.join(stateDirectory, entry.name), "utf8")) as {
-        version?: number;
-        finding?: StructuredFinding;
-      };
-      if (parsed.version === FINDING_STATE_VERSION && parsed.finding?.id) {
-        findings.push(parsed.finding);
-      }
-    }
-    return findings.sort(compareFindings);
-  } catch {
-    return [];
   }
 }
 
@@ -370,6 +377,52 @@ function normalizeFindingStatus(value: string | undefined): FindingStatus | unde
   return undefined;
 }
 
+async function findExistingIssue(projectRoot: string, findingId: string): Promise<{ number: number; title: string; url: string } | undefined> {
+  try {
+    const { stdout } = await execFileAsync("gh", [
+      "issue",
+      "list",
+      "--search",
+      `${findingId} in:body`,
+      "--json",
+      "number,title,url",
+      "--limit",
+      "10"
+    ], {
+      cwd: projectRoot,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    const parsed = JSON.parse(stdout) as Array<{ number?: number; title?: string; url?: string }>;
+    const match = parsed.find((issue) => typeof issue.number === "number" && issue.url);
+    return match
+      ? { number: match.number as number, title: match.title ?? "", url: match.url as string }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function applyIssueMetadata(projectRoot: string, issueNumber: number, options: AuditOptions): Promise<void> {
+  const labels = options.issueLabels ?? [];
+  const assignees = options.issueAssignees ?? [];
+  if (!labels.length && !assignees.length) {
+    return;
+  }
+  const args = ["issue", "edit", String(issueNumber)];
+  for (const label of labels) {
+    args.push("--add-label", label);
+  }
+  for (const assignee of assignees) {
+    args.push("--add-assignee", assignee);
+  }
+  await execFileAsync("gh", args, {
+    cwd: projectRoot,
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024
+  });
+}
+
 function renderIssueBody(finding: StructuredFinding): string {
   return `## RepoVista Finding
 
@@ -405,11 +458,6 @@ async function safeRead(filePath: string): Promise<string> {
   }
 }
 
-export async function findingStateDirectory(projectRoot: string, outDir: string): Promise<string> {
-  const outRoot = await validateReportRoot(projectRoot, outDir);
-  return path.join(outRoot, "findings");
-}
-
 async function requireFinding(projectRoot: string, options: AuditOptions): Promise<StructuredFinding> {
   const id = requireFindingId(options);
   const finding = (await loadStoredFindings(projectRoot, options.outDir)).find((item) => item.id === id);
@@ -427,24 +475,11 @@ function requireFindingId(options: AuditOptions): string {
 }
 
 async function rewriteFindingState(projectRoot: string, outDir: string, findings: StructuredFinding[]): Promise<void> {
-  const stateDirectory = await findingStateDirectory(projectRoot, outDir);
-  await mkdir(stateDirectory, { recursive: true });
-  await rm(stateDirectory, { recursive: true, force: true });
-  await mkdir(stateDirectory, { recursive: true });
-  for (const finding of findings) {
-    await writeFindingFile(stateDirectory, finding);
-  }
-}
-
-async function writeFindingFile(stateDirectory: string, finding: StructuredFinding): Promise<void> {
-  await writeFile(path.join(stateDirectory, `${safeFileName(finding.id)}.json`), `${JSON.stringify({
-    version: FINDING_STATE_VERSION,
-    finding
-  }, null, 2)}\n`, "utf8");
+  await rewriteFindingStateAtomic(projectRoot, outDir, findings);
 }
 
 function safeFileName(value: string): string {
-  return value.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return safeFindingFileName(value);
 }
 
 function compareFindings(left: StructuredFinding, right: StructuredFinding): number {
@@ -550,4 +585,8 @@ Next commands:
 
 function renderList(items: string[]): string {
   return items.length ? items.map((item) => `- ${item}`).join("\n") : "- n/a";
+}
+
+function renderInlineList(items: string[]): string {
+  return items.length ? items.join(", ") : "none";
 }

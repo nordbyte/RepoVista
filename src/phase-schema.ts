@@ -35,6 +35,7 @@ export function extractStructuredPhaseReport(markdown: string, phaseId: string, 
   if (!report.keyPoints.length && !report.executiveSummary) {
     warnings.push("Structured phase schema is missing executiveSummary or keyPoints.");
   }
+  warnings.push(...validateStructuredPhaseReport(report));
   return report;
 }
 
@@ -119,6 +120,34 @@ function readProposalArray(value: unknown): StructuredRoadmapProposal[] {
       priority: readString(item.priority) ?? "",
       confidence: readString(item.confidence) ?? ""
     }));
+}
+
+function validateStructuredPhaseReport(report: StructuredPhaseReport): string[] {
+  const warnings: string[] = [];
+  if (!report.evidenceReferences.length && report.phaseId !== "summary") {
+    warnings.push("Structured phase schema is missing evidenceReferences.");
+  }
+  if (!report.recommendations.length && report.phaseId !== "summary") {
+    warnings.push("Structured phase schema is missing recommendations.");
+  }
+  if (report.phaseId === "feature-roadmap") {
+    const proposals = report.proposals ?? [];
+    if (!proposals.length) {
+      warnings.push("Structured roadmap schema is missing proposals.");
+    }
+    proposals.forEach((proposal, index) => {
+      for (const [field, value] of Object.entries(proposal)) {
+        const present = Array.isArray(value) ? value.length > 0 : Boolean(String(value ?? "").trim());
+        if (!present) {
+          warnings.push(`Structured roadmap proposal ${index + 1} is missing ${field}.`);
+        }
+      }
+    });
+  }
+  if (report.phaseId === "risk-and-bug" && report.findings?.some((finding) => !finding.signature)) {
+    warnings.push("One or more structured findings are missing stable signatures.");
+  }
+  return warnings;
 }
 
 function firstParagraph(markdown: string): string | undefined {

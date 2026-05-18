@@ -14,11 +14,26 @@ interface ProviderPluginDefinition {
   stdoutLogExtension?: string;
 }
 
+export interface ProviderPluginDiagnostic {
+  source: string;
+  filePath?: string;
+  id?: string;
+  loaded: boolean;
+  error?: string;
+}
+
+const pluginDiagnostics: ProviderPluginDiagnostic[] = [];
+
 export function loadPluginProviders(): ReportProvider[] {
-  const files = pluginFiles();
+  pluginDiagnostics.length = 0;
+  const entries = pluginEntries();
   const providers: ReportProvider[] = [];
-  for (const file of files) {
-    const provider = loadPluginProvider(file);
+  for (const entry of entries) {
+    const provider = entry.definition
+      ? loadPluginDefinition(entry.definition, entry.source, entry.filePath)
+      : entry.filePath
+        ? loadPluginProviderFile(entry.filePath, entry.source)
+        : undefined;
     if (provider) {
       providers.push(provider);
     }
@@ -26,33 +41,99 @@ export function loadPluginProviders(): ReportProvider[] {
   return providers;
 }
 
-function pluginFiles(): string[] {
+export function getPluginProviderDiagnostics(): ProviderPluginDiagnostic[] {
+  return [...pluginDiagnostics];
+}
+
+function pluginEntries(): Array<{ source: string; filePath?: string; definition?: ProviderPluginDefinition }> {
   const single = process.env.REPOVISTA_PROVIDER_PLUGIN ? [process.env.REPOVISTA_PROVIDER_PLUGIN] : [];
   const multiple = process.env.REPOVISTA_PROVIDER_PLUGINS
     ? process.env.REPOVISTA_PROVIDER_PLUGINS.split(path.delimiter).filter(Boolean)
     : [];
-  return [...single, ...multiple].map((file) => path.resolve(file));
+  const envEntries = [...single, ...multiple].map((file) => ({
+    source: "environment",
+    filePath: path.resolve(file)
+  }));
+  return [...envEntries, ...repoPluginEntries()];
 }
 
-function loadPluginProvider(filePath: string): ReportProvider | undefined {
+function repoPluginEntries(): Array<{ source: string; filePath?: string; definition?: ProviderPluginDefinition }> {
+  const configPath = path.resolve(process.cwd(), "repovista.providers.json");
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as { providers?: Array<string | ProviderPluginDefinition> } | ProviderPluginDefinition[];
+    const providers = Array.isArray(parsed) ? parsed : parsed.providers;
+    if (!Array.isArray(providers)) {
+      pluginDiagnostics.push({
+        source: "repo-config",
+        filePath: configPath,
+        loaded: false,
+        error: "repovista.providers.json must be an array or contain a providers array."
+      });
+      return [];
+    }
+    return providers.map((provider, index) => typeof provider === "string"
+      ? { source: "repo-config", filePath: path.resolve(path.dirname(configPath), provider) }
+      : { source: `repo-config:${index + 1}`, filePath: configPath, definition: provider });
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    if (code !== "ENOENT") {
+      pluginDiagnostics.push({
+        source: "repo-config",
+        filePath: configPath,
+        loaded: false,
+        error: maskSensitiveText(error instanceof Error ? error.message : String(error))
+      });
+    }
+    return [];
+  }
+}
+
+function loadPluginProviderFile(filePath: string, source: string): ReportProvider | undefined {
   try {
     const definition = JSON.parse(readFileSync(filePath, "utf8")) as ProviderPluginDefinition;
-    if (!isValidDefinition(definition)) {
-      return undefined;
-    }
-    return {
-      id: definition.id,
-      displayName: definition.displayName ?? definition.id,
-      executable: definition.executable,
-      outputMode: definition.outputMode ?? "stdout",
-      versionArgs: definition.versionArgs ?? ["--version"],
-      buildArgs: (request) => buildPluginArgs(definition, request),
-      classifyError: (_stderrText, code) => `${definition.displayName ?? definition.id} run exited with code ${code ?? "unknown"}.`,
-      stdoutLogExtension: () => definition.stdoutLogExtension ?? ".log"
-    };
-  } catch {
+    return loadPluginDefinition(definition, source, filePath);
+  } catch (error) {
+    pluginDiagnostics.push({
+      source,
+      filePath,
+      loaded: false,
+      error: maskSensitiveText(error instanceof Error ? error.message : String(error))
+    });
     return undefined;
   }
+}
+
+function loadPluginDefinition(
+  definition: ProviderPluginDefinition,
+  source: string,
+  filePath?: string
+): ReportProvider | undefined {
+  if (!isValidDefinition(definition)) {
+    pluginDiagnostics.push({
+      source,
+      filePath,
+      id: typeof definition?.id === "string" ? definition.id : undefined,
+      loaded: false,
+      error: "Provider plugin definition is invalid. Required fields: id, executable, args[]."
+    });
+    return undefined;
+  }
+  pluginDiagnostics.push({
+    source,
+    filePath,
+    id: definition.id,
+    loaded: true
+  });
+  return {
+    id: definition.id,
+    displayName: definition.displayName ?? definition.id,
+    executable: definition.executable,
+    outputMode: definition.outputMode ?? "stdout",
+    versionArgs: definition.versionArgs ?? ["--version"],
+    buildArgs: (request) => buildPluginArgs(definition, request),
+    classifyError: (_stderrText, code) => `${definition.displayName ?? definition.id} run exited with code ${code ?? "unknown"}.`,
+    stdoutLogExtension: () => definition.stdoutLogExtension ?? ".log"
+  };
 }
 
 function isValidDefinition(value: ProviderPluginDefinition): boolean {

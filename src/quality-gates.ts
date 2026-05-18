@@ -4,6 +4,7 @@ import { extractStructuredPhaseReport } from "./phase-schema.js";
 export interface ReportQualityResult {
   passed: boolean;
   warnings: string[];
+  failures: string[];
   score: number;
 }
 
@@ -69,11 +70,13 @@ const ROADMAP_PROPOSAL_FIELDS = [
 
 export function validateReportQuality(phaseId: string, markdown: string): ReportQualityResult {
   const warnings: string[] = [];
+  const failures: string[] = [];
   const trimmed = markdown.trim();
   if (!trimmed) {
     return {
       passed: false,
       warnings: ["Report is empty."],
+      failures: ["Report is empty."],
       score: 0
     };
   }
@@ -82,7 +85,7 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
   const requiredSections = REQUIRED_SECTIONS[phaseId] ?? [];
   for (const section of requiredSections) {
     if (!containsHeading(headingText, section)) {
-      warnings.push(`Missing expected section: ${section}.`);
+      failures.push(`Missing expected section: ${section}.`);
     }
   }
 
@@ -90,16 +93,16 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
     const pathEvidenceCount = countPathEvidence(markdown);
     const minimum = MIN_PATH_EVIDENCE_BY_PHASE[phaseId] ?? 1;
     if (pathEvidenceCount < minimum) {
-      warnings.push(`Report contains ${pathEvidenceCount} concrete path evidence reference(s); expected at least ${minimum}.`);
+      failures.push(`Report contains ${pathEvidenceCount} concrete path evidence reference(s); expected at least ${minimum}.`);
     }
   }
 
   if (phaseId === "risk-and-bug") {
-    warnings.push(...validateRiskFindings(markdown));
+    failures.push(...validateRiskFindings(markdown));
   }
 
   if (phaseId === "feature-roadmap") {
-    warnings.push(...validateRoadmapDepth(markdown));
+    failures.push(...validateRoadmapDepth(markdown));
   }
 
   if (/as an ai|i cannot inspect|i don't have access/i.test(markdown)) {
@@ -111,16 +114,17 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
   }
 
   return {
-    passed: warnings.length === 0,
-    warnings,
-    score: qualityScore(markdown, warnings)
+    passed: warnings.length === 0 && failures.length === 0,
+    warnings: [...failures, ...warnings],
+    failures,
+    score: qualityScore(markdown, warnings, failures)
   };
 }
 
-function qualityScore(markdown: string, warnings: string[]): number {
+function qualityScore(markdown: string, warnings: string[], failures: string[]): number {
   const evidenceBonus = Math.min(15, countPathEvidence(markdown));
   const lengthBonus = Math.min(10, Math.floor(markdown.trim().length / 2000));
-  const penalty = warnings.length * 12;
+  const penalty = warnings.length * 6 + failures.length * 14;
   return Math.max(0, Math.min(100, 75 + evidenceBonus + lengthBonus - penalty));
 }
 

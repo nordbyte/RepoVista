@@ -53,6 +53,10 @@ export function createInitialMeta(
       failOnCritical: options.failOnCritical,
       progress: options.progress,
       keepLogs: options.keepLogs,
+      auditProfile: options.auditProfile,
+      workspace: options.workspace,
+      allWorkspaces: options.allWorkspaces,
+      incremental: options.incremental,
       repairReports: Boolean(options.repairReports),
       repairAttempts: options.repairAttempts,
       exportFormats: options.exportFormats ?? []

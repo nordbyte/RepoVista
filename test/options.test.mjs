@@ -134,3 +134,57 @@ test("finding workflow commands are recognized", () => {
   assert.equal(revalidate.options.allFindings, true);
   assert.throws(() => parseCliArgs(["triage", "fnd_123", "--status", "ignored"]), /--status/);
 });
+
+test("new operational commands and options are recognized", () => {
+  const doctor = parseCliArgs(["doctor", "--json"]);
+  assert.equal(doctor.action, "doctor");
+  assert.equal(doctor.options.json, true);
+
+  const providers = parseCliArgs(["providers", "test", "codex"]);
+  assert.equal(providers.action, "providers");
+  assert.equal(providers.options.providerAction, "test");
+  assert.equal(providers.options.provider, "codex");
+
+  const baseline = parseCliArgs(["baseline", "add", "fnd_123", "--note", "accepted"]);
+  assert.equal(baseline.action, "baseline");
+  assert.equal(baseline.options.baselineAction, "add");
+  assert.equal(baseline.options.findingId, "fnd_123");
+
+  const suppress = parseCliArgs(["suppress", "fnd_123"]);
+  assert.equal(suppress.action, "suppress");
+  assert.equal(suppress.options.baselineAction, "add");
+
+  const ci = parseCliArgs(["ci", "init", "--dry-run", "--force"]);
+  assert.equal(ci.action, "ci-init");
+  assert.equal(ci.options.dryRun, true);
+  assert.equal(ci.options.force, true);
+
+  const compare = parseCliArgs(["compare", "old", "new", "--format", "json", "--fail-on-regression"]);
+  assert.equal(compare.options.compareFormat, "json");
+  assert.equal(compare.options.compareFailOnRegression, true);
+});
+
+test("audit profiles, workspaces, issue metadata, and incremental mode parse", () => {
+  const parsed = parseCliArgs([
+    "audit",
+    "--audit-profile",
+    "release-readiness",
+    "--workspace",
+    "packages/api",
+    "--all-workspaces",
+    "--incremental",
+    "--label",
+    "repovista",
+    "--assignee",
+    "octocat",
+    "--update-existing"
+  ]);
+
+  assert.equal(parsed.options.auditProfile, "release-readiness");
+  assert.equal(parsed.options.workspace, "packages/api");
+  assert.equal(parsed.options.allWorkspaces, true);
+  assert.equal(parsed.options.incremental, true);
+  assert.deepEqual(parsed.options.issueLabels, ["repovista"]);
+  assert.deepEqual(parsed.options.issueAssignees, ["octocat"]);
+  assert.equal(parsed.options.issueUpdateExisting, true);
+});

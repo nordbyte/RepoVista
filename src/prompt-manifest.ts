@@ -73,6 +73,10 @@ export async function addPromptManifestPhase(
       includedBytes: 0,
       truncated: false,
       readable: true,
+      hashAlgorithm: file.hashAlgorithm,
+      sha256: file.sha256,
+      inclusionReason: file.scopeReason ?? "included through project scan metadata",
+      tokenBudgetEstimate: 0,
       skippedReason: "file content was not embedded; path metadata was included through the inventory and feature map"
     });
   }
@@ -82,10 +86,14 @@ export async function addPromptManifestPhase(
     role: "project-file",
     bytes: file.size,
     includedBytes: 0,
-    truncated: true,
-    readable: true,
-    skippedReason: "omitted from prompt manifest detail because the project file list limit was reached"
-  }));
+      truncated: true,
+      readable: true,
+      hashAlgorithm: file.hashAlgorithm,
+      sha256: file.sha256,
+      inclusionReason: file.scopeReason ?? "omitted after project file list limit",
+      tokenBudgetEstimate: 0,
+      skippedReason: "omitted from prompt manifest detail because the project file list limit was reached"
+    }));
   for (let index = 0; index < (input.omittedProjectFileCount ?? 0); index += 1) {
     omittedFiles.push({
       path: `<additional-omitted-file-${index + 1}>`,
@@ -122,7 +130,9 @@ async function fileEntry(filePath: string, role: PromptManifestFile["role"]): Pr
       bytes: fileStat.size,
       includedBytes: Math.min(fileStat.size, CLIP_LIMIT),
       truncated: fileStat.size > CLIP_LIMIT,
-      readable: fileStat.isFile()
+      readable: fileStat.isFile(),
+      inclusionReason: role === "inventory" ? "primary project inventory context" : "structured feature map context",
+      tokenBudgetEstimate: Math.ceil(Math.min(fileStat.size, CLIP_LIMIT) / 4)
     };
   } catch {
     return {

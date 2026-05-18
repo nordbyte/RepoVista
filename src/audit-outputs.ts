@@ -19,19 +19,48 @@ export async function writeStructuredOutputs(
   evidence: EvidencePack,
   promptManifest: PromptManifest,
   featuresPath: string,
-  structuredReports: StructuredPhaseReport[] = []
+  structuredReports: StructuredPhaseReport[] = [],
+  suppressedFindings: StructuredFinding[] = []
 ): Promise<void> {
   const findingsPath = reportPath(paths.runDir, "findings.json");
   const summaryPath = reportPath(paths.runDir, "summary.json");
+  const reportJsonPath = reportPath(paths.runDir, "report.json");
   const promptManifestPath = reportPath(paths.runDir, "prompt-manifest.json");
   const structuredReportsPath = reportPath(paths.runDir, "structured-reports.json");
   const findingStateDir = await writeFindingState(meta.projectRoot, meta.options.outDir, findings, meta.runId);
   const findingCounts = findingCountsBySeverity(findings);
+  const suppressedFindingCounts = findingCountsBySeverity(suppressedFindings);
   meta.findingCounts = findingCounts;
+  meta.suppressedFindingCounts = suppressedFindingCounts;
   await writeJsonFile(findingsPath, findings);
   await writeJsonFile(promptManifestPath, promptManifest);
   await writeJsonFile(structuredReportsPath, structuredReports);
-  const exportOutputs = await writeFindingExports(paths, findings, meta.options.exportFormats ?? []);
+  const exportOutputs = await writeFindingExports(paths, findings, meta.options.exportFormats ?? [], {
+    meta,
+    evidence,
+    structuredReports,
+    suppressedFindings
+  });
+  await writeJsonFile(reportJsonPath, {
+    schemaVersion: 1,
+    tool: meta.tool,
+    runId: meta.runId,
+    reportDir: meta.reportDir,
+    startedAt: meta.startedAt,
+    completedAt: meta.completedAt,
+    options: meta.options,
+    ai: meta.ai,
+    workspace: meta.workspace,
+    cache: meta.cache,
+    evidence,
+    phases: meta.phases,
+    findings,
+    suppressedFindings,
+    findingCounts,
+    suppressedFindingCounts,
+    structuredReports,
+    promptManifest
+  });
   await writeJsonFile(summaryPath, {
     tool: meta.tool,
     runId: meta.runId,
@@ -54,7 +83,9 @@ export async function writeStructuredOutputs(
     },
     phases: meta.phases,
     findingCounts,
+    suppressedFindingCounts,
     outputs: {
+      reportJson: reportJsonPath,
       promptManifestJson: promptManifestPath,
       findingStateDir,
       featuresJson: featuresPath,
@@ -65,6 +96,7 @@ export async function writeStructuredOutputs(
   meta.outputs = {
     findingsJson: findingsPath,
     summaryJson: summaryPath,
+    reportJson: reportJsonPath,
     promptManifestJson: promptManifestPath,
     findingStateDir,
     featuresJson: featuresPath,

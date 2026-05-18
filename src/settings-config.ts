@@ -29,6 +29,10 @@ export interface RepoVistaSettings {
   progress?: boolean;
   ci?: boolean;
   failOnCritical?: boolean;
+  auditProfile?: AuditOptions["auditProfile"];
+  workspace?: string;
+  allWorkspaces?: boolean;
+  incremental?: boolean;
 }
 
 export function getSettingsPath(): string {
@@ -77,6 +81,10 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     progress: settings.progress ?? defaults.progress,
     ci: settings.ci ?? defaults.ci,
     failOnCritical: settings.failOnCritical ?? defaults.failOnCritical,
+    auditProfile: settings.auditProfile ?? defaults.auditProfile,
+    workspace: settings.workspace ?? defaults.workspace,
+    allWorkspaces: settings.allWorkspaces ?? defaults.allWorkspaces,
+    incremental: settings.incremental ?? defaults.incremental,
     runChecks: settings.runChecks ?? defaults.runChecks,
     checkCommands: settings.checkCommands ? [...settings.checkCommands] : [...defaults.checkCommands],
     checkTimeoutSeconds: settings.checkTimeoutSeconds ?? defaults.checkTimeoutSeconds,
@@ -104,7 +112,7 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     sanitized.parallel = settings.parallel;
   }
 
-  for (const key of ["model", "profile", "reasoning", "language", "outDir"] as const) {
+  for (const key of ["model", "profile", "reasoning", "language", "outDir", "workspace"] as const) {
     const value = settings[key];
     if (typeof value === "string" && value.trim()) {
       sanitized[key] = value.trim();
@@ -113,6 +121,16 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
 
   if (settings.sandbox === "read-only" || settings.sandbox === "workspace-write") {
     sanitized.sandbox = settings.sandbox;
+  }
+
+  if (
+    settings.auditProfile === "quick" ||
+    settings.auditProfile === "security" ||
+    settings.auditProfile === "pr-review" ||
+    settings.auditProfile === "release-readiness" ||
+    settings.auditProfile === "architecture"
+  ) {
+    sanitized.auditProfile = settings.auditProfile;
   }
 
   for (const key of ["includes", "ignores", "checkCommands"] as const) {
@@ -143,7 +161,7 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     }
   }
 
-  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports"] as const) {
+  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "allWorkspaces", "incremental"] as const) {
     if (typeof settings[key] === "boolean") {
       sanitized[key] = settings[key];
     }

@@ -3,7 +3,10 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runAudit } from "./audit.js";
-import { runCompareCommand } from "./compare.js";
+import { compareHasRegression, runCompareCommand } from "./compare.js";
+import { runBaselineCommand } from "./baseline.js";
+import { runCiInitCommand } from "./ci-init.js";
+import { runDoctorCommand } from "./doctor.js";
 import { CliUsageError, RepoVistaError } from "./errors.js";
 import {
   runNextFindingCommand,
@@ -15,6 +18,8 @@ import {
   runTriageFindingCommand
 } from "./finding-state.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
+import { runProvidersCommand } from "./provider-commands.js";
+import { runProfilesCommand } from "./profiles.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
 import { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
@@ -62,11 +67,39 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runPlanCommand(optionsWithSettings.options));
       return 0;
     }
+    if (optionsWithSettings.action === "doctor") {
+      process.stdout.write(await runDoctorCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "providers") {
+      process.stdout.write(await runProvidersCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "profiles") {
+      process.stdout.write(runProfilesCommand(optionsWithSettings.options.json));
+      return 0;
+    }
+    if (optionsWithSettings.action === "ci-init") {
+      process.stdout.write(await runCiInitCommand(optionsWithSettings.options));
+      return 0;
+    }
     if (optionsWithSettings.action === "compare") {
       process.stdout.write(await runCompareCommand(
         optionsWithSettings.options.compareOldRun ?? "",
-        optionsWithSettings.options.compareNewRun ?? ""
+        optionsWithSettings.options.compareNewRun ?? "",
+        process.cwd(),
+        { format: optionsWithSettings.options.compareFormat ?? "markdown" }
       ));
+      if (optionsWithSettings.options.compareFailOnRegression && await compareHasRegression(
+        optionsWithSettings.options.compareOldRun ?? "",
+        optionsWithSettings.options.compareNewRun ?? ""
+      )) {
+        return 2;
+      }
+      return 0;
+    }
+    if (optionsWithSettings.action === "baseline" || optionsWithSettings.action === "suppress") {
+      process.stdout.write(await runBaselineCommand(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "next") {

@@ -1,6 +1,14 @@
 import { writeFile } from "node:fs/promises";
 import { reportPath } from "./reports.js";
-import type { FindingEvidenceReference, ReportExportFormat, RunPaths, StructuredFinding } from "./types.js";
+import type {
+  AuditMeta,
+  EvidencePack,
+  FindingEvidenceReference,
+  ReportExportFormat,
+  RunPaths,
+  StructuredFinding,
+  StructuredPhaseReport
+} from "./types.js";
 
 export interface FindingExportPaths {
   findingsSarif?: string;
@@ -9,10 +17,18 @@ export interface FindingExportPaths {
   githubAnnotationsJson?: string;
 }
 
+export interface FindingExportContext {
+  meta?: AuditMeta;
+  evidence?: EvidencePack;
+  structuredReports?: StructuredPhaseReport[];
+  suppressedFindings?: StructuredFinding[];
+}
+
 export async function writeFindingExports(
   paths: RunPaths,
   findings: StructuredFinding[],
-  formats: ReportExportFormat[]
+  formats: ReportExportFormat[],
+  context: FindingExportContext = {}
 ): Promise<FindingExportPaths> {
   const uniqueFormats = new Set(formats);
   const outputs: FindingExportPaths = {};
@@ -29,7 +45,7 @@ export async function writeFindingExports(
 
   if (uniqueFormats.has("html")) {
     outputs.htmlReport = reportPath(paths.runDir, "report.html");
-    await writeFile(outputs.htmlReport, renderHtml(findings), "utf8");
+    await writeFile(outputs.htmlReport, renderHtml(findings, context), "utf8");
   }
 
   if (uniqueFormats.has("github")) {
@@ -41,16 +57,18 @@ export async function writeFindingExports(
 }
 
 function toSarif(findings: StructuredFinding[]): Record<string, unknown> {
-  const rules = new Map(findings.map((finding) => [finding.id, {
-    id: finding.id,
+  const rules = new Map(findings.map((finding) => [ruleId(finding), {
+    id: ruleId(finding),
     name: finding.title,
     shortDescription: { text: finding.title },
     fullDescription: { text: finding.problemRationale ?? finding.evidence ?? finding.title },
+    helpUri: "https://github.com/nordbyte/RepoVista",
     help: { text: finding.recommendation ?? "Review the RepoVista finding." },
     properties: {
       severity: finding.severity,
       category: finding.category,
-      confidence: finding.confidence
+      confidence: finding.confidence,
+      tags: ["repovista", finding.category, finding.severity].filter(Boolean)
     }
   }]));
   return {
@@ -66,10 +84,18 @@ function toSarif(findings: StructuredFinding[]): Record<string, unknown> {
           }
         },
         results: findings.map((finding) => ({
-          ruleId: finding.id,
+          ruleId: ruleId(finding),
           level: sarifLevel(finding.severity),
           message: { text: finding.evidence ?? finding.title },
-          locations: findingLocations(finding)
+          locations: findingLocations(finding),
+          partialFingerprints: {
+            repovistaSignature: finding.signature ?? finding.id
+          },
+          properties: {
+            findingId: finding.id,
+            status: finding.status ?? "open",
+            confidence: finding.confidence
+          }
         }))
       }
     ]
@@ -114,7 +140,11 @@ function toGithubAnnotations(findings: StructuredFinding[]): Array<Record<string
       annotation_level: githubLevel(finding.severity),
       message: `${finding.title}: ${finding.evidence ?? finding.recommendation ?? "RepoVista finding"}`,
       title: finding.title,
-      raw_details: finding.problemRationale
+      raw_details: [
+        finding.problemRationale,
+        finding.recommendation ? `Recommendation: ${finding.recommendation}` : undefined,
+        finding.signature ? `Signature: ${finding.signature}` : undefined
+      ].filter(Boolean).join("\n\n")
     }));
   });
 }
@@ -135,7 +165,18 @@ function findingReferences(finding: StructuredFinding): FindingEvidenceReference
     : finding.paths.map((path) => ({ path }));
 }
 
-function renderHtml(findings: StructuredFinding[]): string {
+function ruleId(finding: StructuredFinding): string {
+  return `repovista/${finding.signature ?? finding.id}`.replace(/[^A-Za-z0-9_.:/-]/g, "_");
+}
+
+function renderHtml(findings: StructuredFinding[], context: FindingExportContext): string {
+  const meta = context.meta;
+  const phaseRows = (context.structuredReports ?? []).map((report) => `<tr>
+<td>${escapeHtml(report.phaseId)}</td>
+<td>${escapeHtml(report.executiveSummary ?? report.keyPoints[0] ?? "")}</td>
+<td>${escapeHtml(String(report.evidenceReferences.length))}</td>
+<td>${escapeHtml(String(report.recommendations.length))}</td>
+</tr>`).join("\n");
   const rows = findings.map((finding) => `<tr>
 <td>${escapeHtml(finding.severity)}</td>
 <td>${escapeHtml(finding.status ?? "open")}</td>
@@ -143,24 +184,57 @@ function renderHtml(findings: StructuredFinding[]): string {
 <td>${escapeHtml(finding.paths.join(", ") || "n/a")}</td>
 <td>${escapeHtml(finding.recommendation ?? "")}</td>
 </tr>`).join("\n");
+  const proposals = (context.structuredReports ?? [])
+    .flatMap((report) => report.proposals ?? [])
+    .map((proposal) => `<li><strong>${escapeHtml(proposal.title)}</strong><br>${escapeHtml(proposal.description)}<br><small>${escapeHtml(proposal.priority)} priority, ${escapeHtml(proposal.effort)} effort, ${escapeHtml(proposal.confidence)} confidence</small></li>`)
+    .join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>RepoVista Findings</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; color: #171717; }
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #171717; line-height: 1.45; }
+    header { border-bottom: 1px solid #d4d4d4; margin-bottom: 1.5rem; padding-bottom: 1rem; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin: 1rem 0; }
+    .meta div { border: 1px solid #d4d4d4; padding: .75rem; border-radius: 6px; background: #fafafa; }
     table { border-collapse: collapse; width: 100%; }
     th, td { border: 1px solid #d4d4d4; padding: .5rem; vertical-align: top; }
     th { background: #f5f5f5; text-align: left; }
+    section { margin-top: 2rem; }
+    li { margin-bottom: .75rem; }
   </style>
 </head>
 <body>
-  <h1>RepoVista Findings</h1>
+  <header>
+    <h1>RepoVista Report</h1>
+    <div class="meta">
+      <div><strong>Run</strong><br>${escapeHtml(meta?.runId ?? "finding-state")}</div>
+      <div><strong>Provider</strong><br>${escapeHtml(meta?.ai.displayName ?? "not recorded")}</div>
+      <div><strong>Model</strong><br>${escapeHtml(meta?.ai.model ?? "not recorded")}</div>
+      <div><strong>Reasoning</strong><br>${escapeHtml(meta?.ai.reasoning ?? "not recorded")}</div>
+      <div><strong>Checks</strong><br>${escapeHtml(context.evidence?.checks.enabled ? `${context.evidence.checks.commands.length} command(s)` : "disabled")}</div>
+      <div><strong>Suppressed</strong><br>${escapeHtml(String(context.suppressedFindings?.length ?? 0))}</div>
+    </div>
+  </header>
+  <section>
+  <h2>Findings</h2>
   <table>
     <thead><tr><th>Severity</th><th>Status</th><th>Title</th><th>Paths</th><th>Recommendation</th></tr></thead>
     <tbody>${rows || "<tr><td colspan=\"5\">No findings</td></tr>"}</tbody>
   </table>
+  </section>
+  <section>
+  <h2>Phase Summaries</h2>
+  <table>
+    <thead><tr><th>Phase</th><th>Summary</th><th>Evidence refs</th><th>Recommendations</th></tr></thead>
+    <tbody>${phaseRows || "<tr><td colspan=\"4\">No structured phase summaries</td></tr>"}</tbody>
+  </table>
+  </section>
+  <section>
+  <h2>Roadmap Proposals</h2>
+  <ul>${proposals || "<li>No roadmap proposals recorded.</li>"}</ul>
+  </section>
 </body>
 </html>
 `;

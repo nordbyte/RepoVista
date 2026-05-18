@@ -4,6 +4,8 @@ export type AiProviderId = string;
 
 export type ParallelMode = "off" | "auto" | number;
 export type ReportExportFormat = "sarif" | "html" | "jsonl" | "github";
+export type CompareFormat = "markdown" | "json" | "html";
+export type AuditProfileId = "quick" | "security" | "pr-review" | "release-readiness" | "architecture";
 
 export type CliAction =
   | "audit"
@@ -15,6 +17,12 @@ export type CliAction =
   | "settings-reset"
   | "findings"
   | "compare"
+  | "doctor"
+  | "providers"
+  | "baseline"
+  | "suppress"
+  | "ci-init"
+  | "profiles"
   | "next"
   | "show"
   | "triage"
@@ -53,8 +61,14 @@ export interface AuditOptions {
   failOnCritical: boolean;
   progress: boolean;
   keepLogs: boolean;
+  auditProfile?: AuditProfileId;
+  workspace?: string;
+  allWorkspaces?: boolean;
+  incremental?: boolean;
   compareOldRun?: string;
   compareNewRun?: string;
+  compareFormat?: CompareFormat;
+  compareFailOnRegression?: boolean;
   since?: string;
   prMode?: boolean;
   baseRef?: string;
@@ -64,6 +78,12 @@ export interface AuditOptions {
   allFindings?: boolean;
   providerRevalidate?: boolean;
   dryRun?: boolean;
+  force?: boolean;
+  providerAction?: "list" | "test";
+  baselineAction?: "list" | "add" | "remove" | "prune";
+  issueLabels?: string[];
+  issueAssignees?: string[];
+  issueUpdateExisting?: boolean;
   settingsKey?: string;
   settingsValue?: string;
 }
@@ -276,6 +296,10 @@ export interface AuditMeta {
     failOnCritical: boolean;
     progress: boolean;
     keepLogs: boolean;
+    auditProfile?: AuditProfileId;
+    workspace?: string;
+    allWorkspaces?: boolean;
+    incremental?: boolean;
   };
   codex: {
     model: string;
@@ -308,13 +332,18 @@ export interface AuditMeta {
     warnings: string[];
   };
   parallel?: ParallelExecutionMeta;
+  workspace?: WorkspaceDetectionResult;
+  cache?: AuditCacheMeta;
   evidence?: EvidencePack;
   phases: PhaseReportStatus[];
   findings: StructuredFinding[];
+  suppressedFindings?: StructuredFinding[];
   findingCounts?: Record<string, number>;
+  suppressedFindingCounts?: Record<string, number>;
   outputs?: {
     findingsJson?: string;
     summaryJson?: string;
+    reportJson?: string;
     promptManifestJson?: string;
     findingStateDir?: string;
     featuresJson?: string;
@@ -332,6 +361,36 @@ export interface ProjectFileSummary {
   extension: string;
   size: number;
   language: string;
+  mtimeMs?: number;
+  hashAlgorithm?: "sha256";
+  sha256?: string;
+  scopeReason?: string;
+}
+
+export interface WorkspaceInfo {
+  name: string;
+  path: string;
+  packageManager: string;
+  packageJsonPath?: string;
+  patterns: string[];
+}
+
+export interface WorkspaceDetectionResult {
+  detected: boolean;
+  selected?: string;
+  allWorkspaces: boolean;
+  workspaces: WorkspaceInfo[];
+  warnings: string[];
+}
+
+export interface AuditCacheMeta {
+  enabled: boolean;
+  cachePath: string;
+  scanFingerprint: string;
+  hit: boolean;
+  previousRunDir?: string;
+  previousRunId?: string;
+  updatedAt: string;
 }
 
 export interface ProjectArea {
@@ -388,6 +447,10 @@ export interface PromptManifestFile {
   includedBytes: number;
   truncated: boolean;
   readable: boolean;
+  hashAlgorithm?: "sha256";
+  sha256?: string;
+  inclusionReason?: string;
+  tokenBudgetEstimate?: number;
   skippedReason?: string;
 }
 

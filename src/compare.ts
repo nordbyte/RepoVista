@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { RepoVistaError } from "./errors.js";
-import type { AuditMeta, StructuredFinding } from "./types.js";
+import type { AuditMeta, CompareFormat, StructuredFinding } from "./types.js";
 
 export interface LoadedRun {
   runDir: string;
@@ -48,6 +48,22 @@ export interface ReportMetric {
   pathEvidence: number;
 }
 
+export interface RunComparison {
+  oldRun: LoadedRun;
+  newRun: LoadedRun;
+  findingCounts: {
+    old: Record<string, number>;
+    new: Record<string, number>;
+    deltas: Record<string, number>;
+  };
+  changes: {
+    added: StructuredFinding[];
+    resolved: StructuredFinding[];
+    persisting: StructuredFinding[];
+  };
+  regressions: StructuredFinding[];
+}
+
 type SummaryPhase = NonNullable<RunSummary["phases"]>[number];
 
 const REPORT_FILES = [
@@ -61,11 +77,54 @@ const REPORT_FILES = [
 export async function runCompareCommand(
   oldRunDirectory: string,
   newRunDirectory: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  options: { format?: CompareFormat } = {}
 ): Promise<string> {
+  const comparison = await buildRunComparison(projectRoot, oldRunDirectory, newRunDirectory);
+  if (options.format === "json") {
+    return `${JSON.stringify(comparison, null, 2)}\n`;
+  }
+  if (options.format === "html") {
+    return renderRunComparisonHtml(comparison);
+  }
+  return renderRunComparison(comparison.oldRun, comparison.newRun);
+}
+
+export async function compareHasRegression(
+  oldRunDirectory: string,
+  newRunDirectory: string,
+  projectRoot = process.cwd()
+): Promise<boolean> {
+  const comparison = await buildRunComparison(projectRoot, oldRunDirectory, newRunDirectory);
+  return comparison.regressions.length > 0;
+}
+
+export async function buildRunComparison(
+  projectRoot: string,
+  oldRunDirectory: string,
+  newRunDirectory: string
+): Promise<RunComparison> {
   const oldRun = await loadRun(projectRoot, oldRunDirectory);
   const newRun = await loadRun(projectRoot, newRunDirectory);
-  return renderRunComparison(oldRun, newRun);
+  const changes = diffFindings(oldRun.findings, newRun.findings);
+  const oldCounts = findingCounts(oldRun);
+  const newCounts = findingCounts(newRun);
+  const severities = ["critical", "high", "medium", "low", "unknown"];
+  const deltas = Object.fromEntries(severities.map((severity) => [
+    severity,
+    (newCounts[severity] ?? 0) - (oldCounts[severity] ?? 0)
+  ]));
+  return {
+    oldRun,
+    newRun,
+    findingCounts: {
+      old: oldCounts,
+      new: newCounts,
+      deltas
+    },
+    changes,
+    regressions: changes.added.filter((finding) => finding.severity === "critical" || finding.severity === "high")
+  };
 }
 
 export function renderRunComparison(oldRun: LoadedRun, newRun: LoadedRun): string {
@@ -119,6 +178,40 @@ ${REPORT_FILES.map((fileName) => renderMetricRow(fileName, oldRun.reportMetrics,
 | Phase | Old | New |
 |---|---|---|
 ${renderPhaseRows(oldRun, newRun)}
+`;
+}
+
+export function renderRunComparisonHtml(comparison: RunComparison): string {
+  const markdown = renderRunComparison(comparison.oldRun, comparison.newRun);
+  const rows = ["critical", "high", "medium", "low", "unknown"].map((severity) => `<tr>
+<td>${escapeHtml(severity)}</td>
+<td>${comparison.findingCounts.old[severity] ?? 0}</td>
+<td>${comparison.findingCounts.new[severity] ?? 0}</td>
+<td>${formatDelta(comparison.findingCounts.deltas[severity] ?? 0)}</td>
+</tr>`).join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RepoVista Comparison</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #171717; line-height: 1.45; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #d4d4d4; padding: .5rem; text-align: left; vertical-align: top; }
+    th { background: #f5f5f5; }
+    pre { white-space: pre-wrap; background: #f7f7f7; padding: 1rem; border: 1px solid #d4d4d4; }
+  </style>
+</head>
+<body>
+  <h1>RepoVista Comparison</h1>
+  <p>Regressions: ${comparison.regressions.length}</p>
+  <table>
+    <thead><tr><th>Severity</th><th>Old</th><th>New</th><th>Delta</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <pre>${escapeHtml(markdown)}</pre>
+</body>
+</html>
 `;
 }
 
@@ -325,4 +418,12 @@ function normalizeText(value: string): string {
 
 function cell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

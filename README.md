@@ -65,6 +65,8 @@ Examples:
 ```sh
 repovista audit --language English --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
+repovista audit --audit-profile release-readiness
+repovista audit --workspace packages/api --incremental
 repovista audit --parallel auto
 repovista audit --parallel 3
 repovista audit --out reports/repovista --keep-logs
@@ -75,7 +77,12 @@ repovista audit --resume .repovista/2026-05-18T14-57-32-123Z
 repovista audit --phase risk-and-bug --phase summary
 repovista audit --since origin/main
 repovista audit --pr --base main
-repovista compare .repovista/old-run .repovista/new-run
+repovista doctor
+repovista providers list
+repovista providers test codex
+repovista profiles
+repovista ci init --dry-run
+repovista compare .repovista/old-run .repovista/new-run --format json --fail-on-regression
 repovista findings --json
 repovista findings --export sarif
 repovista next
@@ -84,7 +91,9 @@ repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista triage --all --status uncertain --note "needs review"
 repovista revalidate fnd_abc123def456
 repovista revalidate fnd_abc123def456 --provider-revalidate
-repovista issue fnd_abc123def456 --dry-run
+repovista baseline add fnd_abc123def456 --note "accepted risk"
+repovista suppress fnd_abc123def456 --note "accepted risk"
+repovista issue fnd_abc123def456 --label repovista --update-existing --dry-run
 repovista settings get model
 repovista settings set reasoning xhigh
 repovista settings reset reasoning
@@ -96,6 +105,8 @@ Each run creates its own timestamped folder:
 
 ```text
 .repovista/
+  baseline.json
+  cache/
   findings/
   project-map.json
   2026-05-18T14-57-32-123Z/
@@ -109,6 +120,7 @@ Each run creates its own timestamped folder:
     findings.jsonl
     findings.sarif
     github-annotations.json
+    report.json
     report.html
     index.md
     meta.json
@@ -119,7 +131,7 @@ Each run creates its own timestamped folder:
     logs/
 ```
 
-`project-map.json` is written by `repovista init` and stores the repository areas, semantic features, recommended thread count, and default shard assignments. `.repovista/findings/` stores the persistent finding lifecycle state across runs. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `features.json` stores the run-specific semantic feature map and optional diff scope. `findings.json` contains structured risk findings extracted from the risk report's JSON schema block, with Markdown fields as a fallback for older reports. `structured-reports.json` stores normalized phase schemas for architecture, code quality, risk, roadmap, and summary phases. `prompt-manifest.json` records prompt sizes, approximate token counts, granular project file metadata, omitted files, truncation reasons, semantic features, and diff scope. `summary.json` contains machine-readable run, phase, finding, provider, parallel, evidence, and output summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality score, report quality warnings, and preflight information. `findings.jsonl`, `findings.sarif`, `github-annotations.json`, and `report.html` are written when requested with `--export`. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
+`project-map.json` is written by `repovista init` and stores the repository areas, semantic features, recommended thread count, and default shard assignments. `.repovista/findings/` stores the persistent finding lifecycle state across runs. `baseline.json` stores accepted suppressions, and `cache/project-scan.json` stores the latest project scan fingerprint for incremental runs. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `features.json` stores the run-specific semantic feature map and optional diff scope. `findings.json` contains active structured risk findings extracted from the risk report's JSON schema block, with Markdown fields as a fallback for older reports. `report.json` is the complete machine-readable run artifact with metadata, evidence, findings, suppressed findings, structured phase reports, prompt manifest, workspace metadata, and cache metadata. `structured-reports.json` stores normalized phase schemas for architecture, code quality, risk, roadmap, and summary phases. `prompt-manifest.json` records prompt sizes, approximate token counts, project file hashes where available, inclusion reasons, omitted files, truncation reasons, semantic features, and diff scope. `summary.json` contains machine-readable run, phase, finding, provider, parallel, evidence, and output summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, phase status, shard status, report quality score, report quality warnings, workspace scope, cache status, and preflight information. `findings.jsonl`, `findings.sarif`, `github-annotations.json`, and the full `report.html` are written when requested with `--export`. `shards/` is created when a shardable phase runs in parallel. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## Comparing Reports
 
@@ -130,6 +142,8 @@ repovista compare .repovista/2026-05-18T14-57-32-123Z .repovista/2026-05-18T16-2
 ```
 
 The comparison prints Markdown with provider/model/reasoning metadata, finding count deltas, added/resolved/persisting findings, report line and evidence-reference deltas, and phase quality status.
+
+Use `--format json` or `--format html` for machine-readable or browser output. `--fail-on-regression` exits with code `2` when the new run adds critical or high findings.
 
 ## Finding Workflow
 
@@ -146,10 +160,30 @@ repovista revalidate --all
 repovista revalidate fnd_abc123def456 --provider-revalidate
 repovista findings --json
 repovista findings --export sarif,github
+repovista baseline list
+repovista baseline add fnd_abc123def456 --note "accepted risk"
+repovista baseline remove fnd_abc123def456
+repovista baseline prune
 repovista issue fnd_abc123def456 --dry-run
 ```
 
 Evidence validation checks that referenced paths stay inside the project root, exist, and optionally match line ranges or quotes from schema-based `evidenceReferences`. Local revalidation is read-only: valid evidence keeps a finding open, missing or changed evidence marks it fixed when all references disappeared, and weak evidence marks it uncertain. Provider revalidation asks the configured provider for a read-only status decision and stores the revalidation report under `.repovista/revalidations/`. `repovista issue` uses the GitHub CLI (`gh`) and supports `--dry-run` for previewing the issue body.
+
+Baseline suppressions remove accepted findings from active run outputs and record them as suppressed findings in `report.json`, `summary.json`, and `meta.json`. Issue creation deduplicates existing issues by finding id; use `--update-existing` to add a fresh comment and update labels or assignees instead of creating another issue.
+
+## Doctor, Profiles, and Workspaces
+
+Use `repovista doctor` before long runs to check project recognition, report output safety, settings, provider executables, plugin diagnostics, Git state, and detected workspaces. `repovista providers list` shows built-in and plugin providers, and `repovista providers test <provider>` runs the provider version command with a timeout.
+
+Built-in audit profiles tune phases and defaults:
+
+- `quick`: risk plus summary for a fast orientation pass.
+- `security`: risk-heavy strict run with checks, repair, and CI-friendly exports.
+- `pr-review`: diff-focused PR review with checks and GitHub annotations.
+- `release-readiness`: full strict pre-release audit with checks, repair, parallel mode, and all exports.
+- `architecture`: architecture plus roadmap focus.
+
+Workspace detection reads npm/yarn package workspaces and `pnpm-workspace.yaml`. Use `--workspace <name-or-path>` to focus inventory and scan metadata on one workspace, or `--all-workspaces` to record the full workspace map.
 
 ## CLI Options
 
@@ -163,6 +197,10 @@ Evidence validation checks that referenced paths stay inside the project root, e
 | `--since <git-ref>` | Focus the audit on files changed since the given Git ref |
 | `--pr` | PR mode with `origin/main` as the default diff base unless `--base` is set |
 | `--base <git-ref>` | Base ref for PR or diff-focused audits |
+| `--audit-profile <name>` | Apply a built-in profile: `quick`, `security`, `pr-review`, `release-readiness`, or `architecture` |
+| `--workspace <name-or-path>` | Focus scan metadata and inventory includes on one detected workspace |
+| `--all-workspaces` | Record all detected workspaces in metadata |
+| `--incremental` | Enable scan-cache reuse using file hashes and the previous run fingerprint |
 | `--model <name>` | Override the provider model |
 | `--profile <name>` | Use a Codex configuration profile |
 | `--reasoning <effort>` | Override provider reasoning effort |
@@ -185,6 +223,8 @@ Evidence validation checks that referenced paths stay inside the project root, e
 | `--repair-reports` | Run a provider repair pass when a report misses quality gates |
 | `--repair-attempts <n>` | Maximum repair attempts per phase, `1`-`3`, default `1` |
 | `--export <formats>` | Export findings as `sarif`, `html`, `jsonl`, or `github`; comma-separated |
+| `--format <format>` | Compare output format: `markdown`, `json`, or `html` |
+| `--fail-on-regression` | Return exit code `2` from compare when new critical/high findings appear |
 | `--ci` | CI-friendly mode without progress output |
 | `--fail-on-critical` | Return exit code `2` in CI when critical findings are detected |
 | `--no-progress` | Reduce progress output |
@@ -194,7 +234,11 @@ Evidence validation checks that referenced paths stay inside the project root, e
 | `--note <text>` | Triage note stored in finding history |
 | `--all` | Include all finding statuses or revalidate all findings |
 | `--provider-revalidate` | Use the configured provider for finding revalidation |
-| `--dry-run` | Preview GitHub issue creation without calling `gh issue create` |
+| `--label <name>` | Add a GitHub issue label; repeatable |
+| `--assignee <login>` | Add a GitHub issue assignee; repeatable |
+| `--update-existing` | Comment on an existing issue for the finding id instead of creating a duplicate |
+| `--dry-run` | Preview GitHub issue or workflow creation without writing remotely |
+| `--force` | Overwrite generated files where supported, currently `repovista ci init` |
 | `--version` | Show version |
 | `--help` | Show help |
 
@@ -298,11 +342,11 @@ Settings are stored in `~/.config/repovista/settings.json` by default. Set `REPO
 
 CLI flags always override saved settings for the current run.
 
-The settings menu and non-interactive settings commands can persist provider, parallel mode, model, reasoning, Codex profile, Codex fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, repair behavior, export formats, JSON/log settings, CI mode, and critical-finding behavior.
+The settings menu and non-interactive settings commands can persist provider, parallel mode, audit profile, workspace defaults, incremental scan cache, model, reasoning, Codex profile, Codex fast mode, sandbox, language, output directory, include/ignore patterns, local check behavior, check commands, timeouts, strict report gates, repair behavior, export formats, JSON/log settings, CI mode, and critical-finding behavior.
 
 ## Provider Plugins
 
-Codex CLI and Claude Code CLI are built in. Additional provider adapters can be registered with JSON plugin definitions through `REPOVISTA_PROVIDER_PLUGIN=/path/provider.json` or `REPOVISTA_PROVIDER_PLUGINS=/path/a.json:/path/b.json`.
+Codex CLI and Claude Code CLI are built in. Additional provider adapters can be registered with JSON plugin definitions through `REPOVISTA_PROVIDER_PLUGIN=/path/provider.json`, `REPOVISTA_PROVIDER_PLUGINS=/path/a.json:/path/b.json`, or a repository-local `repovista.providers.json`.
 
 ```json
 {
@@ -317,11 +361,14 @@ Codex CLI and Claude Code CLI are built in. Additional provider adapters can be 
 
 Provider prompts are sent on stdin. Use `outputMode: "stdout"` when the provider prints the final report, or `outputMode: "report-file"` when the provider writes to `{reportPath}` itself. Supported templates include `{projectRoot}`, `{reportPath}`, `{phaseId}`, `{phaseTitle}`, `{model}`, `{profile}`, `{reasoning}`, `{sandbox}`, `{jsonEvents}`, and `{fastMode}`.
 
+Run `repovista providers list --json` or `repovista doctor --json` to inspect plugin load diagnostics. Invalid provider definitions are reported instead of being silently ignored.
+
 ## CI Notes
 
 For CI/CD:
 
 ```sh
+repovista ci init
 repovista audit --ci --json --fail-on-critical
 ```
 
@@ -344,6 +391,9 @@ Reports can be stored as CI artifacts from the selected `--out` directory.
 - Rerun only the risk report and summary: `repovista audit --resume .repovista/<run-id> --phase risk-and-bug --phase summary`.
 - Compare two reports: `repovista compare .repovista/<old-run-id> .repovista/<new-run-id>`.
 - Work through findings: `repovista next`, then `repovista show <id>`, `repovista triage <id> --status fixed`, or `repovista revalidate <id>`.
+- Suppress accepted findings: `repovista baseline add <id> --note "accepted risk"`.
+- Check setup before a long run: `repovista doctor`.
+- Create a GitHub Actions workflow: `repovista ci init`.
 - Configure persistent defaults: run `repovista settings`, choose a model with Space, return with Enter, then save.
 - Run with Claude Code: `repovista audit --provider claude --model sonnet --reasoning high`.
 - Keep technical logs for troubleshooting: `repovista audit --keep-logs`.

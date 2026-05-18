@@ -1,4 +1,5 @@
-import { lstat, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
 import { languageForPath } from "./work-partitioner.js";
@@ -20,6 +21,7 @@ export interface ProjectScanResult {
 }
 
 const DEFAULT_MAX_SCAN_FILES = 30_000;
+const MAX_HASH_BYTES = 1024 * 1024;
 
 export async function scanProject(projectRoot: string, options: ProjectScanOptions): Promise<ProjectScanResult> {
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_SCAN_FILES;
@@ -96,11 +98,24 @@ async function walkProject(
       continue;
     }
 
+    const contentHash = stats.size <= MAX_HASH_BYTES ? await fileSha256(absolutePath) : undefined;
     state.files.push({
       relativePath,
       extension: path.extname(relativePath).toLowerCase(),
       size: stats.size,
-      language: languageForPath(relativePath)
+      language: languageForPath(relativePath),
+      mtimeMs: Math.round(stats.mtimeMs),
+      hashAlgorithm: contentHash ? "sha256" : undefined,
+      sha256: contentHash,
+      scopeReason: "matched repository scan include/ignore settings"
     });
+  }
+}
+
+async function fileSha256(filePath: string): Promise<string | undefined> {
+  try {
+    return createHash("sha256").update(await readFile(filePath)).digest("hex");
+  } catch {
+    return undefined;
   }
 }

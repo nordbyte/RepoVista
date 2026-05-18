@@ -7,10 +7,11 @@ import {
   type ProviderModelInfo
 } from "./provider-models.js";
 import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
+import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
 import type { AiProviderId, ParallelMode, SandboxMode } from "./types.js";
 
-type MenuScreen = "main" | "provider" | "parallel" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
+type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
@@ -23,9 +24,9 @@ interface MenuState {
 }
 
 type MainItem =
-  | { id: "provider" | "parallel" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
-  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
-  | { id: "profile" | "outDir" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "parallel" | "auditProfile" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
+  | { id: "profile" | "workspace" | "outDir" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
 const LANGUAGE_OPTIONS = ["English", "German", "Spanish", "French", "Italian", "Portuguese"];
@@ -126,6 +127,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
   return [
     `Provider: ${provider.displayName}`,
     `Parallel mode: ${formatParallel(settings.parallel ?? "off")}`,
+    `Audit profile: ${settings.auditProfile ?? "none"}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${settings.reasoning ?? "model default"}`,
     `Codex profile: ${settings.profile ?? "none"}`,
@@ -133,6 +135,9 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Sandbox: ${settings.sandbox ?? "read-only"}`,
     `Language: ${settings.language ?? "English"}`,
     `Output directory: ${settings.outDir ?? ".repovista"}`,
+    `Workspace: ${settings.workspace ?? "all"}`,
+    `All workspaces: ${settings.allWorkspaces ? "on" : "off"}`,
+    `Incremental scan cache: ${settings.incremental ? "on" : "off"}`,
     `Include patterns: ${formatArray(settings.includes)}`,
     `Ignore patterns: ${formatArray(settings.ignores)}`,
     `Run checks: ${settings.runChecks ? "on" : "off"}`,
@@ -190,6 +195,7 @@ function activateCurrentItem(state: MenuState): void {
   switch (item.id) {
     case "provider":
     case "parallel":
+    case "auditProfile":
     case "model":
     case "reasoning":
     case "sandbox":
@@ -208,9 +214,12 @@ function activateCurrentItem(state: MenuState): void {
     case "failOnCritical":
     case "strictReports":
     case "repairReports":
+    case "allWorkspaces":
+    case "incremental":
       toggleBoolean(state, item.id);
       break;
     case "profile":
+    case "workspace":
     case "outDir":
     case "includes":
     case "ignores":
@@ -254,6 +263,12 @@ function toggleCurrentSelection(state: MenuState): void {
   if (state.screen === "parallel") {
     const selected = PARALLEL_OPTIONS[state.cursor];
     state.settings.parallel = state.settings.parallel === selected ? undefined : selected;
+    return;
+  }
+
+  if (state.screen === "auditProfile") {
+    const selected = AUDIT_PROFILES[state.cursor]?.id;
+    state.settings.auditProfile = state.settings.auditProfile === selected ? undefined : selected;
     return;
   }
 
@@ -334,6 +349,8 @@ function currentItems(state: MenuState): string[] {
       });
     case "parallel":
       return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === (state.settings.parallel ?? "off"), formatParallel(parallel)));
+    case "auditProfile":
+      return AUDIT_PROFILES.map((profile) => checkbox(profile.id === state.settings.auditProfile, `${profile.id} - ${profile.description}`));
     case "model":
       return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
@@ -371,7 +388,7 @@ async function editTextSetting(
   const answer = await promptForText(input, output, `${label}${current ? ` [${current}]` : ""}`);
   const trimmed = answer.trim();
 
-  if (id === "profile" || id === "outDir") {
+  if (id === "profile" || id === "outDir" || id === "workspace") {
     state.settings[id] = trimmed || undefined;
     return;
   }
@@ -406,7 +423,7 @@ function promptForText(input: ReadStream, output: WriteStream, label: string): P
 }
 
 function textValueForSetting(settings: RepoVistaSettings, id: Extract<MainItem, { type: "text" }>["id"]): string {
-  if (id === "profile" || id === "outDir") {
+  if (id === "profile" || id === "outDir" || id === "workspace") {
     return settings[id] ?? "";
   }
   if (id === "includes") {
@@ -425,6 +442,8 @@ function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
   switch (id) {
     case "profile":
       return "Codex profile, empty clears";
+    case "workspace":
+      return "Workspace name or path, empty audits all";
     case "outDir":
       return "Output directory, empty clears";
     case "includes":
@@ -476,6 +495,7 @@ function formatParallel(parallel: ParallelMode): string {
 const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
   { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(settings.parallel ?? "off")}` },
+  { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${settings.auditProfile ?? "none"}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${settings.reasoning ?? "model default"}` },
   { id: "profile", type: "text", label: (settings) => `Codex profile: ${settings.profile ?? "none"}` },
@@ -483,6 +503,9 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "sandbox", type: "submenu", label: (settings) => `Sandbox: ${settings.sandbox ?? "read-only"}` },
   { id: "language", type: "submenu", label: (settings) => `Language: ${settings.language ?? "English"}` },
   { id: "outDir", type: "text", label: (settings) => `Output directory: ${settings.outDir ?? ".repovista"}` },
+  { id: "workspace", type: "text", label: (settings) => `Workspace: ${settings.workspace ?? "all"}` },
+  { id: "allWorkspaces", type: "toggle", label: (settings) => checkbox(Boolean(settings.allWorkspaces), "Record all detected workspaces") },
+  { id: "incremental", type: "toggle", label: (settings) => checkbox(Boolean(settings.incremental), "Incremental scan cache") },
   { id: "includes", type: "text", label: (settings) => `Include patterns: ${formatArray(settings.includes)}` },
   { id: "ignores", type: "text", label: (settings) => `Ignore patterns: ${formatArray(settings.ignores)}` },
   { id: "runChecks", type: "toggle", label: (settings) => checkbox(Boolean(settings.runChecks), "Run local checks before analysis") },
