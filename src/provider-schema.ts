@@ -1,9 +1,70 @@
 import type { StructuredFinding, StructuredRoadmapProposal } from "./types.js";
 
+const evidenceReferenceJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["path", "startLine", "endLine", "quote", "symbol"],
+  properties: {
+    path: { type: "string" },
+    startLine: { type: ["number", "null"] },
+    endLine: { type: ["number", "null"] },
+    quote: { type: ["string", "null"] },
+    symbol: { type: ["string", "null"] }
+  }
+};
+
+const childFindingJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "title",
+    "severity",
+    "category",
+    "status",
+    "signature",
+    "affectedPaths",
+    "evidence",
+    "evidenceReferences",
+    "problemRationale",
+    "recommendedFix",
+    "reproduction",
+    "suggestedRegressionTest",
+    "minimumFixScope",
+    "estimatedEffort",
+    "confidence",
+    "findingType",
+    "parentId",
+    "parentTitle"
+  ],
+  properties: {
+    title: { type: "string" },
+    severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
+    category: { type: "string" },
+    status: { type: "string", enum: ["open", "fixed", "false-positive", "wont-fix", "uncertain"] },
+    signature: { type: "string" },
+    affectedPaths: { type: "array", items: { type: "string" } },
+    evidence: { type: "string" },
+    evidenceReferences: {
+      type: "array",
+      items: evidenceReferenceJsonSchema
+    },
+    problemRationale: { type: "string" },
+    recommendedFix: { type: "string" },
+    reproduction: { type: "string" },
+    suggestedRegressionTest: { type: "string" },
+    minimumFixScope: { type: "string" },
+    estimatedEffort: { type: "string", enum: ["small", "medium", "large"] },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+    findingType: { type: "string", enum: ["atomic"] },
+    parentId: { type: ["string", "null"] },
+    parentTitle: { type: ["string", "null"] }
+  }
+};
+
 export const riskReportJsonSchema: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["schemaVersion", "phaseId", "executiveSummary", "findings", "recommendations", "inspected"],
+  required: ["schemaVersion", "phaseId", "executiveSummary", "severitySummary", "findings", "recommendations", "inspected"],
   properties: {
     schemaVersion: { type: "number", enum: [1] },
     phaseId: { type: "string", enum: ["risk-and-bug"] },
@@ -39,7 +100,11 @@ export const riskReportJsonSchema: Record<string, unknown> = {
           "suggestedRegressionTest",
           "minimumFixScope",
           "estimatedEffort",
-          "confidence"
+          "confidence",
+          "findingType",
+          "parentId",
+          "parentTitle",
+          "childFindings"
         ],
         properties: {
           title: { type: "string" },
@@ -51,18 +116,7 @@ export const riskReportJsonSchema: Record<string, unknown> = {
           evidence: { type: "string" },
           evidenceReferences: {
             type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["path"],
-              properties: {
-                path: { type: "string" },
-                startLine: { type: ["number", "null"] },
-                endLine: { type: ["number", "null"] },
-                quote: { type: ["string", "null"] },
-                symbol: { type: ["string", "null"] }
-              }
-            }
+            items: evidenceReferenceJsonSchema
           },
           problemRationale: { type: "string" },
           recommendedFix: { type: "string" },
@@ -72,7 +126,12 @@ export const riskReportJsonSchema: Record<string, unknown> = {
           estimatedEffort: { type: "string", enum: ["small", "medium", "large"] },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
           findingType: { type: "string", enum: ["atomic", "theme"] },
-          parentTitle: { type: ["string", "null"] }
+          parentId: { type: ["string", "null"] },
+          parentTitle: { type: ["string", "null"] },
+          childFindings: {
+            type: "array",
+            items: childFindingJsonSchema
+          }
         }
       }
     },
@@ -95,7 +154,7 @@ const PHASE_IDS = ["architecture", "code-quality", "feature-roadmap", "summary"]
 export const phaseReportJsonSchema: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["schemaVersion", "phaseId", "title", "executiveSummary", "sections", "keyPoints", "evidenceReferences", "recommendations"],
+  required: ["schemaVersion", "phaseId", "title", "executiveSummary", "sections", "keyPoints", "evidenceReferences", "recommendations", "proposals"],
   properties: {
     schemaVersion: { type: "number", enum: [1] },
     phaseId: { type: "string", enum: [...PHASE_IDS] },
@@ -106,7 +165,7 @@ export const phaseReportJsonSchema: Record<string, unknown> = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["heading", "body"],
+        required: ["heading", "body", "bullets"],
         properties: {
           heading: { type: "string" },
           body: { type: "string" },
@@ -194,11 +253,11 @@ Additional structured-output rule:
 - Return strict JSON only. No Markdown, no code fences.
 - The JSON must match RepoVista's provider-native phase-report schema.
 - Set "phaseId" to "${phaseId}".
-- Put the requested Markdown section content into "sections" as ordered heading/body pairs.
+- Put the requested Markdown section content into "sections" as ordered heading/body/bullets objects. Use an empty bullets array when a section has no bullet list.
 - Put the most important evidence-backed points in "keyPoints".
 - Put concrete repository path references in "evidenceReferences".
 - Put actionable recommendations in "recommendations".
-- For feature-roadmap, include at least 6 complete "proposals" unless the repository genuinely cannot justify that many.
+- For feature-roadmap, include at least 6 complete "proposals" unless the repository genuinely cannot justify that many. For other phases, set "proposals" to [].
 `;
 }
 
@@ -293,11 +352,7 @@ ${severitySection(findings, "low", stringValue(severitySummary.low))}
 ${recommendations.length ? recommendations.map((item) => `- ${item}`).join("\n") : "- Keep the current evidence pack and automated checks current."}
 
 <!-- repovista-findings:start -->
-${JSON.stringify({
-    schemaVersion: 1,
-    phaseId: "risk-and-bug",
-    findings
-  }, null, 2)}
+${JSON.stringify(findingsSentinelPayload(findings), null, 2)}
 <!-- repovista-findings:end -->
 `;
 }
@@ -366,6 +421,12 @@ function normalizeStructuredFindings(value: unknown): StructuredFinding[] {
   return value.map((item, index) => {
     const raw = typeof item === "object" && item ? item as Record<string, unknown> : {};
     const paths = stringArray(raw.affectedPaths);
+    const childFindings = normalizeStructuredFindings(raw.childFindings)
+      .map((child) => ({
+        ...child,
+        parentId: child.parentId || stringValue(raw.signature) || undefined,
+        parentTitle: child.parentTitle || stringValue(raw.title) || undefined
+      }));
     return {
       id: "",
       source: "provider-native-json",
@@ -384,11 +445,67 @@ function normalizeStructuredFindings(value: unknown): StructuredFinding[] {
       minimumFixScope: stringValue(raw.minimumFixScope),
       estimatedEffort: stringValue(raw.estimatedEffort),
       confidence: stringValue(raw.confidence),
+      parentId: stringValue(raw.parentId),
       findingType: raw.findingType === "theme" ? "theme" : "atomic",
       parentTitle: stringValue(raw.parentTitle),
+      childFindings,
       schemaVersion: 1
     };
   });
+}
+
+export function findingsSentinelPayload(findings: StructuredFinding[]): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    phaseId: "risk-and-bug",
+    findings: findings.map(schemaFinding)
+  };
+}
+
+function schemaFinding(finding: StructuredFinding): Record<string, unknown> {
+  return {
+    title: finding.title,
+    severity: finding.severity === "unknown" ? "low" : finding.severity,
+    category: finding.category ?? "unknown",
+    status: finding.status ?? "open",
+    signature: finding.signature ?? "",
+    affectedPaths: finding.paths,
+    evidence: finding.evidence ?? "",
+    evidenceReferences: schemaEvidenceReferences(finding),
+    problemRationale: finding.problemRationale ?? "",
+    recommendedFix: finding.recommendation ?? "",
+    reproduction: finding.reproduction ?? "",
+    suggestedRegressionTest: finding.suggestedRegressionTest ?? "",
+    minimumFixScope: finding.minimumFixScope ?? "",
+    estimatedEffort: schemaEffort(finding.estimatedEffort),
+    confidence: schemaConfidence(finding.confidence),
+    findingType: finding.findingType ?? "atomic",
+    parentId: finding.parentId ?? null,
+    parentTitle: finding.parentTitle ?? null,
+    childFindings: (finding.childFindings ?? []).map(schemaFinding)
+  };
+}
+
+function schemaEvidenceReferences(finding: StructuredFinding): Array<Record<string, unknown>> {
+  const references = finding.evidenceDetails?.length ? finding.evidenceDetails : finding.evidenceReferences ?? [];
+  return references
+    .map((reference) => typeof reference === "string" ? { path: reference } : reference)
+    .filter((reference) => reference.path)
+    .map((reference) => ({
+      path: reference.path,
+      startLine: reference.startLine ?? null,
+      endLine: reference.endLine ?? null,
+      quote: reference.quote ?? null,
+      symbol: reference.symbol ?? null
+    }));
+}
+
+function schemaEffort(value: string | undefined): "small" | "medium" | "large" {
+  return value === "small" || value === "medium" || value === "large" ? value : "medium";
+}
+
+function schemaConfidence(value: string | undefined): "high" | "medium" | "low" {
+  return value === "high" || value === "medium" || value === "low" ? value : "medium";
 }
 
 function evidenceRefs(value: unknown): StructuredFinding["evidenceReferences"] {

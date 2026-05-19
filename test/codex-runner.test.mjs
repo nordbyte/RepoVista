@@ -5,13 +5,34 @@ import { PassThrough } from "node:stream";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildClaudeExecArgs, buildCodexExecArgs, riskReportJsonSchema, runCodexPhase, runProviderPhase } from "../dist/index.js";
+import { buildClaudeExecArgs, buildCodexExecArgs, phaseReportJsonSchema, riskReportJsonSchema, runCodexPhase, runProviderPhase } from "../dist/index.js";
 
 class FakeChild extends EventEmitter {
   stdin = new PassThrough();
   stdout = new PassThrough();
   stderr = new PassThrough();
 }
+
+function assertAllObjectPropertiesRequired(schema, label = "schema") {
+  if (!schema || typeof schema !== "object") {
+    return;
+  }
+  if (schema.type === "object" && schema.properties) {
+    const properties = Object.keys(schema.properties).sort();
+    assert.deepEqual([...(schema.required ?? [])].sort(), properties, `${label} required keys must match properties`);
+    for (const [key, value] of Object.entries(schema.properties)) {
+      assertAllObjectPropertiesRequired(value, `${label}.${key}`);
+    }
+  }
+  if (schema.type === "array" && schema.items) {
+    assertAllObjectPropertiesRequired(schema.items, `${label}[]`);
+  }
+}
+
+test("codex provider-native schemas satisfy strict structured-output requirements", () => {
+  assertAllObjectPropertiesRequired(phaseReportJsonSchema, "phaseReportJsonSchema");
+  assertAllObjectPropertiesRequired(riskReportJsonSchema, "riskReportJsonSchema");
+});
 
 test("codex args use read-only sandbox, target cwd and output-last-message", () => {
   const args = buildCodexExecArgs({
@@ -186,7 +207,11 @@ test("codex provider-native schema output is rendered into markdown", async () =
               suggestedRegressionTest: "Add a guard test.",
               minimumFixScope: "src/index.ts",
               estimatedEffort: "small",
-              confidence: "high"
+              confidence: "high",
+              findingType: "atomic",
+              parentId: null,
+              parentTitle: null,
+              childFindings: []
             }
           ],
           recommendations: ["Add the guard."],
@@ -218,6 +243,9 @@ test("codex provider-native schema output is rendered into markdown", async () =
     assert.match(report, /Risk and Bug Analysis/);
     assert.match(report, /Missing guard/);
     assert.match(report, /repovista-findings:start/);
+    assert.match(report, /"affectedPaths": \[\s*"src\/index\.ts"\s*\]/);
+    assert.match(report, /"recommendedFix": "Add the guard\."/);
+    assert.doesNotMatch(report, /"paths": \[/);
     assert.ok(result.structuredOutputPath.endsWith(".structured.json"));
   } finally {
     await rm(root, { recursive: true, force: true });

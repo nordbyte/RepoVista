@@ -3,6 +3,7 @@ import path from "node:path";
 import { extractFindings, mergeFindings } from "./findings.js";
 import { claimFeature, releaseFeature } from "./feature-state.js";
 import { type PhaseDefinition, type PromptContext } from "./prompts.js";
+import { findingsSentinelPayload } from "./provider-schema.js";
 import { reportPath } from "./reports.js";
 import { safeReadReport } from "./resume-manager.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
@@ -230,11 +231,7 @@ RepoVista ran additional read-only risk-review passes for project shards and mer
 ${shardLinks || "- No successful deep-review shard reports."}
 
 <!-- repovista-findings:start -->
-${JSON.stringify({
-    schemaVersion: 1,
-    phaseId: "risk-and-bug",
-    findings
-  }, null, 2)}
+${JSON.stringify(findingsSentinelPayload(findings), null, 2)}
 <!-- repovista-findings:end -->
 `;
 }
