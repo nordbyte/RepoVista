@@ -156,6 +156,7 @@ test("settings summary reflects built-in first-run defaults", () => {
 
   assert.ok(summary.includes("Provider: Codex CLI"));
   assert.ok(summary.includes("Parallel mode: auto"));
+  assert.ok(summary.includes("Audit profile: Default full audit"));
   assert.ok(summary.includes("Reasoning: xhigh"));
   assert.ok(summary.includes("Incremental scan cache: on"));
   assert.ok(summary.includes("Run checks: on"));
@@ -198,9 +199,14 @@ test("settings fast mode renders as on off selection", () => {
 test("settings default selections are visible without persisted overrides", () => {
   const mainFrame = renderSettingsMenuFrame({}, { columns: 100, rows: 24 });
   assert.match(mainFrame, /Parallel mode: auto/);
+  assert.match(mainFrame, /Audit profile: Default full audit/);
   assert.match(mainFrame, /Reasoning: xhigh/);
   assert.match(mainFrame, /\[x\] Incremental scan cache/);
   assert.match(mainFrame, /\[x\] Run local checks before analysis/);
+
+  const profileFrame = renderSettingsMenuFrame({}, { screen: "auditProfile", columns: 100, rows: 12 });
+  assert.match(profileFrame, /\[x\] Full \(default\) - Standard complete audit without a profile/);
+  assert.match(profileFrame, /\[ \] quick - Fast orientation pass/);
 
   const exportFrame = renderSettingsMenuFrame({}, { screen: "exportFormats", columns: 80, rows: 12 });
   assert.match(exportFrame, /\[x\] sarif/);

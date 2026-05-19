@@ -49,6 +49,7 @@ const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
 const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "test-gaps"];
 const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
 const FAST_MODE_OPTIONS = ["on", "off"] as const;
+const DEFAULT_AUDIT_PROFILE_LABEL = "Default full audit";
 const RENDER_DEBOUNCE_MS = 16;
 
 export async function runSettingsMenu(
@@ -172,7 +173,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
   return [
     `Provider: ${provider.displayName}`,
     `Parallel mode: ${formatParallel(effectiveParallel(settings))}`,
-    `Audit profile: ${settings.auditProfile ?? "none"}`,
+    `Audit profile: ${formatAuditProfile(settings.auditProfile)}`,
     `Review mode: ${effectiveReviewMode(settings)}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${effectiveReasoning(settings) ?? "model default"}`,
@@ -326,7 +327,11 @@ function toggleCurrentSelection(state: MenuState): void {
   }
 
   if (state.screen === "auditProfile") {
-    const selected = AUDIT_PROFILES[state.cursor]?.id;
+    if (state.cursor === 0) {
+      state.settings.auditProfile = undefined;
+      return;
+    }
+    const selected = AUDIT_PROFILES[state.cursor - 1]?.id;
     state.settings.auditProfile = state.settings.auditProfile === selected ? undefined : selected;
     return;
   }
@@ -518,7 +523,10 @@ function currentItems(state: MenuState): string[] {
     case "parallel":
       return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === effectiveParallel(state.settings), formatParallel(parallel)));
     case "auditProfile":
-      return AUDIT_PROFILES.map((profile) => checkbox(profile.id === state.settings.auditProfile, `${profile.id} - ${profile.description}`));
+      return [
+        checkbox(!state.settings.auditProfile, "Full (default) - Standard complete audit without a profile"),
+        ...AUDIT_PROFILES.map((profile) => checkbox(profile.id === state.settings.auditProfile, `${profile.id} - ${profile.description}`))
+      ];
     case "reviewMode":
       return REVIEW_MODE_OPTIONS.map((mode) => checkbox(mode === effectiveReviewMode(state.settings), mode));
     case "model":
@@ -706,6 +714,10 @@ function formatArray(values: string[] | undefined): string {
   return values?.length ? values.join(", ") : "none";
 }
 
+function formatAuditProfile(profile: RepoVistaSettings["auditProfile"]): string {
+  return profile ?? DEFAULT_AUDIT_PROFILE_LABEL;
+}
+
 function formatSeconds(seconds: number): string {
   if (seconds < 60) {
     return `${seconds}s`;
@@ -721,7 +733,7 @@ function formatParallel(parallel: ParallelMode): string {
 const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
   { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(effectiveParallel(settings))}` },
-  { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${settings.auditProfile ?? "none"}` },
+  { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${formatAuditProfile(settings.auditProfile)}` },
   { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${effectiveReviewMode(settings)}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${effectiveReasoning(settings) ?? "model default"}` },

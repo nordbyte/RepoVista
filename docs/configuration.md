@@ -84,7 +84,7 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `progress` | boolean | Show the interactive audit progress TUI in terminals, with plain progress output as fallback. |
 | `ci` | boolean | CI defaults. |
 | `failOnCritical` | boolean | Fail CI on critical findings. |
-| `auditProfile` | enum | Built-in audit profile. |
+| `auditProfile` | enum | Built-in audit profile; unset means the default full audit. |
 | `workspace` | string | Default workspace name or path. |
 | `allWorkspaces` | boolean | Include all detected workspaces. |
 | `incremental` | boolean | Use scan-cache metadata. |
