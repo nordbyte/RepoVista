@@ -63,7 +63,7 @@ export { readStateFile, writeJsonAtomic, writeStateFileAtomic } from "./state-st
 export { applySettingsToDefaults, loadSettings, saveSettings, sanitizeSettings } from "./settings-config.js";
 export { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 export { SETTING_DEFINITIONS, SETTING_KEYS, normalizeSettingKey, parseSettingValue } from "./settings-schema.js";
-export { renderSettingsMenuFrame, summarizeSettings } from "./settings-menu.js";
+export { renderSettingsMenuFrame, renderSettingsTerminalFrame, summarizeSettings } from "./settings-menu.js";
 export { findingSignature, stableFindingId, stableId } from "./stable-id.js";
 export { detectWorkspaces, resolveWorkspaceScope, workspaceIncludes } from "./workspaces.js";
 export type {

@@ -418,7 +418,7 @@ function render(state: MenuState, output: WriteStream): void {
     return;
   }
   state.lastFrame = frame;
-  output.write(`\x1b[H${frame}\x1b[J`);
+  output.write(renderSettingsTerminalFrame(frame));
 }
 
 export function renderSettingsMenuFrame(
@@ -451,6 +451,14 @@ export function renderSettingsMenuFrame(
     rows: options.rows ?? 30,
     color: options.color ?? false
   });
+}
+
+export function renderSettingsTerminalFrame(frame: string): string {
+  const clearedLines = frame
+    .split("\n")
+    .map((line) => `${line}\x1b[K`)
+    .join("\n");
+  return `\x1b[H${clearedLines}\x1b[J`;
 }
 
 function buildSettingsMenuFrame(state: MenuState, options: { columns: number; rows: number; color: boolean }): string {

@@ -9,6 +9,7 @@ import {
   parseCodexModelCatalog,
   reasoningOptionsForModel,
   renderSettingsMenuFrame,
+  renderSettingsTerminalFrame,
   sanitizeSettings,
   saveSettings
 } from "../dist/index.js";
@@ -162,6 +163,17 @@ test("settings menu frame renders only the menu with ANSI styling", () => {
   assert.match(plain, /Model: gpt-5\.5/);
   assert.equal(plain.match(/Provider: Codex CLI/g)?.length, 1);
   assert.equal(plain.match(/Reasoning: xhigh/g)?.length, 1);
+});
+
+test("settings terminal frame clears every line ending", () => {
+  const frame = [
+    "\x1b[46m Active line \x1b[0m",
+    "Short"
+  ].join("\n");
+  const terminalFrame = renderSettingsTerminalFrame(frame);
+
+  assert.match(terminalFrame, /^\x1b\[H/);
+  assert.match(terminalFrame, /\x1b\[K\nShort\x1b\[K\x1b\[J$/);
 });
 
 test("codex model catalog parsing exposes current model and reasoning options", () => {
