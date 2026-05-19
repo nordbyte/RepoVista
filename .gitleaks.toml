@@ -1,0 +1,12 @@
+title = "RepoVista Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "RepoVista masking regression test uses a synthetic API key shaped fixture."
+condition = "AND"
+paths = ['''test/ignore-and-secrets\.test\.mjs''']
+regexTarget = "line"
+regexes = ['''maskSensitiveText\('\{"apiKey":"sk-123456789012345678901234"\}'\)''']
