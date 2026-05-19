@@ -21,6 +21,7 @@ import { runPreflight, type PreflightDependencies } from "./preflight.js";
 import { createParallelExecutionMeta, createProjectMap, loadProjectMap, saveProjectMap } from "./project-map.js";
 import { scanProject } from "./project-scan.js";
 import { getReportProvider } from "./providers/index.js";
+import { resolveProviderDefaultModel } from "./provider-models.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { applyAuditProfile } from "./profiles.js";
 import { QUALITY_GATES_VERSION, validateReportQuality } from "./quality-gates.js";
@@ -65,6 +66,7 @@ export interface AuditDependencies extends PreflightDependencies, EvidenceDepend
   cwd?: string;
   now?: Date;
   version?: string;
+  resolveProviderDefaultModel?: (provider: string, options: AuditOptions) => Promise<string | undefined>;
   runProvider?: typeof runProviderPhase;
   runCodex?: typeof runProviderPhase;
   spawnAdapter?: SpawnAdapter;
@@ -89,8 +91,10 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const logger = new Logger(options.progress);
   const createLogs = options.keepLogs || options.json;
   const paths = await createRunPaths(projectRoot, options, now, createLogs);
+  const provider = getReportProvider(options.provider ?? "codex");
+  const effectiveModel = options.model ?? await (dependencies.resolveProviderDefaultModel ?? resolveProviderDefaultModel)(provider.id, options);
 
-  const meta = createInitialMeta(projectRoot, paths, options, version, now);
+  const meta = createInitialMeta(projectRoot, paths, options, version, now, { model: effectiveModel });
   meta.workspace = workspaceScope;
   const previousReports: Record<string, string> = {};
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
@@ -125,7 +129,6 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
 
     logger.step("Creating project inventory");
-    const provider = getReportProvider(options.provider ?? "codex");
     const inventory = await createProjectInventory(projectRoot, {
       outDir: options.outDir,
       includes: options.includes,
@@ -134,7 +137,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         provider: options.provider ?? "codex",
         displayName: provider.displayName,
         executable: provider.executable,
-        model: options.model,
+        model: effectiveModel,
         profile: options.profile,
         reasoning: options.reasoning,
         fastMode: options.fastMode,
@@ -172,7 +175,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     });
     const reuseKey = stableCacheFingerprint(auditCacheContext(options, diffScope, {
       providerVersion: evidence.aiProvider.version,
-      promptManifestFingerprint
+      promptManifestFingerprint,
+      effectiveModel
     }));
     const scanFingerprint = projectScanFingerprint(projectScan.files, {
       reuseKey,
@@ -575,6 +579,7 @@ function auditCacheContext(
   compatibility: {
     providerVersion?: string;
     promptManifestFingerprint: string;
+    effectiveModel?: string;
   }
 ): Record<string, unknown> {
   return {
@@ -585,7 +590,7 @@ function auditCacheContext(
     provider: options.provider ?? "codex",
     providerVersion: compatibility.providerVersion ?? null,
     promptManifestFingerprint: compatibility.promptManifestFingerprint,
-    model: options.model ?? null,
+    model: options.model ?? compatibility.effectiveModel ?? null,
     profile: options.profile ?? null,
     reasoning: options.reasoning ?? null,
     fastMode: Boolean(options.fastMode),

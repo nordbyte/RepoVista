@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   applySettingsToDefaults,
   DEFAULT_OPTIONS,
+  parseCodexConfigDefaults,
   parseCodexModelCatalog,
   reasoningOptionsForModel,
   renderSettingsMenuFrame,
@@ -239,4 +240,20 @@ test("codex model catalog parsing exposes current model and reasoning options", 
   assert.equal(models[0].slug, "gpt-5.5");
   assert.equal(models[0].supportsFastMode, true);
   assert.deepEqual(reasoningOptionsForModel(models, "gpt-5.5").map((item) => item.effort), ["low", "high"]);
+});
+
+test("codex config default parsing reads top-level model settings", () => {
+  const defaults = parseCodexConfigDefaults([
+    "# global defaults",
+    "model = \"gpt-5.5\"",
+    "model_reasoning_effort = \"xhigh\" # comment",
+    "",
+    "[profiles.fast]",
+    "model = \"gpt-5.4-mini\""
+  ].join("\n"));
+
+  assert.deepEqual(defaults, {
+    model: "gpt-5.5",
+    reasoning: "xhigh"
+  });
 });

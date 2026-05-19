@@ -13,15 +13,21 @@ import type {
   SemanticFeature
 } from "./types.js";
 
+export interface EffectiveAiSettings {
+  model?: string;
+}
+
 export function createInitialMeta(
   projectRoot: string,
   paths: RunPaths,
   options: AuditOptions,
   version: string,
-  startedAt: Date
+  startedAt: Date,
+  effectiveAi: EffectiveAiSettings = {}
 ): AuditMeta {
   const provider = getReportProvider(options.provider ?? "codex");
   const providerDefaults = `${provider.displayName} configured default`;
+  const recordedModel = options.model ?? effectiveAi.model;
   return {
     tool: {
       name: "RepoVista",
@@ -65,7 +71,7 @@ export function createInitialMeta(
       exportFormats: options.exportFormats ?? []
     },
     codex: {
-      model: options.model ?? "Codex configured default",
+      model: recordedModel ?? "Codex configured default",
       profile: options.profile ?? "none",
       reasoning: options.reasoning ?? "model default",
       fastMode: options.fastMode,
@@ -75,7 +81,7 @@ export function createInitialMeta(
       provider: provider.id,
       displayName: provider.displayName,
       executable: provider.executable,
-      model: options.model ?? providerDefaults,
+      model: recordedModel ?? providerDefaults,
       profile: options.profile ?? "none",
       reasoning: options.reasoning ?? "model default",
       fastMode: options.fastMode,

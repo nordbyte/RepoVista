@@ -1,6 +1,7 @@
 import { lstat, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
+import { resolveProviderDefaultModel } from "./provider-models.js";
 import { validateReportRoot } from "./reports.js";
 import {
   renderTuiListFrame,
@@ -11,6 +12,16 @@ import {
   type TuiKey
 } from "./tui.js";
 import type { AuditMeta, AuditOptions, StructuredFinding } from "./types.js";
+
+export type ReportDefaultModelResolver = (provider: string, run: {
+  runId: string;
+  runDir: string;
+  displayName?: string;
+}) => Promise<string | undefined>;
+
+export interface ReportRunListOptions {
+  defaultModelResolver?: ReportDefaultModelResolver;
+}
 
 export interface ReportRunSummary {
   runId: string;
@@ -90,7 +101,7 @@ export async function runReportsMenu(
   });
 }
 
-export async function listReportRuns(projectRoot: string, outDir: string): Promise<ReportRunSummary[]> {
+export async function listReportRuns(projectRoot: string, outDir: string, options: ReportRunListOptions = {}): Promise<ReportRunSummary[]> {
   const outRoot = await validateReportRoot(projectRoot, outDir);
   let entries;
   try {
@@ -101,7 +112,7 @@ export async function listReportRuns(projectRoot: string, outDir: string): Promi
 
   const runs = await Promise.all(entries
     .filter((entry) => entry.isDirectory())
-    .map(async (entry) => loadReportRun(path.join(outRoot, entry.name), entry.name)));
+    .map(async (entry) => loadReportRun(path.join(outRoot, entry.name), entry.name, options)));
   return runs
     .filter((run): run is ReportRunSummary => Boolean(run))
     .sort((left, right) => sortTime(right) - sortTime(left) || right.runId.localeCompare(left.runId));
@@ -285,7 +296,7 @@ export async function deleteMarkedReportRuns(runs: ReportRunSummary[], markedDir
   return deleted;
 }
 
-async function loadReportRun(runDir: string, fallbackRunId: string): Promise<ReportRunSummary | undefined> {
+async function loadReportRun(runDir: string, fallbackRunId: string, options: ReportRunListOptions): Promise<ReportRunSummary | undefined> {
   const marker = await hasRunMarker(runDir);
   if (!marker) {
     return undefined;
@@ -298,13 +309,21 @@ async function loadReportRun(runDir: string, fallbackRunId: string): Promise<Rep
   if (!sections.length) {
     return undefined;
   }
+  const providerId = meta?.ai?.provider ?? meta?.options?.provider ?? "codex";
+  const displayName = meta?.ai?.displayName;
+  const explicitModel = cleanModelLabel(meta?.ai?.model, displayName) ?? cleanModelLabel(meta?.codex?.model, "Codex");
+  const resolvedModel = explicitModel ?? cleanModelLabel(await resolveRunDefaultModel(providerId, {
+    runId: meta?.runId ?? fallbackRunId,
+    runDir,
+    displayName
+  }, options), displayName);
   return {
     runId: meta?.runId ?? fallbackRunId,
     runDir,
     startedAt: meta?.startedAt,
     completedAt: meta?.completedAt,
-    provider: meta?.ai?.displayName ?? meta?.ai?.provider,
-    model: cleanModelLabel(meta?.ai?.model, meta?.ai?.displayName) ?? cleanModelLabel(meta?.codex?.model, "Codex"),
+    provider: displayName ?? providerId,
+    model: resolvedModel,
     reasoning: cleanReasoningLabel(meta?.ai?.reasoning ?? meta?.codex?.reasoning),
     findingCount: findings?.length ?? meta?.findings?.length ?? countFindings(meta?.findingCounts),
     exitCode: meta?.exitCode,
@@ -425,6 +444,15 @@ function compactRunTime(value: string): string {
     return `${runId[1]} ${runId[2]}:${runId[3]}`;
   }
   return value;
+}
+
+async function resolveRunDefaultModel(
+  provider: string,
+  run: { runId: string; runDir: string; displayName?: string },
+  options: ReportRunListOptions
+): Promise<string | undefined> {
+  const resolver = options.defaultModelResolver ?? ((providerId: string) => resolveProviderDefaultModel(providerId));
+  return resolver(provider, run);
 }
 
 function formatRunsFooter(run: ReportRunSummary, state: ReportBrowserState, totalRuns: number, markedCount: number): string {

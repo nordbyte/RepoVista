@@ -6,13 +6,13 @@ export { BOOLEAN_OPTION_NAMES, CLI_COMMANDS, CLI_OPTIONS, VALUE_OPTION_NAMES } f
 export { buildCodexExecArgs, runCodexPhase } from "./codex-runner.js";
 export { buildClaudeExecArgs } from "./providers/claude.js";
 export { buildRunComparison, compareHasRegression, runCompareCommand, renderRunComparison, renderRunComparisonHtml } from "./compare.js";
-export { loadCodexModels, parseCodexModelCatalog, reasoningOptionsForModel } from "./codex-models.js";
-export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider-models.js";
+export { loadCodexConfigDefaults, loadCodexModels, parseCodexConfigDefaults, parseCodexModelCatalog, reasoningOptionsForModel, resolveCodexDefaultModel } from "./codex-models.js";
+export { loadProviderModels, reasoningOptionsForProviderModel, resolveProviderDefaultModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
 export { commandAvailable, runProcess, signalProcess } from "./process-runner.js";
 export { runRepairRunCommand } from "./repair-run.js";
 export { deleteMarkedReportRuns, listReportRuns, renderReportsMenuFrame, runReportsMenu } from "./report-browser.js";
-export type { ReportBrowserState, ReportRunSummary, ReportSection } from "./report-browser.js";
+export type { ReportBrowserState, ReportDefaultModelResolver, ReportRunListOptions, ReportRunSummary, ReportSection } from "./report-browser.js";
 export { renderPrComment, renderRunReview, reviewRunDirectory, runPrCommentCommand, runReviewCommand } from "./report-review.js";
 export { renderGithubStepSummary } from "./ci-summary.js";
 export { writeFindingExports } from "./exporters.js";

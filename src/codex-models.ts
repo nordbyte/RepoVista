@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { runProcess } from "./process-runner.js";
 
 export interface CodexReasoningLevel {
@@ -12,6 +15,11 @@ export interface CodexModelInfo {
   defaultReasoning?: string;
   supportedReasoning: CodexReasoningLevel[];
   supportsFastMode: boolean;
+}
+
+export interface CodexConfigDefaults {
+  model?: string;
+  reasoning?: string;
 }
 
 interface RawModelCatalog {
@@ -87,6 +95,44 @@ export function reasoningOptionsForModel(models: CodexModelInfo[], selectedModel
   return Array.from(byEffort.values());
 }
 
+export async function resolveCodexDefaultModel(configPath = defaultCodexConfigPath()): Promise<string | undefined> {
+  const configured = await loadCodexConfigDefaults(configPath);
+  return configured.model ?? FALLBACK_CODEX_MODELS[0]?.slug;
+}
+
+export async function loadCodexConfigDefaults(configPath = defaultCodexConfigPath()): Promise<CodexConfigDefaults> {
+  try {
+    return parseCodexConfigDefaults(await readFile(configPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export function parseCodexConfigDefaults(raw: string): CodexConfigDefaults {
+  const defaults: CodexConfigDefaults = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    if (trimmed.startsWith("[")) {
+      break;
+    }
+    const match = trimmed.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const key = match[1];
+    const value = parseTomlScalar(match[2]);
+    if (key === "model" && value) {
+      defaults.model = value;
+    } else if (key === "model_reasoning_effort" && value) {
+      defaults.reasoning = value;
+    }
+  }
+  return defaults;
+}
+
 function runCodexDebugModels(): Promise<string> {
   return runProcess("codex", ["debug", "models"], {
     timeoutMs: CODEX_DEBUG_MODELS_TIMEOUT_MS,
@@ -99,6 +145,48 @@ function runCodexDebugModels(): Promise<string> {
     }
     throw new Error(result.error ?? (result.stderr.trim() || `codex debug models exited with code ${result.exitCode ?? "unknown"}`));
   });
+}
+
+function defaultCodexConfigPath(): string {
+  const codexHome = process.env.CODEX_HOME
+    ? path.resolve(process.env.CODEX_HOME)
+    : path.join(os.homedir(), ".codex");
+  return path.join(codexHome, "config.toml");
+}
+
+function parseTomlScalar(raw: string): string | undefined {
+  const value = stripTomlComment(raw).trim();
+  if (!value) {
+    return undefined;
+  }
+  if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1).trim() || undefined;
+  }
+  return value.split(/\s+/)[0]?.trim() || undefined;
+}
+
+function stripTomlComment(raw: string): string {
+  let quote: string | undefined;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote === "\"") {
+      escaped = true;
+      continue;
+    }
+    if ((char === "\"" || char === "'") && (!quote || quote === char)) {
+      quote = quote ? undefined : char;
+      continue;
+    }
+    if (char === "#" && !quote) {
+      return raw.slice(0, index);
+    }
+  }
+  return raw;
 }
 
 function model(slug: string, displayName: string, defaultReasoning: string, supportsFastMode: boolean): CodexModelInfo {

@@ -49,8 +49,12 @@ Important types:
 | `buildClaudeExecArgs(request)` | Build Claude Code CLI args. |
 | `loadProviderModels(provider)` | Load model catalog for a provider. |
 | `reasoningOptionsForProviderModel(provider, models, selectedModel?)` | Resolve reasoning options. |
+| `resolveProviderDefaultModel(provider)` | Resolve the configured default model when RepoVista can infer it. |
 | `loadCodexModels()` | Load Codex model catalog. |
+| `loadCodexConfigDefaults()` | Read Codex CLI default model and reasoning settings from config. |
+| `resolveCodexDefaultModel()` | Resolve the Codex CLI configured or bundled default model. |
 | `parseCodexModelCatalog(raw)` | Parse `codex debug models` JSON. |
+| `parseCodexConfigDefaults(raw)` | Parse top-level Codex CLI config defaults. |
 | `reasoningOptionsForModel(models, selectedModel?)` | Resolve Codex reasoning options. |
 | `getPluginProviderDiagnostics()` | Return plugin loading diagnostics. |
 | `providerPluginTrustStatus(providerId)` | Return plugin trust status. |

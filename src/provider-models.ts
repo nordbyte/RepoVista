@@ -1,5 +1,6 @@
 import {
   loadCodexModels,
+  resolveCodexDefaultModel,
   reasoningOptionsForModel,
   type CodexModelInfo,
   type CodexReasoningLevel
@@ -50,6 +51,13 @@ export async function loadProviderModels(provider: AiProviderId): Promise<Provid
     return FALLBACK_AIDER_MODELS;
   }
   return [];
+}
+
+export async function resolveProviderDefaultModel(provider: AiProviderId): Promise<string | undefined> {
+  if (provider === "codex") {
+    return resolveCodexDefaultModel();
+  }
+  return undefined;
 }
 
 function genericModel(slug: string, displayName: string): ProviderModelInfo {

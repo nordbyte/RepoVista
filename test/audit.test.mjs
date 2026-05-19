@@ -31,6 +31,7 @@ test("audit creates the full report structure with mocked Codex phases", async (
       now: new Date("2026-05-18T14:57:32.123Z"),
       version: "0.1.0",
       commandExists: async () => true,
+      resolveProviderDefaultModel: async () => "gpt-test-default",
       runCodex: async (request) => {
         const content = request.phaseId === "risk-and-bug"
           ? "# Risk\n\n## Critical Findings\n\nNo critical findings.\n"
@@ -64,10 +65,10 @@ test("audit creates the full report structure with mocked Codex phases", async (
 
     const meta = JSON.parse(await readFile(path.join(result.paths.runDir, "meta.json"), "utf8"));
     assert.equal(meta.codex.sandbox, "read-only");
-    assert.equal(meta.codex.model, "Codex configured default");
+    assert.equal(meta.codex.model, "gpt-test-default");
     assert.equal(meta.codex.reasoning, "model default");
     assert.equal(meta.ai.provider, "codex");
-    assert.equal(meta.ai.model, "Codex CLI configured default");
+    assert.equal(meta.ai.model, "gpt-test-default");
     assert.equal(meta.phases.every((phase) => phase.status === "success"), true);
     assert.equal(typeof meta.cache.scanFingerprint, "string");
     assert.equal(meta.workspace.detected, false);
@@ -75,7 +76,7 @@ test("audit creates the full report structure with mocked Codex phases", async (
     const inventory = await readFile(path.join(result.paths.runDir, "00-inventory.md"), "utf8");
     assert.match(inventory, /## AI Provider Execution Settings/);
     assert.match(inventory, /Provider: Codex CLI/);
-    assert.match(inventory, /Model: Codex configured default/);
+    assert.match(inventory, /Model: gpt-test-default/);
     assert.match(inventory, /Reasoning: model default/);
   } finally {
     await rm(root, { recursive: true, force: true });

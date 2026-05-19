@@ -24,7 +24,9 @@ test("report browser lists report runs and renders sections", async () => {
       reasoning: "xhigh"
     });
 
-    const runs = await listReportRuns(root, ".repovista");
+    const runs = await listReportRuns(root, ".repovista", {
+      defaultModelResolver: async () => "gpt-resolved-default"
+    });
 
     assert.equal(runs.length, 2);
     assert.equal(runs[0].runId, "2026-05-19T10-00-00-000Z");
@@ -40,11 +42,12 @@ test("report browser lists report runs and renders sections", async () => {
     }, { columns: 100, rows: 24, color: false });
     assert.match(listFrame, /RepoVista Reports/);
     assert.match(listFrame, /2026-05-19 10:00/);
-    assert.match(listFrame, /model: default/);
+    assert.match(listFrame, /model: gpt-resolved-default/);
     assert.match(listFrame, /model: gpt-5\.5/);
     assert.match(listFrame, /reasoning: xhigh/);
     assert.match(listFrame, /\[ \] 2026-05-19 10:00/);
     assert.match(listFrame, /2026-05-19T10-00-00-000Z/);
+    assert.doesNotMatch(listFrame, /model: default/);
     assert.doesNotMatch(listFrame, /Codex CLI Codex CLI configured default/);
 
     const markedFrame = renderReportsMenuFrame(runs, {
