@@ -335,7 +335,10 @@ test("codex runner cancels a phase after timeout", async () => {
   try {
     const reportPath = path.join(root, "report.md");
     const child = new FakeChild();
+    child.pid = 99999999;
+    const signals = [];
     child.kill = (signal) => {
+      signals.push(signal);
       setImmediate(() => child.emit("close", null, signal));
       return true;
     };
@@ -349,10 +352,17 @@ test("codex runner cancels a phase after timeout", async () => {
       jsonEvents: false,
       keepLogs: false,
       timeoutSeconds: 0.01
-    }, () => child);
+    }, (_command, _args, options) => {
+      assert.equal(options.detached, process.platform !== "win32");
+      return child;
+    });
 
     assert.equal(result.success, false);
     assert.match(result.error, /timed out/);
+    assert.equal(result.diagnostics.timedOut, true);
+    assert.equal(result.diagnostics.pid, 99999999);
+    assert.equal(result.diagnostics.termination.sigtermSent, true);
+    assert.deepEqual(signals, ["SIGTERM"]);
     assert.match(await readFile(reportPath, "utf8"), /timed out/);
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -8,7 +8,7 @@ import type { WriteStream } from "node:fs";
 import { getReportProvider } from "./providers/index.js";
 import { renderStructuredProviderOutput } from "./provider-schema.js";
 import { createSensitiveTextMasker, maskSensitiveText } from "./secrets.js";
-import type { ProviderRunRequest, ProviderRunResult } from "./types.js";
+import type { ProviderRunDiagnostics, ProviderRunRequest, ProviderRunResult } from "./types.js";
 
 export type SpawnAdapter = (
   command: string,
@@ -30,6 +30,7 @@ export async function runProviderPhase(
     ? { ...request, outputSchemaPath: structured.schemaPath, structuredOutputPath: structured.outputPath, promptFilePath: promptFile?.promptPath }
     : { ...request, promptFilePath: promptFile?.promptPath };
   const args = provider.buildArgs(providerRequest);
+  const useProcessGroup = process.platform !== "win32";
   const shouldStoreLogs = request.keepLogs || request.jsonEvents;
   const stdoutLogPath = shouldStoreLogs && request.logsDir
     ? path.join(request.logsDir, `${request.phaseId}.stdout${provider.stdoutLogExtension(request)}`)
@@ -51,7 +52,22 @@ export async function runProviderPhase(
     let timedOut = false;
     let interrupted = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
+    let forcedSettleTimer: NodeJS.Timeout | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
+    const diagnostics: ProviderRunDiagnostics = {
+      provider: provider.id,
+      executable: provider.executable,
+      args,
+      phaseId: providerRequest.phaseId,
+      processGroup: useProcessGroup,
+      startedAt: new Date(startedAt).toISOString(),
+      timeoutSeconds: providerRequest.timeoutSeconds,
+      timedOut: false,
+      interrupted: false,
+      stdoutLogPath,
+      stderrLogPath,
+      structuredOutputPath: structured?.outputPath
+    };
     const stdoutLog = stdoutLogPath ? createWriteStream(stdoutLogPath, { flags: "w" }) : undefined;
     const stderrLog = stderrLogPath ? createWriteStream(stderrLogPath, { flags: "w" }) : undefined;
     stdoutLog?.on("error", () => undefined);
@@ -70,8 +86,12 @@ export async function runProviderPhase(
       if (forceKillTimer) {
         clearTimeout(forceKillTimer);
       }
+      if (forcedSettleTimer) {
+        clearTimeout(forcedSettleTimer);
+      }
       process.off("SIGINT", interruptHandler);
       process.off("SIGTERM", interruptHandler);
+      diagnostics.endedAt = new Date().toISOString();
       writeMasked(stdoutLog, stdoutMasker.flush());
       writeMasked(stderrLog, stderrMasker.flush());
       await Promise.all([
@@ -85,6 +105,7 @@ export async function runProviderPhase(
         stdoutLogPath,
         stderrLogPath,
         structuredOutputPath: structured?.outputPath,
+        diagnostics,
         ...result
       });
       if (structured?.tempDir) {
@@ -101,13 +122,51 @@ export async function runProviderPhase(
       }
       if (reason === "timeout") {
         timedOut = true;
+        diagnostics.timedOut = true;
       } else {
         interrupted = true;
+        diagnostics.interrupted = true;
       }
-      child.kill("SIGTERM");
+      diagnostics.termination = diagnostics.termination ?? {
+        reason,
+        sigtermSent: false,
+        sigkillSent: false,
+        forcedSettle: false,
+        errors: []
+      };
+      diagnostics.termination.reason = reason;
+      diagnostics.termination.sigtermSent = true;
+      diagnostics.termination.sigtermAt = new Date().toISOString();
+      signalChild(child, useProcessGroup, "SIGTERM", diagnostics);
       forceKillTimer = setTimeout(() => {
         if (!settled) {
-          child?.kill("SIGKILL");
+          diagnostics.termination = diagnostics.termination ?? {
+            reason,
+            sigtermSent: true,
+            sigkillSent: false,
+            forcedSettle: false,
+            errors: []
+          };
+          diagnostics.termination.sigkillSent = true;
+          diagnostics.termination.sigkillAt = new Date().toISOString();
+          if (child) {
+            signalChild(child, useProcessGroup, "SIGKILL", diagnostics);
+          }
+          forcedSettleTimer = setTimeout(() => {
+            if (settled) {
+              return;
+            }
+            if (diagnostics.termination) {
+              diagnostics.termination.forcedSettle = true;
+            }
+            const message = reason === "timeout"
+              ? `${provider.displayName} run timed out after ${providerRequest.timeoutSeconds} seconds and did not exit after SIGKILL.`
+              : `${provider.displayName} run was interrupted and did not exit after SIGKILL.`;
+            void writeProviderFailureReport(providerRequest, message, stdoutText, stderrText)
+              .then(() => finish({ success: false, exitCode: null, error: message }))
+              .catch(() => finish({ success: false, exitCode: null, error: message }));
+          }, 5000);
+          forcedSettleTimer.unref();
         }
       }, 5000);
       forceKillTimer.unref();
@@ -119,8 +178,10 @@ export async function runProviderPhase(
       child = spawnAdapter(provider.executable, args, {
         cwd: request.projectRoot,
         env: process.env,
-        stdio: "pipe"
+        stdio: "pipe",
+        detached: useProcessGroup
       });
+      diagnostics.pid = child.pid;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       void writeProviderFailureReport(providerRequest, `Could not start ${provider.displayName}: ${message}`, undefined, undefined)
@@ -163,6 +224,8 @@ export async function runProviderPhase(
         if (settled) {
           return;
         }
+        diagnostics.exitCode = code;
+        diagnostics.signal = signal;
 
         if (timedOut || interrupted) {
           const message = timedOut
@@ -285,6 +348,34 @@ function closeLog(stream: WriteStream | undefined): Promise<void> {
     stream.once("error", done);
     stream.end();
   });
+}
+
+function signalChild(
+  child: ChildProcessWithoutNullStreams,
+  processGroup: boolean,
+  signal: NodeJS.Signals,
+  diagnostics: ProviderRunDiagnostics
+): void {
+  const errors: string[] = [];
+  if (processGroup && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      errors.push(`process group ${signal}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  try {
+    child.kill(signal);
+    return;
+  } catch (error) {
+    errors.push(`child ${signal}: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (errors.length) {
+      diagnostics.termination?.errors.push(...errors);
+    }
+  }
 }
 
 async function hasUsableReport(reportPath: string): Promise<boolean> {

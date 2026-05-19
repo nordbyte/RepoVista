@@ -121,6 +121,8 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
       shardStatus.status = result.success ? "success" : "failed";
       shardStatus.durationMs = result.durationMs;
       shardStatus.error = result.error;
+      shardStatus.attempts = 1;
+      shardStatus.providerRun = result.diagnostics;
     }
     return { shard, result };
   });

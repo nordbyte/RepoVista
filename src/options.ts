@@ -548,6 +548,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "finding":
       options.findingId = requireNonEmpty(name, value);
       break;
+    case "run":
+      options.findingRunId = requireNonEmpty(name, value);
+      break;
     case "status":
       options.findingStatus = validateFindingStatus(value);
       break;

@@ -98,18 +98,19 @@ export async function runNextFindingCommand(options: AuditOptions, projectRoot =
 }
 
 export async function runListFindingsCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
-  const findings = await loadStoredFindings(projectRoot, options.outDir);
+  const listing = await loadFindingsForList(projectRoot, options);
+  const findings = listing.findings;
   const status = options.findingStatus;
   const selected = findings
     .filter((finding) => options.allFindings || !status || (finding.status ?? "open") === status)
     .sort(compareFindings);
 
   if (options.exportFormats.length) {
-    const outRoot = await validateReportRoot(projectRoot, options.outDir);
+    const outRoot = listing.outRoot ?? await validateReportRoot(projectRoot, options.outDir);
     const outputs = await writeFindingExports({
       outRoot,
-      runDir: outRoot,
-      runId: "finding-state"
+      runDir: listing.runDir ?? outRoot,
+      runId: listing.runId ?? "finding-state"
     }, selected, options.exportFormats);
     return `Exported ${selected.length} RepoVista finding(s):\n${renderList(Object.values(outputs).filter(Boolean) as string[])}\n`;
   }
@@ -119,13 +120,57 @@ export async function runListFindingsCommand(options: AuditOptions, projectRoot 
   }
 
   if (!selected.length) {
-    return `No ${status && !options.allFindings ? `${status} ` : ""}RepoVista findings found in ${await findingStateDirectory(projectRoot, options.outDir)}.\n`;
+    return `No ${status && !options.allFindings ? `${status} ` : ""}RepoVista findings found in ${listing.source}.\n`;
   }
 
   return `${selected.map((finding) => [
     `${finding.id}  ${finding.severity.toUpperCase()}  ${finding.status ?? "open"}  ${finding.title}`,
     `  paths: ${finding.paths.join(", ") || "n/a"}`
   ].join("\n")).join("\n")}\n`;
+}
+
+async function loadFindingsForList(
+  projectRoot: string,
+  options: AuditOptions
+): Promise<{ findings: StructuredFinding[]; source: string; outRoot?: string; runDir?: string; runId?: string }> {
+  if (!options.findingRunId) {
+    const stateDir = await findingStateDirectory(projectRoot, options.outDir);
+    return {
+      findings: await loadStoredFindings(projectRoot, options.outDir),
+      source: stateDir
+    };
+  }
+
+  const outRoot = await validateReportRoot(projectRoot, options.outDir);
+  const runDir = resolveRunDirectory(projectRoot, outRoot, options.findingRunId);
+  const findingsPath = path.join(runDir, "findings.json");
+  try {
+    const parsed = JSON.parse(await readFile(findingsPath, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error("findings.json is not an array");
+    }
+    return {
+      findings: parsed as StructuredFinding[],
+      source: findingsPath,
+      outRoot,
+      runDir,
+      runId: path.basename(runDir)
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RepoVistaError(`Could not read RepoVista findings for run ${options.findingRunId}: ${message}`);
+  }
+}
+
+function resolveRunDirectory(projectRoot: string, outRoot: string, value: string): string {
+  const candidate = value.includes("/") || value.startsWith(".")
+    ? path.resolve(projectRoot, value)
+    : path.join(outRoot, value);
+  const relative = path.relative(outRoot, candidate);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new RepoVistaError(`Run path must be inside ${outRoot}: ${value}`);
+  }
+  return candidate;
 }
 
 export async function runShowFindingCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {

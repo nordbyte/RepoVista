@@ -54,6 +54,7 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
   }));
 
   const concurrency = Math.max(1, Math.min(input.options.parallel === "off" ? 2 : Number(input.options.parallel) || 3, shards.length, 5));
+  const shardTimeoutSeconds = deepReviewShardTimeoutSeconds(input.options.phaseTimeoutSeconds ?? 1800);
   const shardResults = await runWithConcurrency(shards, concurrency, async (shard) => {
     const report = shardReportPath(deepDir, shard.id);
     const shardStatus = input.status.deepReviewShards?.find((item) => item.id === shard.id);
@@ -78,39 +79,25 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
         } satisfies ProviderRunResult
       };
     }
-    const result = await input.runPhase({
-      provider: input.options.provider ?? "codex",
-      phaseId: `${input.phase.id}-deep-${shard.id}`,
-      phaseTitle: `${input.phase.title} Deep Review (${shard.title})`,
-      prompt: buildDeepReviewPrompt(input.basePrompt, input.context, shard),
-      projectRoot: input.projectRoot,
-      reportPath: report,
-      logsDir: input.paths.logsDir,
-      model: input.options.model,
-      profile: input.options.profile,
-      reasoning: input.options.reasoning,
-      fastMode: input.options.fastMode,
-      sandbox: input.options.sandbox,
-      jsonEvents: input.options.json,
-      keepLogs: input.options.keepLogs,
-      timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
-    }, input.spawnAdapter);
+    const attemptResult = await runDeepShardWithAttempts(input, shard, report, shardTimeoutSeconds);
     await Promise.all(claimed.claimed.map((featureId) =>
       releaseFeature(
         input.projectRoot,
         input.options.outDir,
         featureId,
-        result.success ? "reviewed" : "error",
-        result.error,
+        attemptResult.result.success ? "reviewed" : "error",
+        attemptResult.result.error,
         new Date()
-      )
+      ).catch(() => undefined)
     ));
     if (shardStatus) {
-      shardStatus.status = result.success ? "success" : "failed";
-      shardStatus.durationMs = result.durationMs;
-      shardStatus.error = result.error;
+      shardStatus.status = attemptResult.result.success ? "success" : "failed";
+      shardStatus.durationMs = attemptResult.result.durationMs;
+      shardStatus.error = attemptResult.result.error;
+      shardStatus.attempts = attemptResult.attempts;
+      shardStatus.providerRun = attemptResult.providerRun;
     }
-    return { shard, result };
+    return { shard, result: attemptResult.result };
   });
 
   const baseReport = await safeReadReport(input.result.reportPath, input.phase.title);
@@ -133,12 +120,78 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
   const failed = shardResults.filter((item) => !item.result.success);
   return {
     phaseId: input.phase.id,
-    success: failed.length === 0,
+    success: true,
     reportPath: finalReportPath,
     durationMs: input.result.durationMs + Date.now() - startedAt,
-    exitCode: failed.length ? 1 : input.result.exitCode,
-    error: failed.length ? `${failed.length} deep review shard(s) failed.` : undefined
+    exitCode: input.result.exitCode,
+    error: failed.length ? `${failed.length} deep review shard(s) failed; base risk report and successful shard findings were preserved.` : undefined
   };
+}
+
+async function runDeepShardWithAttempts(
+  input: DeepRiskReviewInput,
+  shard: WorkShard,
+  report: string,
+  timeoutSeconds: number
+): Promise<{ result: ProviderRunResult; attempts: number; providerRun?: ProviderRunResult["diagnostics"] }> {
+  const maxAttempts = 2;
+  let lastResult: ProviderRunResult | undefined;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await input.runPhase({
+        provider: input.options.provider ?? "codex",
+        phaseId: `${input.phase.id}-deep-${shard.id}${attempt > 1 ? `-retry-${attempt}` : ""}`,
+        phaseTitle: `${input.phase.title} Deep Review (${shard.title})`,
+        prompt: buildDeepReviewPrompt(input.basePrompt, input.context, shard, attempt, maxAttempts),
+        projectRoot: input.projectRoot,
+        reportPath: report,
+        logsDir: input.paths.logsDir,
+        model: input.options.model,
+        profile: input.options.profile,
+        reasoning: input.options.reasoning,
+        fastMode: input.options.fastMode,
+        sandbox: input.options.sandbox,
+        jsonEvents: input.options.json,
+        keepLogs: input.options.keepLogs,
+        timeoutSeconds
+      }, input.spawnAdapter);
+      lastResult = result;
+      if (result.success || !shouldRetryDeepShard(result)) {
+        return { result, attempts: attempt, providerRun: result.diagnostics };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lastResult = {
+        phaseId: `${input.phase.id}-deep-${shard.id}`,
+        success: false,
+        reportPath: report,
+        durationMs: 0,
+        exitCode: 1,
+        error: message
+      };
+    }
+  }
+
+  return {
+    result: lastResult ?? {
+      phaseId: `${input.phase.id}-deep-${shard.id}`,
+      success: false,
+      reportPath: report,
+      durationMs: 0,
+      exitCode: 1,
+      error: "Deep review shard failed before producing a result."
+    },
+    attempts: maxAttempts,
+    providerRun: lastResult?.diagnostics
+  };
+}
+
+function shouldRetryDeepShard(result: ProviderRunResult): boolean {
+  return Boolean(result.diagnostics?.timedOut || result.diagnostics?.interrupted || /timed out|interrupted|cancelled/i.test(result.error ?? ""));
+}
+
+function deepReviewShardTimeoutSeconds(phaseTimeoutSeconds: number): number {
+  return Math.max(5, Math.min(phaseTimeoutSeconds, 900));
 }
 
 function deepReviewShards(projectMap: ProjectMap): WorkShard[] {
@@ -201,11 +254,12 @@ async function claimShardFeatures(input: DeepRiskReviewInput, shard: WorkShard):
   }
 }
 
-function buildDeepReviewPrompt(basePrompt: string, context: PromptContext, shard: WorkShard): string {
+function buildDeepReviewPrompt(basePrompt: string, context: PromptContext, shard: WorkShard, attempt = 1, maxAttempts = 1): string {
   return `${basePrompt}
 
 Additional feature-sliced deep review assignment:
 - This is not the broad repository risk report. Focus only on this shard: ${shard.title}.
+- Attempt ${attempt} of ${maxAttempts}; keep the response bounded and finish with the required findings sentinel.
 - Paths in scope: ${shard.paths.length ? shard.paths.map((item) => `\`${item}\``).join(", ") : "n/a"}.
 - Primary languages/signals: ${shard.primaryLanguages.join(", ") || "not detected"}.
 - Focus notes: ${shard.focus}

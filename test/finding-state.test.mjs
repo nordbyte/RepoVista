@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   loadStoredFindings,
+  runListFindingsCommand,
   runNextFindingCommand,
   runFixFindingCommand,
   runRevalidateFindingCommand,
@@ -68,6 +69,46 @@ test("finding lifecycle commands read, triage and revalidate persistent state", 
     const revalidated = (await loadStoredFindings(root, ".repovista"))[0];
     assert.equal(revalidated.status, "open");
     assert.equal(revalidated.evidenceValidation.passed, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("findings command can list one run without persistent state noise", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-finding-run-"));
+  try {
+    const persistent = {
+      id: "fnd_old",
+      source: "03-risk-and-bug-report.md",
+      title: "Old persistent finding",
+      severity: "medium",
+      paths: ["src/old.ts"]
+    };
+    await writeFindingState(root, ".repovista", [persistent], "old-run", new Date("2026-05-18T10:00:00.000Z"));
+
+    const runDir = path.join(root, ".repovista", "run-1");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(runDir, "findings.json"), JSON.stringify([
+      {
+        id: "fnd_current",
+        source: "03-risk-and-bug-report.md",
+        title: "Current run finding",
+        severity: "high",
+        status: "open",
+        paths: ["src/current.ts"]
+      }
+    ], null, 2), "utf8");
+
+    const output = await runListFindingsCommand({
+      outDir: ".repovista",
+      findingRunId: "run-1",
+      json: true,
+      exportFormats: []
+    }, root);
+    const listed = JSON.parse(output);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, "fnd_current");
+    assert.doesNotMatch(output, /fnd_old/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

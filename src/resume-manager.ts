@@ -26,9 +26,6 @@ export async function loadExistingReports(
 ): Promise<void> {
   for (const phase of ANALYSIS_PHASES) {
     const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
-    if (previousStatus?.status !== "success") {
-      continue;
-    }
     const filePath = reportPath(paths.runDir, phase.reportFile);
     try {
       const content = await readReport(filePath);
@@ -38,8 +35,10 @@ export async function loadExistingReports(
       previousReports[phase.reportFile] = content;
       const status = phaseStatus(statuses, phase);
       status.status = "success";
-      status.durationMs = previousStatus.durationMs;
-      status.shards = previousStatus.shards;
+      status.durationMs = previousStatus?.durationMs;
+      status.shards = previousStatus?.shards;
+      status.deepReviewShards = previousStatus?.deepReviewShards;
+      status.providerRun = previousStatus?.providerRun;
       applyReportQuality(status, phase.id, content, false);
     } catch {
       // Missing reports are normal for an interrupted run.
@@ -115,13 +114,28 @@ export function phaseStatus(statuses: PhaseReportStatus[], phase: PhaseDefinitio
 export async function updatePhaseStatus(
   status: PhaseReportStatus,
   phase: PhaseDefinition,
-  result: { success: boolean; durationMs: number; error?: string; reportPath: string },
+  result: {
+    success: boolean;
+    durationMs: number;
+    error?: string;
+    reportPath: string;
+    diagnostics?: PhaseReportStatus["providerRun"];
+    preservedPreviousReport?: boolean;
+    retryError?: string;
+    retryDurationMs?: number;
+  },
   strictReports: boolean
 ): Promise<void> {
   status.status = result.success ? "success" : "failed";
   status.durationMs = result.durationMs;
+  status.providerRun = result.diagnostics;
+  status.preservedPreviousReport = result.preservedPreviousReport;
+  status.retryError = result.retryError;
+  status.retryDurationMs = result.retryDurationMs;
   if (result.error) {
     status.error = result.error;
+  } else if (!result.retryError) {
+    status.error = undefined;
   }
 
   if (!result.success) {

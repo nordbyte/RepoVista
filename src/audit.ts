@@ -56,6 +56,7 @@ import type {
   EvidencePack,
   ParallelExecutionMeta,
   PhaseReportStatus,
+  ProviderRunResult,
   RunPaths,
   StructuredFinding
 } from "./types.js";
@@ -234,6 +235,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       status.error = undefined;
 
       const phaseReportPath = reportPath(paths.runDir, phase.reportFile);
+      const preservedReport = await reusableReportForPreservation(phase.id, phaseReportPath, previousReports[phase.reportFile]);
       const context: PromptContext = {
         language: options.language,
         projectRoot,
@@ -304,6 +306,12 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         status,
         runPhase,
         spawnAdapter: dependencies.spawnAdapter
+      });
+      result = await preservePreviousReportIfRetryFailed({
+        phaseId: phase.id,
+        result,
+        previousReport: preservedReport,
+        reportPath: phaseReportPath
       });
 
       await updatePhaseStatus(status, phase, result, options.strictReports);
@@ -409,6 +417,62 @@ async function createRunPaths(projectRoot: string, options: AuditOptions, now: D
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new PreflightError(`Could not create RepoVista run: ${message}`);
+  }
+}
+
+async function reusableReportForPreservation(
+  phaseId: string,
+  filePath: string,
+  knownContent: string | undefined
+): Promise<string | undefined> {
+  if (knownContent && isReusablePhaseReport(phaseId, knownContent)) {
+    return knownContent;
+  }
+  try {
+    const content = await readReport(filePath);
+    return isReusablePhaseReport(phaseId, content) ? content : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function preservePreviousReportIfRetryFailed(input: {
+  phaseId: string;
+  result: ProviderRunResult;
+  previousReport: string | undefined;
+  reportPath: string;
+}): Promise<ProviderRunResult> {
+  if (!input.previousReport) {
+    return input.result;
+  }
+
+  const retryFailure = await retryFailureReason(input.phaseId, input.result);
+  if (!retryFailure) {
+    return input.result;
+  }
+
+  await writeMarkdownReport(input.reportPath, input.previousReport);
+  return {
+    ...input.result,
+    success: true,
+    exitCode: 0,
+    error: undefined,
+    preservedPreviousReport: true,
+    retryError: retryFailure,
+    retryDurationMs: input.result.durationMs
+  };
+}
+
+async function retryFailureReason(phaseId: string, result: ProviderRunResult): Promise<string | undefined> {
+  if (!result.success) {
+    return result.error ?? "Provider retry failed before producing a reusable report.";
+  }
+  try {
+    const content = await readReport(result.reportPath);
+    const quality = validateReportQuality(phaseId, content);
+    return quality.passed ? undefined : `Provider retry report failed quality gates: ${quality.warnings.join(" ")}`;
+  } catch (error) {
+    return `Provider retry report could not be read: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 

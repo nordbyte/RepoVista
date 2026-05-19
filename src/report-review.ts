@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { validateReportQuality } from "./quality-gates.js";
-import type { AuditMeta, AuditOptions, StructuredFinding, StructuredPhaseReport } from "./types.js";
+import type { AuditMeta, AuditOptions, PhaseReportStatus, StructuredFinding, StructuredPhaseReport } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -134,6 +134,7 @@ Reasoning: ${reviewed.meta?.ai.reasoning ?? "not recorded"}
 
 ${reviewed.reportReviews.map((report) => [
     `- ${report.fileName}: ${report.qualityPassed ? "passed" : "warnings"} (${report.qualityScore}/100, ${report.lines} lines)`,
+    ...phaseReviewNotes(reviewed.meta?.phases?.find((phase) => phase.id === report.phaseId)).map((warning) => `  - ${warning}`),
     ...report.warnings.map((warning) => `  - ${warning}`)
   ].join("\n")).join("\n")}
 
@@ -148,6 +149,39 @@ ${reviewed.weakEvidence.length ? reviewed.weakEvidence.map((finding) => [
 
 ${reviewed.staleWarnings.length ? reviewed.staleWarnings.map((warning) => `- ${warning}`).join("\n") : "- No stale state signals detected."}
 `;
+}
+
+function phaseReviewNotes(phase: PhaseReportStatus | undefined): string[] {
+  if (!phase) {
+    return [];
+  }
+  const notes: string[] = [];
+  if (phase.status !== "success") {
+    notes.push(`Phase status: ${phase.status}${phase.error ? ` (${phase.error})` : ""}`);
+  } else if (phase.error) {
+    notes.push(`Phase warning: ${phase.error}`);
+  }
+  if (phase.preservedPreviousReport) {
+    notes.push(`Previous valid report preserved after failed retry${phase.retryError ? `: ${phase.retryError}` : "."}`);
+  }
+  if (phase.providerRun) {
+    const run = phase.providerRun;
+    const termination = run.termination
+      ? `; termination=${run.termination.reason}, SIGTERM=${run.termination.sigtermSent ? "sent" : "not sent"}, SIGKILL=${run.termination.sigkillSent ? "sent" : "not sent"}${run.termination.forcedSettle ? ", forced settle" : ""}`
+      : "";
+    if (run.timedOut || run.interrupted || phase.status === "failed") {
+      notes.push(`Provider process: pid=${run.pid ?? "n/a"}, timeout=${run.timeoutSeconds}s, timedOut=${run.timedOut}, interrupted=${run.interrupted}, exit=${run.exitCode ?? "n/a"}, signal=${run.signal ?? "n/a"}${termination}`);
+    }
+  }
+  const failedShards = [...(phase.shards ?? []), ...(phase.deepReviewShards ?? [])].filter((shard) => shard.status === "failed");
+  for (const shard of failedShards.slice(0, 5)) {
+    const run = shard.providerRun;
+    notes.push(`Shard ${shard.id} failed after ${shard.attempts ?? 1} attempt(s): ${shard.error ?? "no error"}${run?.pid ? ` (pid=${run.pid})` : ""}`);
+  }
+  if (failedShards.length > 5) {
+    notes.push(`${failedShards.length - 5} additional shard failure(s) omitted from review output.`);
+  }
+  return notes;
 }
 
 export function renderPrComment(reviewed: ReviewedRun): string {

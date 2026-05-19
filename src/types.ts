@@ -96,6 +96,7 @@ export interface AuditOptions {
   findingStatus?: FindingStatus;
   note?: string;
   allFindings?: boolean;
+  findingRunId?: string;
   providerRevalidate?: boolean;
   dryRun?: boolean;
   force?: boolean;
@@ -140,6 +141,10 @@ export interface PhaseReportStatus {
   qualityScore?: number;
   shards?: PhaseShardStatus[];
   deepReviewShards?: PhaseShardStatus[];
+  providerRun?: ProviderRunDiagnostics;
+  preservedPreviousReport?: boolean;
+  retryError?: string;
+  retryDurationMs?: number;
 }
 
 export interface PhaseShardStatus {
@@ -149,6 +154,8 @@ export interface PhaseShardStatus {
   status: "pending" | "success" | "failed" | "skipped";
   durationMs?: number;
   error?: string;
+  attempts?: number;
+  providerRun?: ProviderRunDiagnostics;
 }
 
 export interface EvidenceCommandResult {
@@ -640,6 +647,38 @@ export interface ProviderRunResult {
   stdoutLogPath?: string;
   stderrLogPath?: string;
   structuredOutputPath?: string;
+  diagnostics?: ProviderRunDiagnostics;
+  preservedPreviousReport?: boolean;
+  retryError?: string;
+  retryDurationMs?: number;
+}
+
+export interface ProviderRunDiagnostics {
+  provider: AiProviderId;
+  executable: string;
+  args: string[];
+  phaseId: string;
+  pid?: number;
+  processGroup?: boolean;
+  startedAt: string;
+  endedAt?: string;
+  timeoutSeconds: number;
+  timedOut: boolean;
+  interrupted: boolean;
+  exitCode?: number | null;
+  signal?: string | null;
+  stdoutLogPath?: string;
+  stderrLogPath?: string;
+  structuredOutputPath?: string;
+  termination?: {
+    reason: "timeout" | "interrupt";
+    sigtermSent: boolean;
+    sigtermAt?: string;
+    sigkillSent: boolean;
+    sigkillAt?: string;
+    forcedSettle: boolean;
+    errors: string[];
+  };
 }
 
 export interface ProviderCapabilities {

@@ -372,6 +372,87 @@ test("parallel resume reuses completed shard reports before synthesis", async ()
   }
 });
 
+test("resume preserves a valid phase report when a forced retry fails", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-resume-preserve-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    const resumeDir = path.join(root, ".repovista", "manual-run");
+    await mkdir(resumeDir, { recursive: true });
+    const goodReport = completeMockReport("architecture", "Architecture Analysis");
+    await writeFile(path.join(resumeDir, "00-inventory.md"), "# Inventory\n\nExisting run.\n", "utf8");
+    await writeFile(path.join(resumeDir, "01-architecture-report.md"), goodReport, "utf8");
+    await writeFile(path.join(resumeDir, "meta.json"), JSON.stringify({
+      phases: [
+        {
+          id: "architecture",
+          title: "Architecture Analysis",
+          reportFile: "01-architecture-report.md",
+          status: "success",
+          qualityPassed: true,
+          qualityScore: 100
+        }
+      ]
+    }), "utf8");
+
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: "off",
+      outDir: ".repovista",
+      resumeDir,
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: true,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        await writeFile(request.reportPath, "# Architecture Analysis\n\n## Status\n\nFailed.\n", "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: false,
+          reportPath: request.reportPath,
+          durationMs: 7,
+          exitCode: 1,
+          error: "provider retry failed"
+        };
+      }
+    });
+
+    const phase = result.meta.phases.find((item) => item.id === "architecture");
+    assert.equal(result.exitCode, 0);
+    assert.equal(phase.status, "success");
+    assert.equal(phase.preservedPreviousReport, true);
+    assert.match(phase.retryError, /provider retry failed/);
+    assert.equal(await readFile(path.join(resumeDir, "01-architecture-report.md"), "utf8"), goodReport.endsWith("\n") ? goodReport : `${goodReport}\n`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("deep review runs feature-sliced risk shards and merges schema findings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-deep-"));
   try {
@@ -441,6 +522,89 @@ test("deep review runs feature-sliced risk shards and merges schema findings", a
     assert.ok(shardFinding.featureId);
     assert.equal(shardFinding.evidenceValidation.references[0].source, "prompt-context");
     assert.ok(await readFile(path.join(result.paths.runDir, "deep-review", "risk-and-bug", result.meta.phases.find((phase) => phase.id === "risk-and-bug").deepReviewShards[0].id + ".md"), "utf8"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("deep review preserves base risk report when one shard fails", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-deep-partial-"));
+  try {
+    await mkdir(path.join(root, "src", "alpha"), { recursive: true });
+    await mkdir(path.join(root, "src", "beta"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "alpha", "a.ts"), "export const a = 1;\n", "utf8");
+    await writeFile(path.join(root, "src", "beta", "b.ts"), "export const b = 1;\n", "utf8");
+    await initializeProjectMap(root, DEFAULT_OPTIONS, new Date("2026-05-18T14:57:32.123Z"));
+
+    let failedOneShard = false;
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: 2,
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["risk-and-bug"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false,
+      deepReview: true
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        if (request.phaseId.includes("-deep-") && !failedOneShard) {
+          failedOneShard = true;
+          await writeFile(request.reportPath, "# Failed shard\n\n## Status\n\nFailed.\n", "utf8");
+          return {
+            phaseId: request.phaseId,
+            success: false,
+            reportPath: request.reportPath,
+            durationMs: 1,
+            exitCode: 1,
+            error: "shard provider failed"
+          };
+        }
+        const content = request.phaseId.includes("-deep-")
+          ? riskReportWithFinding("Successful shard finding", "src/beta/b.ts", "export const b = 1;")
+          : completeMockReport("risk-and-bug", request.phaseTitle);
+        await writeFile(request.reportPath, content, "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    const phase = result.meta.phases.find((item) => item.id === "risk-and-bug");
+    assert.equal(result.exitCode, 0);
+    assert.equal(phase.status, "success");
+    assert.match(phase.error, /deep review shard/);
+    assert.ok(phase.deepReviewShards.some((shard) => shard.status === "failed"));
+    assert.ok(phase.deepReviewShards.some((shard) => shard.status === "success"));
+    assert.match(await readFile(path.join(result.paths.runDir, "03-risk-and-bug-report.md"), "utf8"), /Feature-Sliced Deep Review/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

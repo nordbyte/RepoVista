@@ -94,6 +94,7 @@ test("explicit export options replace built-in or saved export defaults", () => 
   assert.deepEqual(parseCliArgs(["audit", "--export", "github"]).options.exportFormats, ["github"]);
   assert.deepEqual(parseCliArgs(["findings"]).options.exportFormats, []);
   assert.deepEqual(parseCliArgs(["findings", "--export", "sarif"]).options.exportFormats, ["sarif"]);
+  assert.equal(parseCliArgs(["findings", "--run", "run-1"]).options.findingRunId, "run-1");
 
   const savedDefaults = {
     ...DEFAULT_OPTIONS,
