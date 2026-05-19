@@ -230,19 +230,21 @@ function defaultRunCommand(command: string, args: string[], options: CommandRunO
     let stderr = "";
     let timedOut = false;
     let settled = false;
+    const detached = Boolean(options.shell && process.platform !== "win32");
     const child = spawn(command, args, {
       cwd: options.cwd,
       shell: options.shell ?? false,
       env: process.env,
+      detached,
       stdio: "pipe"
     });
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killChildProcess(child.pid, detached, "SIGTERM");
       setTimeout(() => {
         if (!settled) {
-          child.kill("SIGKILL");
+          killChildProcess(child.pid, detached, "SIGKILL");
         }
       }, 5000).unref();
     }, options.timeoutSeconds * 1000);
@@ -287,6 +289,21 @@ function defaultRunCommand(command: string, args: string[], options: CommandRunO
       });
     });
   });
+}
+
+function killChildProcess(pid: number | undefined, detached: boolean, signal: NodeJS.Signals): void {
+  if (!pid) {
+    return;
+  }
+  try {
+    if (detached) {
+      process.kill(-pid, signal);
+    } else {
+      process.kill(pid, signal);
+    }
+  } catch {
+    // The process may already have exited.
+  }
 }
 
 function renderChecks(evidence: EvidencePack): string {

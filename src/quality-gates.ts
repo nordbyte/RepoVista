@@ -181,11 +181,20 @@ function validateRiskFindings(markdown: string): string[] {
     if (!finding.evidence) {
       warnings.push(`Schema finding ${label} is missing evidence.`);
     }
-    if (!(finding.evidenceDetails?.length || finding.evidenceReferences?.length || finding.paths.length)) {
+    const evidenceReferences = finding.evidenceDetails?.length
+      ? finding.evidenceDetails
+      : (finding.evidenceReferences ?? []).map((reference) => typeof reference === "string" ? { path: reference } : reference);
+    if (!evidenceReferences.length) {
       warnings.push(`Schema finding ${label} is missing concrete evidenceReferences.`);
     }
-    if (finding.evidenceDetails?.some((reference) => !reference.path)) {
-      warnings.push(`Schema finding ${label} has an invalid evidence reference.`);
+    if (evidenceReferences.some((reference) => !reference.path)) {
+      warnings.push(`Schema finding ${label} has an invalid evidence reference path.`);
+    }
+    if (evidenceReferences.some((reference) => !reference.startLine || !reference.endLine)) {
+      warnings.push(`Schema finding ${label} has an evidence reference without startLine/endLine.`);
+    }
+    if (evidenceReferences.filter((reference) => reference.quote).length < Math.min(1, evidenceReferences.length)) {
+      warnings.push(`Schema finding ${label} should include at least one exact evidence quote.`);
     }
     if (!finding.status) {
       warnings.push(`Schema finding ${label} is missing lifecycle status.`);
@@ -198,6 +207,15 @@ function validateRiskFindings(markdown: string): string[] {
     }
     if (!finding.recommendation) {
       warnings.push(`Schema finding ${label} is missing recommendedFix.`);
+    }
+    if (!finding.reproduction) {
+      warnings.push(`Schema finding ${label} is missing reproduction.`);
+    }
+    if (!finding.suggestedRegressionTest) {
+      warnings.push(`Schema finding ${label} is missing suggestedRegressionTest.`);
+    }
+    if (!finding.minimumFixScope) {
+      warnings.push(`Schema finding ${label} is missing minimumFixScope.`);
     }
     if (!finding.estimatedEffort) {
       warnings.push(`Schema finding ${label} is missing estimatedEffort.`);

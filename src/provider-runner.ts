@@ -3,8 +3,9 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
+import type { WriteStream } from "node:fs";
 import { getReportProvider } from "./providers/index.js";
-import { maskSensitiveText } from "./secrets.js";
+import { createSensitiveTextMasker, maskSensitiveText } from "./secrets.js";
 import type { ProviderRunRequest, ProviderRunResult } from "./types.js";
 
 export type SpawnAdapter = (
@@ -46,6 +47,10 @@ export async function runProviderPhase(
     let timeoutTimer: NodeJS.Timeout | undefined;
     const stdoutLog = stdoutLogPath ? createWriteStream(stdoutLogPath, { flags: "w" }) : undefined;
     const stderrLog = stderrLogPath ? createWriteStream(stderrLogPath, { flags: "w" }) : undefined;
+    stdoutLog?.on("error", () => undefined);
+    stderrLog?.on("error", () => undefined);
+    const stdoutMasker = createSensitiveTextMasker();
+    const stderrMasker = createSensitiveTextMasker();
 
     const finish = async (result: Omit<ProviderRunResult, "durationMs" | "reportPath" | "phaseId">) => {
       if (settled) {
@@ -60,8 +65,12 @@ export async function runProviderPhase(
       }
       process.off("SIGINT", interruptHandler);
       process.off("SIGTERM", interruptHandler);
-      stdoutLog?.end();
-      stderrLog?.end();
+      writeMasked(stdoutLog, stdoutMasker.flush());
+      writeMasked(stderrLog, stderrMasker.flush());
+      await Promise.all([
+        closeLog(stdoutLog),
+        closeLog(stderrLog)
+      ]);
       resolve({
         phaseId: request.phaseId,
         reportPath: request.reportPath,
@@ -115,7 +124,7 @@ export async function runProviderPhase(
 
     child.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
-      stdoutLog?.write(maskSensitiveText(text));
+      writeMasked(stdoutLog, stdoutMasker.push(text));
       if (provider.outputMode === "stdout") {
         stdoutOutput += text;
       }
@@ -124,7 +133,7 @@ export async function runProviderPhase(
 
     child.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
-      stderrLog?.write(maskSensitiveText(text));
+      writeMasked(stderrLog, stderrMasker.push(text));
       stderrText = appendBounded(stderrText, text);
     });
 
@@ -153,7 +162,7 @@ export async function runProviderPhase(
         if (code !== 0) {
           const message = provider.classifyError(stderrText, code);
           await writeProviderFailureReport(request, message, stdoutText, stderrText);
-          await finish({ success: false, exitCode: code, error: message });
+          await finish({ success: false, exitCode: code, error: maskSensitiveText(message) });
           return;
         }
 
@@ -173,11 +182,38 @@ export async function runProviderPhase(
         }
 
         await finish({ success: true, exitCode: code });
-      })();
+      })().catch(async (error) => {
+        const message = maskSensitiveText(error instanceof Error ? error.message : String(error));
+        try {
+          await writeProviderFailureReport(request, message, stdoutText, stderrText);
+        } catch {
+          // The run still has to settle even if the failure report cannot be written.
+        }
+        await finish({ success: false, exitCode: code, error: message });
+      });
     });
 
     child.stdin.write(request.prompt);
     child.stdin.end();
+  });
+}
+
+function writeMasked(stream: WriteStream | undefined, value: string): void {
+  if (stream && value) {
+    stream.write(value);
+  }
+}
+
+function closeLog(stream: WriteStream | undefined): Promise<void> {
+  if (!stream || stream.destroyed || stream.writableEnded) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    stream.once("finish", done);
+    stream.once("close", done);
+    stream.once("error", done);
+    stream.end();
   });
 }
 

@@ -39,3 +39,18 @@ test("baseline command adds suppressions and filters findings", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("baseline command rejects malformed baseline state", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-baseline-bad-"));
+  try {
+    await mkdir(path.join(root, ".repovista"), { recursive: true });
+    await writeFile(path.join(root, ".repovista", "baseline.json"), "{not-json", "utf8");
+
+    await assert.rejects(
+      () => runBaselineCommand({ outDir: ".repovista", baselineAction: "list" }, root),
+      /baseline file/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

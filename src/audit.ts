@@ -2,6 +2,7 @@ import { allowedEvidencePaths, collectAuditDiffScope, createInitialMeta, reportF
 import { writeStructuredOutputs } from "./audit-outputs.js";
 import { applyBaselineToFindings } from "./baseline.js";
 import { projectScanFingerprint, updateAuditCache } from "./cache.js";
+import { maybeRunDeepRiskReview } from "./deep-review.js";
 import { PreflightError } from "./errors.js";
 import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
 import { validateFindingsEvidence } from "./evidence-validation.js";
@@ -45,6 +46,7 @@ import { resolveWorkspaceScope, workspaceIncludes } from "./workspaces.js";
 import type {
   AuditMeta,
   AuditOptions,
+  DiffScope,
   EvidencePack,
   ParallelExecutionMeta,
   PhaseReportStatus,
@@ -113,7 +115,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       includes: options.includes,
       ignores: options.ignores
     });
-    const scanFingerprint = projectScanFingerprint(projectScan.files);
+    const scanFingerprint = projectScanFingerprint(projectScan.files, auditCacheContext(options, diffScope));
     meta.cache = await updateAuditCache({
       projectRoot,
       outDir: options.outDir,
@@ -252,6 +254,19 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         runPhase,
         spawnAdapter: dependencies.spawnAdapter
       });
+      result = await maybeRunDeepRiskReview({
+        phase,
+        basePrompt: prompt,
+        context,
+        projectRoot,
+        paths,
+        options,
+        projectMap: featureMap,
+        result,
+        status,
+        runPhase,
+        spawnAdapter: dependencies.spawnAdapter
+      });
 
       await updatePhaseStatus(status, phase, result, options.strictReports);
       previousReports[phase.reportFile] = await safeReadReport(phaseReportPath, phase.title);
@@ -369,7 +384,7 @@ function determineExitCode(
   evidence: EvidencePack | undefined
 ): number {
   const hasCritical = findings.some((finding) => finding.severity === "critical") ||
-    Boolean(riskReport && hasCriticalFindings(riskReport));
+    Boolean(!findings.length && riskReport && hasCriticalFindings(riskReport));
   if (options.ci && options.failOnCritical && hasCritical) {
     return 2;
   }
@@ -380,6 +395,40 @@ function determineExitCode(
     return 1;
   }
   return 0;
+}
+
+function auditCacheContext(options: AuditOptions, diffScope: DiffScope | undefined): Record<string, unknown> {
+  return {
+    provider: options.provider ?? "codex",
+    model: options.model ?? null,
+    profile: options.profile ?? null,
+    reasoning: options.reasoning ?? null,
+    fastMode: Boolean(options.fastMode),
+    sandbox: options.sandbox,
+    language: options.language,
+    phases: options.phases,
+    runChecks: Boolean(options.runChecks),
+    checkCommands: options.checkCommands,
+    checkTimeoutSeconds: options.checkTimeoutSeconds,
+    phaseTimeoutSeconds: options.phaseTimeoutSeconds,
+    strictReports: Boolean(options.strictReports),
+    repairReports: Boolean(options.repairReports),
+    deepReview: Boolean(options.deepReview),
+    auditProfile: options.auditProfile ?? null,
+    workspace: options.workspace ?? null,
+    allWorkspaces: Boolean(options.allWorkspaces),
+    since: options.since ?? null,
+    diffRef: diffScope?.ref ?? null,
+    diffFiles: diffScope?.fileStatuses?.map(cacheDiffFile) ?? diffScope?.changedFiles.map((path) => ({ path, status: "unknown" }))
+  };
+}
+
+function cacheDiffFile(file: NonNullable<DiffScope["fileStatuses"]>[number]): Pick<NonNullable<DiffScope["fileStatuses"]>[number], "path" | "status" | "previousPath"> {
+  return {
+    path: file.path,
+    status: file.status,
+    previousPath: file.previousPath
+  };
 }
 
 export function hasCriticalFindings(report: string): boolean {

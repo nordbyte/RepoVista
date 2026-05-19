@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { createIgnoreMatcher, maskObject, maskSensitiveText, matchesPattern } from "../dist/index.js";
+import { createIgnoreMatcher, createSensitiveTextMasker, maskObject, maskSensitiveText, matchesPattern } from "../dist/index.js";
 
 test("default ignore rules exclude dependencies, build output, media and report folder", () => {
   const matcher = createIgnoreMatcher({
@@ -37,4 +37,18 @@ test("secret masking redacts sensitive object keys and env assignments", () => {
   assert.equal(masked.script, "TOKEN=[masked] node deploy.js");
   assert.deepEqual(masked.nested, { password: "[masked]" });
   assert.equal(maskSensitiveText("https://user:pass@example.com"), "https://[masked]@example.com");
+  assert.equal(maskSensitiveText("Authorization: Bearer ghp_123456789012345678901234"), "Authorization: [masked]");
+  assert.equal(maskSensitiveText('{"apiKey":"sk-123456789012345678901234"}'), '{"apiKey":"[masked]"}');
+});
+
+test("streaming secret masker catches secrets split across chunks", () => {
+  const masker = createSensitiveTextMasker(64);
+  const output = [
+    masker.push("TOKEN=s3"),
+    masker.push("cr3t-value\n"),
+    masker.flush()
+  ].join("");
+
+  assert.doesNotMatch(output, /s3cr3t/);
+  assert.match(output, /\[masked\]/);
 });

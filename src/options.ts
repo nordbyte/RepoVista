@@ -22,6 +22,7 @@ export const DEFAULT_OPTIONS: AuditOptions = {
   strictReports: false,
   repairReports: false,
   repairAttempts: 1,
+  deepReview: false,
   exportFormats: [],
   ci: false,
   failOnCritical: false,
@@ -120,27 +121,42 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
         break;
       case "run-checks":
         options.runChecks = true;
+        options.runChecksExplicit = true;
         break;
       case "no-run-checks":
         options.runChecks = false;
+        options.runChecksExplicit = true;
         break;
       case "strict-reports":
         options.strictReports = true;
+        options.strictReportsExplicit = true;
         break;
       case "no-strict-reports":
         options.strictReports = false;
+        options.strictReportsExplicit = true;
         break;
       case "repair-reports":
         options.repairReports = true;
+        options.repairReportsExplicit = true;
         break;
       case "no-repair-reports":
         options.repairReports = false;
+        options.repairReportsExplicit = true;
+        break;
+      case "deep-review":
+        options.deepReview = true;
+        options.deepReviewExplicit = true;
+        break;
+      case "no-deep-review":
+        options.deepReview = false;
+        options.deepReviewExplicit = true;
         break;
       case "no-progress":
         options.progress = false;
         break;
       case "no-parallel":
         options.parallel = "off";
+        options.parallelExplicit = true;
         break;
       case "keep-logs":
         options.keepLogs = true;
@@ -372,6 +388,7 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
       break;
     case "parallel":
       options.parallel = parseParallelMode(value);
+      options.parallelExplicit = true;
       break;
     case "out":
       options.outDir = requireNonEmpty(name, value);
@@ -548,7 +565,11 @@ function parsePositiveMinutes(optionName: string, value: string): number {
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new CliUsageError(`Option --${optionName} must be a positive number of minutes.`);
   }
-  return Math.round(parsed * 60);
+  const seconds = Math.ceil(parsed * 60);
+  if (seconds < 1) {
+    throw new CliUsageError(`Option --${optionName} must be at least one second.`);
+  }
+  return seconds;
 }
 
 function parsePositiveInteger(optionName: string, value: string, max: number): number {

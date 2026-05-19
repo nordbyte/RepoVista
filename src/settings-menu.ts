@@ -9,6 +9,7 @@ import {
 import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
+import { parseSettingValue } from "./settings-schema.js";
 import type { AiProviderId, ParallelMode, SandboxMode } from "./types.js";
 
 type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
@@ -25,7 +26,7 @@ interface MenuState {
 
 type MainItem =
   | { id: "provider" | "parallel" | "auditProfile" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
-  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
+  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "workspace" | "outDir" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
@@ -146,6 +147,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}`,
     `Strict report gates: ${settings.strictReports ? "on" : "off"}`,
     `Repair reports: ${settings.repairReports ? "on" : "off"}`,
+    `Deep review: ${settings.deepReview ? "on" : "off"}`,
     `Export formats: ${formatArray(settings.exportFormats)}`,
     `JSON: ${settings.json ? "on" : "off"}`,
     `Keep logs: ${settings.keepLogs ? "on" : "off"}`,
@@ -317,6 +319,10 @@ function toggleCurrentSelection(state: MenuState): void {
 }
 
 function toggleBoolean(state: MenuState, key: keyof RepoVistaSettings): void {
+  if (key === "progress") {
+    state.settings.progress = state.settings.progress === false ? undefined : false;
+    return;
+  }
   state.settings[key] = !state.settings[key] as never;
 }
 
@@ -399,7 +405,7 @@ async function editTextSetting(
   } else if (id === "ignores") {
     state.settings.ignores = values.length ? values : undefined;
   } else if (id === "exportFormats") {
-    state.settings.exportFormats = values.filter((value) => value === "sarif" || value === "html" || value === "jsonl" || value === "github") as RepoVistaSettings["exportFormats"];
+    state.settings.exportFormats = parseSettingValue("exportFormats", trimmed) as RepoVistaSettings["exportFormats"];
   } else {
     state.settings.checkCommands = values.length ? values : undefined;
   }
@@ -514,6 +520,7 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}` },
   { id: "strictReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.strictReports), "Strict report quality gates") },
   { id: "repairReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.repairReports), "Repair reports that miss quality gates") },
+  { id: "deepReview", type: "toggle", label: (settings) => checkbox(Boolean(settings.deepReview), "Feature-sliced deep review") },
   { id: "exportFormats", type: "text", label: (settings) => `Export formats: ${formatArray(settings.exportFormats)}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(Boolean(settings.json), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(Boolean(settings.keepLogs), "Keep technical logs") },

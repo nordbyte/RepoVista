@@ -161,9 +161,19 @@ test("finding extractor uses schema findings before markdown fallback", () => {
       "signature": "high|security|src/schema.ts|Schema title",
       "affectedPaths": ["src/schema.ts"],
       "evidence": "src/schema.ts validates the report schema",
-      "evidenceReferences": ["src/schema.ts"],
+      "evidenceReferences": [
+        {
+          "path": "src/schema.ts",
+          "startLine": 1,
+          "endLine": 1,
+          "quote": "validate schema"
+        }
+      ],
       "problemRationale": "The schema is the source of truth.",
       "recommendedFix": "Keep the schema valid.",
+      "reproduction": "Inspect src/schema.ts and confirm schema handling is used.",
+      "suggestedRegressionTest": "Add a parser test for schema-first extraction.",
+      "minimumFixScope": "Keep the schema parser path intact.",
       "estimatedEffort": "small",
       "confidence": "high"
     }
@@ -216,9 +226,24 @@ Fix src/schema.ts, src/index.ts and test/schema.test.ts.
       "signature": "high|security|src/schema.ts|Schema title",
       "affectedPaths": ["src/schema.ts"],
       "evidence": "src/schema.ts and test/schema.test.ts cover schema extraction",
-      "evidenceReferences": ["src/schema.ts", "test/schema.test.ts"],
+      "evidenceReferences": [
+        {
+          "path": "src/schema.ts",
+          "startLine": 1,
+          "endLine": 1,
+          "quote": "schema extraction"
+        },
+        {
+          "path": "test/schema.test.ts",
+          "startLine": 1,
+          "endLine": 1
+        }
+      ],
       "problemRationale": "The parser depends on valid structured fields.",
       "recommendedFix": "Keep schema validation in place.",
+      "reproduction": "Run the schema parser against a report with a findings block.",
+      "suggestedRegressionTest": "Assert that schema findings are preferred over markdown fallback.",
+      "minimumFixScope": "Update the parser and quality gate only.",
       "estimatedEffort": "small",
       "confidence": "high"
     }
@@ -227,6 +252,82 @@ Fix src/schema.ts, src/index.ts and test/schema.test.ts.
 \`\`\`
 `);
   assert.equal(quality.passed, true);
+});
+
+test("schema extractor handles sentinel JSON, fenced quote text and parent child findings", () => {
+  const schema = {
+    schemaVersion: 1,
+    findings: [
+      {
+        title: "Project scripts can bypass no-run-checks",
+        severity: "low",
+        category: "Reliability",
+        status: "open",
+        signature: "settings|no-run-checks|src/profiles.ts",
+        affectedPaths: ["src/profiles.ts"],
+        evidence: "src/profiles.ts enables run checks from profiles.",
+        evidenceReferences: [
+          {
+            path: "src/profiles.ts",
+            startLine: 1,
+            endLine: 3,
+            quote: "const fenced = \"```json\";"
+          }
+        ],
+        problemRationale: "An explicit --no-run-checks choice must not be overridden by profiles.",
+        recommendedFix: "Track explicit CLI booleans and let them win over profile defaults.",
+        reproduction: "Run a profile with --no-run-checks and inspect the resolved options.",
+        suggestedRegressionTest: "Assert --audit-profile pr-review --no-run-checks keeps runChecks false.",
+        minimumFixScope: "Change profile option merging only.",
+        estimatedEffort: "small",
+        confidence: "high",
+        childFindings: [
+          {
+            title: "Profile merge ignores explicit run check disable",
+            severity: "medium",
+            category: "Reliability",
+            status: "open",
+            signature: "settings|child|src/options.ts",
+            affectedPaths: ["src/options.ts"],
+            evidence: "src/options.ts parses no-run-checks.",
+            evidenceReferences: [
+              {
+                path: "src/options.ts",
+                startLine: 1,
+                endLine: 2,
+                quote: "no-run-checks"
+              }
+            ],
+            problemRationale: "The parser must preserve whether the user explicitly disabled checks.",
+            recommendedFix: "Record an explicit runChecks flag while parsing.",
+            reproduction: "Parse audit --audit-profile pr-review --no-run-checks.",
+            suggestedRegressionTest: "Assert the parsed and profiled options keep runChecks false.",
+            minimumFixScope: "Add explicit boolean tracking to options/profile handling.",
+            estimatedEffort: "small",
+            confidence: "high"
+          }
+        ]
+      }
+    ]
+  };
+
+  const extraction = extractFindingsWithSource(`# Risk
+
+## Critical Findings
+
+- Title: Markdown fallback should be ignored
+- Severity: Critical
+
+<!-- repovista-findings:start -->
+${JSON.stringify(schema, null, 2)}
+<!-- repovista-findings:end -->
+`);
+
+  assert.equal(extraction.source, "schema");
+  assert.equal(extraction.findings.length, 2);
+  assert.equal(extraction.findings[0].severity, "high");
+  assert.ok(extraction.findings.some((finding) => finding.findingType === "theme"));
+  assert.ok(extraction.findings.some((finding) => finding.parentTitle === "Project scripts can bypass no-run-checks"));
 });
 
 test("schema findings get stable ids and validated evidence details", async () => {
@@ -281,6 +382,9 @@ Fix src/schema.ts, src/index.ts and test/schema.test.ts.
       ],
       "problemRationale": "The parser depends on valid structured fields.",
       "recommendedFix": "Keep schema validation in place.",
+      "reproduction": "Run extraction for a report that references src/schema.ts.",
+      "suggestedRegressionTest": "Assert evidence validation succeeds for the exact quote.",
+      "minimumFixScope": "Keep evidence reference parsing and validation aligned.",
       "estimatedEffort": "small",
       "confidence": "high"
     }
@@ -338,7 +442,7 @@ test("audit writes structured findings and summary json", async () => {
       commandExists: async () => true,
       runCommand: async (command, args) => ok([command, ...args].join(" "), command === "git" && args[0] === "rev-parse" ? "false\n" : "ok\n"),
       runCodex: async (request) => {
-        const content = request.phaseId === "risk-and-bug"
+        const content = request.phaseId.startsWith("risk-and-bug")
           ? `# Risk
 
 ## Executive Summary
@@ -382,10 +486,20 @@ No low findings.
       "severity": "critical",
       "category": "reliability",
       "affectedPaths": ["src/index.ts"],
-      "evidence": "src/index.ts is the entry point in this fixture",
-      "evidenceReferences": ["src/index.ts"],
+      "evidence": "src/index.ts is the entry point in this fixture; package.json and test/index.test.ts document the fixture boundary.",
+      "evidenceReferences": [
+        {
+          "path": "src/index.ts",
+          "startLine": 1,
+          "endLine": 1,
+          "quote": "export const value = 1;"
+        }
+      ],
       "problemRationale": "The entry point lacks the expected validation in this fixture.",
       "recommendedFix": "add validation",
+      "reproduction": "Inspect src/index.ts and observe there is no validation around the exported value.",
+      "suggestedRegressionTest": "Add a test that fails when validation is absent.",
+      "minimumFixScope": "Add validation in src/index.ts and cover it with a focused test.",
       "estimatedEffort": "small",
       "confidence": "high"
     }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { RepoVistaError } from "./errors.js";
 import { findingStateDirectory, loadStoredFindings } from "./finding-store.js";
@@ -165,24 +165,33 @@ async function loadBaseline(projectRoot: string, outDir: string, now: Date): Pro
     if (parsed.schemaVersion === 1 && Array.isArray(parsed.suppressions)) {
       return { path: baselinePath, file: parsed };
     }
-  } catch {
-    // Missing or invalid baseline files are treated as empty; doctor reports invalid plugin files separately.
-  }
-  return {
-    path: baselinePath,
-    file: {
-      schemaVersion: 1,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      suppressions: []
+    throw new RepoVistaError(`Invalid RepoVista baseline file: ${baselinePath}`);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return {
+        path: baselinePath,
+        file: {
+          schemaVersion: 1,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          suppressions: []
+        }
+      };
     }
-  };
+    if (error instanceof RepoVistaError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RepoVistaError(`Could not read RepoVista baseline file ${baselinePath}: ${message}`);
+  }
 }
 
 async function saveBaseline(projectRoot: string, outDir: string, baseline: BaselineFile): Promise<string> {
   const baselinePath = await baselineFilePath(projectRoot, outDir);
   await mkdir(path.dirname(baselinePath), { recursive: true });
-  await writeFile(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
+  const tempPath = path.join(path.dirname(baselinePath), `.baseline.${process.pid}.${Date.now()}.tmp`);
+  await writeFile(tempPath, `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
+  await rename(tempPath, baselinePath);
   return baselinePath;
 }
 
@@ -215,4 +224,8 @@ function requireFindingId(options: AuditOptions): string {
     throw new RepoVistaError("Baseline command requires a finding id.");
   }
   return options.findingId;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT");
 }

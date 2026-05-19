@@ -160,9 +160,13 @@ function githubLevel(severity: StructuredFinding["severity"]): "failure" | "warn
 }
 
 function findingReferences(finding: StructuredFinding): FindingEvidenceReference[] {
-  return finding.evidenceDetails?.length
-    ? finding.evidenceDetails
-    : finding.paths.map((path) => ({ path }));
+  if (finding.evidenceDetails?.length) {
+    return finding.evidenceDetails;
+  }
+  if (finding.evidenceReferences?.length) {
+    return finding.evidenceReferences.map((reference) => typeof reference === "string" ? { path: reference } : reference);
+  }
+  return finding.paths.map((path) => ({ path }));
 }
 
 function ruleId(finding: StructuredFinding): string {

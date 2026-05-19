@@ -190,7 +190,8 @@ test("provider runner masks sensitive failure output and logs", async () => {
     const child = new FakeChild();
     const spawnAdapter = () => {
       setImmediate(() => {
-        child.stdout.write("TOKEN=s3cr3t-value\n");
+        child.stdout.write("TOKEN=s3");
+        child.stdout.write("cr3t-value\n");
         child.stderr.write("request failed for https://user:pass@example.com with API_KEY=abc123\n");
         child.emit("close", 1);
       });

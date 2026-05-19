@@ -23,6 +23,7 @@ export interface RepoVistaSettings {
   strictReports?: boolean;
   repairReports?: boolean;
   repairAttempts?: number;
+  deepReview?: boolean;
   exportFormats?: ReportExportFormat[];
   json?: boolean;
   keepLogs?: boolean;
@@ -86,15 +87,16 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     allWorkspaces: settings.allWorkspaces ?? defaults.allWorkspaces,
     incremental: settings.incremental ?? defaults.incremental,
     runChecks: settings.runChecks ?? defaults.runChecks,
-    checkCommands: settings.checkCommands ? [...settings.checkCommands] : [...defaults.checkCommands],
+    checkCommands: settings.checkCommands !== undefined ? [...settings.checkCommands] : [...defaults.checkCommands],
     checkTimeoutSeconds: settings.checkTimeoutSeconds ?? defaults.checkTimeoutSeconds,
     phaseTimeoutSeconds: settings.phaseTimeoutSeconds ?? defaults.phaseTimeoutSeconds,
     strictReports: settings.strictReports ?? defaults.strictReports,
     repairReports: settings.repairReports ?? defaults.repairReports,
     repairAttempts: settings.repairAttempts ?? defaults.repairAttempts,
-    exportFormats: settings.exportFormats ? [...settings.exportFormats] : [...defaults.exportFormats],
-    includes: settings.includes ? [...settings.includes] : [...defaults.includes],
-    ignores: settings.ignores ? [...settings.ignores] : [...defaults.ignores],
+    deepReview: settings.deepReview ?? defaults.deepReview,
+    exportFormats: settings.exportFormats !== undefined ? [...settings.exportFormats] : [...defaults.exportFormats],
+    includes: settings.includes !== undefined ? [...settings.includes] : [...defaults.includes],
+    ignores: settings.ignores !== undefined ? [...settings.ignores] : [...defaults.ignores],
     phases: [...defaults.phases]
   };
 }
@@ -139,9 +141,7 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
         .filter((value): value is string => typeof value === "string")
         .map((value) => value.trim())
         .filter(Boolean);
-      if (values.length) {
-        sanitized[key] = Array.from(new Set(values));
-      }
+      sanitized[key] = Array.from(new Set(values));
     }
   }
 
@@ -149,19 +149,17 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     const values = settings.exportFormats.filter((value): value is ReportExportFormat =>
       value === "sarif" || value === "html" || value === "jsonl" || value === "github"
     );
-    if (values.length) {
-      sanitized.exportFormats = Array.from(new Set(values));
-    }
+    sanitized.exportFormats = Array.from(new Set(values));
   }
 
   for (const key of ["checkTimeoutSeconds", "phaseTimeoutSeconds", "repairAttempts"] as const) {
     const value = settings[key];
     if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      sanitized[key] = Math.round(value);
+      sanitized[key] = Math.max(1, Math.round(value));
     }
   }
 
-  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "allWorkspaces", "incremental"] as const) {
+  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "deepReview", "allWorkspaces", "incremental"] as const) {
     if (typeof settings[key] === "boolean") {
       sanitized[key] = settings[key];
     }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseCliArgs, validateSandbox } from "../dist/index.js";
+import { applyAuditProfile, parseCliArgs, validateSandbox } from "../dist/index.js";
 
 test("default command runs audit with safe defaults", () => {
   const parsed = parseCliArgs([]);
@@ -42,6 +42,7 @@ test("explicit audit command parses supported options", () => {
     "--phase",
     "risk-and-bug,summary",
     "--run-checks",
+    "--deep-review",
     "--check",
     "npm run typecheck",
     "--check-timeout",
@@ -71,6 +72,7 @@ test("explicit audit command parses supported options", () => {
   assert.deepEqual(parsed.options.ignores, ["fixtures/**"]);
   assert.deepEqual(parsed.options.phases, ["risk-and-bug", "summary"]);
   assert.equal(parsed.options.runChecks, true);
+  assert.equal(parsed.options.deepReview, true);
   assert.deepEqual(parsed.options.checkCommands, ["npm run typecheck"]);
   assert.equal(parsed.options.checkTimeoutSeconds, 120);
   assert.equal(parsed.options.phaseTimeoutSeconds, 2700);
@@ -187,4 +189,12 @@ test("audit profiles, workspaces, issue metadata, and incremental mode parse", (
   assert.deepEqual(parsed.options.issueLabels, ["repovista"]);
   assert.deepEqual(parsed.options.issueAssignees, ["octocat"]);
   assert.equal(parsed.options.issueUpdateExisting, true);
+});
+
+test("explicit no-run-checks wins over audit profile defaults", () => {
+  const parsed = parseCliArgs(["audit", "--audit-profile", "pr-review", "--no-run-checks", "--no-parallel"]);
+  const profiled = applyAuditProfile(parsed.options);
+
+  assert.equal(profiled.runChecks, false);
+  assert.equal(profiled.parallel, "off");
 });

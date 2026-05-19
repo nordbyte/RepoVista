@@ -6,7 +6,7 @@ export interface AuditProfileDefinition {
   description: string;
   options: Partial<Pick<
     AuditOptions,
-    "phases" | "runChecks" | "strictReports" | "repairReports" | "parallel" | "prMode" | "since" | "exportFormats" | "incremental"
+    "phases" | "runChecks" | "strictReports" | "repairReports" | "parallel" | "prMode" | "since" | "exportFormats" | "incremental" | "deepReview"
   >>;
 }
 
@@ -87,10 +87,11 @@ export function applyAuditProfile(options: AuditOptions): AuditOptions {
   return {
     ...options,
     phases: options.phases.length ? options.phases : [...(profileOptions.phases ?? options.phases)],
-    runChecks: options.runChecks || Boolean(profileOptions.runChecks),
-    strictReports: options.strictReports || Boolean(profileOptions.strictReports),
-    repairReports: options.repairReports || Boolean(profileOptions.repairReports),
-    parallel: options.parallel === "off" && profileOptions.parallel ? profileOptions.parallel : options.parallel,
+    runChecks: options.runChecksExplicit ? options.runChecks : options.runChecks || Boolean(profileOptions.runChecks),
+    strictReports: options.strictReportsExplicit ? options.strictReports : options.strictReports || Boolean(profileOptions.strictReports),
+    repairReports: options.repairReportsExplicit ? options.repairReports : options.repairReports || Boolean(profileOptions.repairReports),
+    deepReview: options.deepReviewExplicit ? options.deepReview : options.deepReview || Boolean(profileOptions.deepReview),
+    parallel: !options.parallelExplicit && options.parallel === "off" && profileOptions.parallel ? profileOptions.parallel : options.parallel,
     prMode: options.prMode ?? profileOptions.prMode,
     since: options.since ?? profileOptions.since,
     exportFormats: options.exportFormats.length

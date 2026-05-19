@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { RepoVistaError } from "./errors.js";
 import { validateReportRoot } from "./reports.js";
 import type { StructuredFinding } from "./types.js";
 
@@ -19,17 +20,20 @@ export async function loadStoredFindings(projectRoot: string, outDir: string): P
       if (!entry.isFile() || !entry.name.endsWith(".json")) {
         continue;
       }
-      const parsed = JSON.parse(await readFile(path.join(stateDirectory, entry.name), "utf8")) as {
-        version?: number;
-        finding?: StructuredFinding;
-      };
+      const filePath = path.join(stateDirectory, entry.name);
+      const parsed = await readFindingStateFile(filePath);
       if (parsed.version === FINDING_STATE_VERSION && parsed.finding?.id) {
         findings.push(parsed.finding);
+      } else {
+        throw new RepoVistaError(`Invalid RepoVista finding state file: ${filePath}`);
       }
     }
     return findings.sort(compareFindingsForStorage);
-  } catch {
-    return [];
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return [];
+    }
+    throw error;
   }
 }
 
@@ -73,7 +77,23 @@ export async function writeFindingFileAtomic(stateDirectory: string, finding: St
 }
 
 export function safeFindingFileName(value: string): string {
-  return value.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return `f_${Buffer.from(value, "utf8").toString("base64url")}`;
+}
+
+async function readFindingStateFile(filePath: string): Promise<{ version?: number; finding?: StructuredFinding }> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8")) as {
+      version?: number;
+      finding?: StructuredFinding;
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RepoVistaError(`Could not read RepoVista finding state file ${filePath}: ${message}`);
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT");
 }
 
 function compareFindingsForStorage(left: StructuredFinding, right: StructuredFinding): number {

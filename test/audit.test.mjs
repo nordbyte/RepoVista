@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_OPTIONS, hasCriticalFindings, initializeProjectMap, runAudit } from "../dist/index.js";
+import { DEFAULT_OPTIONS, hasCriticalFindings, initializeProjectMap, projectScanFingerprint, runAudit } from "../dist/index.js";
 
 test("audit creates the full report structure with mocked Codex phases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-"));
@@ -325,6 +325,77 @@ test("parallel resume reuses completed shard reports before synthesis", async ()
   }
 });
 
+test("deep review runs feature-sliced risk shards and merges schema findings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-deep-"));
+  try {
+    await mkdir(path.join(root, "src", "alpha"), { recursive: true });
+    await mkdir(path.join(root, "src", "beta"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "alpha", "a.ts"), "export const a = 1;\n", "utf8");
+    await writeFile(path.join(root, "src", "beta", "b.ts"), "export const b = 1;\n", "utf8");
+    await initializeProjectMap(root, DEFAULT_OPTIONS, new Date("2026-05-18T14:57:32.123Z"));
+
+    const seen = [];
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: 2,
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["risk-and-bug"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false,
+      deepReview: true
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        seen.push(request.phaseId);
+        const content = request.phaseId.includes("-deep-")
+          ? riskReportWithFinding("Shard-specific missing guard", "src/alpha/a.ts", "export const a = 1;")
+          : completeMockReport("risk-and-bug", request.phaseTitle);
+        await writeFile(request.reportPath, content, "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(seen.some((phaseId) => phaseId.startsWith("risk-and-bug-deep-")));
+    assert.ok(result.meta.phases.find((phase) => phase.id === "risk-and-bug").deepReviewShards.length > 0);
+    const findings = JSON.parse(await readFile(path.join(result.paths.runDir, "findings.json"), "utf8"));
+    assert.ok(findings.some((finding) => finding.title === "Shard-specific missing guard"));
+    assert.ok(await readFile(path.join(result.paths.runDir, "deep-review", "risk-and-bug", result.meta.phases.find((phase) => phase.id === "risk-and-bug").deepReviewShards[0].id + ".md"), "utf8"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("audit rejects project root as report folder before creating run directories", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-out-root-"));
   try {
@@ -414,6 +485,81 @@ test("critical finding detector distinguishes empty critical sections from real 
     hasCriticalFindings("## Critical Findings\n\n- Title: Unsafe auth\n- Severity: Critical"),
     true
   );
+});
+
+test("scan fingerprint includes mtime fallback and audit context", () => {
+  const files = [
+    {
+      relativePath: "src/index.ts",
+      size: 42,
+      mtimeMs: 1000
+    }
+  ];
+
+  assert.notEqual(projectScanFingerprint(files), projectScanFingerprint([{ ...files[0], mtimeMs: 2000 }]));
+  assert.notEqual(projectScanFingerprint(files, { runChecks: false }), projectScanFingerprint(files, { runChecks: true }));
+});
+
+test("risk phase auto-repairs missing findings schema before extraction", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-repair-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    const seen = [];
+
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["risk-and-bug"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        seen.push(request.phaseId);
+        const content = request.phaseId.includes("repair")
+          ? riskReportWithFinding("Repair-added finding", "src/index.ts", "export const value = 1;")
+          : "# Risk\n\n## Critical Findings\n\nNo critical findings.\n";
+        await writeFile(request.reportPath, content, "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.deepEqual(seen, ["risk-and-bug", "risk-and-bug-repair-1"]);
+    assert.ok(result.meta.findings.some((finding) => finding.title === "Repair-added finding"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("resume preserves completed phase reports without rerunning Codex", async () => {
@@ -702,5 +848,66 @@ The fixture has a simple flow from src/index.ts to test/index.test.ts.
 ## Recommendations
 
 - Keep README.md aligned with package.json.
+`;
+}
+
+function riskReportWithFinding(title, filePath, quote) {
+  return `# Risk and Bug Analysis
+
+## Executive Summary
+
+One shard risk was found in ${filePath}, src/beta/b.ts and package.json.
+
+## Critical Findings
+
+No critical findings.
+
+## High Findings
+
+One high finding.
+
+## Medium Findings
+
+No medium findings.
+
+## Low Findings
+
+No low findings.
+
+## Recommended Next Steps
+
+- Add a guard around ${filePath}.
+
+<!-- repovista-findings:start -->
+${JSON.stringify({
+    schemaVersion: 1,
+    findings: [
+      {
+        title,
+        severity: "high",
+        category: "Reliability",
+        status: "open",
+        signature: `deep|${filePath}|guard`,
+        affectedPaths: [filePath],
+        evidence: `${filePath} exposes a value without a guard.`,
+        evidenceReferences: [
+          {
+            path: filePath,
+            startLine: 1,
+            endLine: 1,
+            quote
+          }
+        ],
+        problemRationale: "The shard exposes behavior without a defensive guard.",
+        recommendedFix: "Add a focused guard and keep the exported behavior covered.",
+        reproduction: `Inspect ${filePath} and observe the unguarded export.`,
+        suggestedRegressionTest: "Add a test that fails when the guard is absent.",
+        minimumFixScope: `Update ${filePath} and the closest test fixture.`,
+        estimatedEffort: "small",
+        confidence: "high"
+      }
+    ]
+  }, null, 2)}
+<!-- repovista-findings:end -->
 `;
 }

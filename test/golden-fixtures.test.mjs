@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCliArgs, extractStructuredPhaseReport, validateReportQuality } from "../dist/index.js";
+import { parseCliArgs, extractStructuredPhaseReport, runCiInitCommand, validateReportQuality } from "../dist/index.js";
 
 test("golden roadmap fixture satisfies structured quality gates", async () => {
   const markdown = await readFile(new URL("./fixtures/golden-roadmap.md", import.meta.url), "utf8");
@@ -34,4 +34,14 @@ test("new CLI flows parse noninteractive settings, exports, repair and PR mode",
   const findings = parseCliArgs(["findings", "--json", "--export", "sarif"]);
   assert.equal(findings.action, "findings");
   assert.deepEqual(findings.options.exportFormats, ["sarif"]);
+});
+
+test("ci init template uses read-only permissions and artifact exports by default", async () => {
+  const workflow = await runCiInitCommand({ outDir: ".repovista", dryRun: true, force: true });
+
+  assert.match(workflow, /permissions:\n  contents: read/);
+  assert.doesNotMatch(workflow, /pull-requests: write|security-events: write|upload-sarif/);
+  assert.match(workflow, /repovista providers test codex/);
+  assert.match(workflow, /--no-run-checks/);
+  assert.match(workflow, /--export jsonl,html/);
 });

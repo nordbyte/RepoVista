@@ -62,10 +62,14 @@ export function evidenceReferencesForFinding(finding: StructuredFinding): Findin
   const seen = new Set<string>();
   const references: FindingEvidenceReference[] = [];
   for (const item of raw ?? []) {
-    const normalized = normalizeEvidencePath(item);
-    if (normalized && !seen.has(normalized)) {
-      seen.add(normalized);
-      references.push({ path: normalized });
+    const reference = typeof item === "string" ? { path: item } : item;
+    const normalized = normalizeEvidencePath(reference.path);
+    const key = normalized
+      ? `${normalized}:${reference.startLine ?? ""}:${reference.endLine ?? ""}:${reference.quote ?? ""}:${reference.symbol ?? ""}`
+      : "";
+    if (normalized && !seen.has(key)) {
+      seen.add(key);
+      references.push({ ...reference, path: normalized });
     }
   }
   return references;

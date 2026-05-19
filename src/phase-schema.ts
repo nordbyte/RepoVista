@@ -1,10 +1,9 @@
-import { extractFindings } from "./findings.js";
+import { extractFindings, extractJsonObjectCandidates } from "./findings.js";
 import type { StructuredPhaseReport, StructuredRoadmapProposal } from "./types.js";
 
 export function extractStructuredPhaseReport(markdown: string, phaseId: string, source: string): StructuredPhaseReport {
   const warnings: string[] = [];
-  const blocks = extractJsonBlocks(markdown);
-  const candidates = blocks
+  const candidates = extractJsonObjectCandidates(markdown)
     .map((block) => parseJsonObject(block))
     .filter((value): value is Record<string, unknown> => Boolean(value));
   const schema = candidates.find((candidate) => candidate.phaseId === phaseId) ??
@@ -64,15 +63,6 @@ function isPhaseSchemaCandidate(value: Record<string, unknown>, phaseId: string)
     return true;
   }
   return Array.isArray(value.keyPoints) || Array.isArray(value.recommendations);
-}
-
-function extractJsonBlocks(markdown: string): string[] {
-  const blocks: string[] = [];
-  const pattern = /```json\s*([\s\S]*?)```/gi;
-  for (const match of markdown.matchAll(pattern)) {
-    blocks.push(match[1]);
-  }
-  return blocks;
 }
 
 function parseJsonObject(content: string): Record<string, unknown> | undefined {

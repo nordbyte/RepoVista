@@ -31,6 +31,7 @@ test("settings sanitize persisted defaults", () => {
     strictReports: true,
     repairReports: true,
     repairAttempts: 2,
+    deepReview: true,
     exportFormats: ["sarif", "invalid", "html"],
     json: true,
     keepLogs: true,
@@ -59,6 +60,7 @@ test("settings sanitize persisted defaults", () => {
     strictReports: true,
     repairReports: true,
     repairAttempts: 2,
+    deepReview: true,
     exportFormats: ["sarif", "html"],
     json: true,
     keepLogs: true,
@@ -83,6 +85,7 @@ test("settings apply to audit defaults while preserving include and ignore array
     checkCommands: ["npm test"],
     strictReports: true,
     repairReports: true,
+    deepReview: true,
     exportFormats: ["sarif"]
   });
 
@@ -99,7 +102,28 @@ test("settings apply to audit defaults while preserving include and ignore array
   assert.deepEqual(options.checkCommands, ["npm test"]);
   assert.equal(options.strictReports, true);
   assert.equal(options.repairReports, true);
+  assert.equal(options.deepReview, true);
   assert.deepEqual(options.exportFormats, ["sarif"]);
+});
+
+test("settings preserve explicit empty arrays and clamp positive durations", () => {
+  const sanitized = sanitizeSettings({
+    includes: [],
+    ignores: [],
+    checkCommands: [],
+    exportFormats: [],
+    checkTimeoutSeconds: 0.2,
+    phaseTimeoutSeconds: 0.4,
+    repairAttempts: 0.6
+  });
+
+  assert.deepEqual(sanitized.includes, []);
+  assert.deepEqual(sanitized.ignores, []);
+  assert.deepEqual(sanitized.checkCommands, []);
+  assert.deepEqual(sanitized.exportFormats, []);
+  assert.equal(sanitized.checkTimeoutSeconds, 1);
+  assert.equal(sanitized.phaseTimeoutSeconds, 1);
+  assert.equal(sanitized.repairAttempts, 1);
 });
 
 test("settings are saved as JSON", async () => {

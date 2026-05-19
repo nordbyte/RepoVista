@@ -569,7 +569,7 @@ Affected paths:
 ${renderList(finding.paths)}
 
 Evidence references:
-${renderList(finding.evidenceReferences ?? finding.paths)}
+${renderList(renderEvidenceReferences(finding.evidenceReferences ?? finding.paths))}
 
 ${finding.evidence ? `Evidence: ${finding.evidence}\n` : ""}
 ${finding.problemRationale && !options.concise ? `Problem rationale: ${finding.problemRationale}\n` : ""}
@@ -585,6 +585,18 @@ Next commands:
 
 function renderList(items: string[]): string {
   return items.length ? items.map((item) => `- ${item}`).join("\n") : "- n/a";
+}
+
+function renderEvidenceReferences(references: NonNullable<StructuredFinding["evidenceReferences"]> | string[]): string[] {
+  return references.map((reference) => {
+    if (typeof reference === "string") {
+      return reference;
+    }
+    const range = reference.startLine
+      ? `:${reference.startLine}${reference.endLine && reference.endLine !== reference.startLine ? `-${reference.endLine}` : ""}`
+      : "";
+    return `${reference.path}${range}${reference.quote ? ` (${reference.quote})` : ""}`;
+  });
 }
 
 function renderInlineList(items: string[]): string {

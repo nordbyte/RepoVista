@@ -41,7 +41,7 @@ export { runPreflight } from "./preflight.js";
 export { prepareRunDirectory, useExistingRunDirectory, validateReportRoot, writeMeta } from "./reports.js";
 export { validateReportQuality } from "./quality-gates.js";
 export { createRunId } from "./run-id.js";
-export { isSensitiveKey, maskObject, maskSensitiveText, maskSensitiveValue } from "./secrets.js";
+export { createSensitiveTextMasker, isSensitiveKey, maskObject, maskSensitiveText, maskSensitiveValue } from "./secrets.js";
 export { applySettingsToDefaults, loadSettings, saveSettings, sanitizeSettings } from "./settings-config.js";
 export { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 export { SETTING_DEFINITIONS, SETTING_KEYS, normalizeSettingKey, parseSettingValue } from "./settings-schema.js";

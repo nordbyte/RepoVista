@@ -50,16 +50,22 @@ export interface AuditOptions {
   ignores: string[];
   phases: string[];
   runChecks: boolean;
+  runChecksExplicit?: boolean;
   checkCommands: string[];
   checkTimeoutSeconds: number;
   phaseTimeoutSeconds: number;
   strictReports: boolean;
+  strictReportsExplicit?: boolean;
   repairReports: boolean;
+  repairReportsExplicit?: boolean;
   repairAttempts: number;
+  deepReview: boolean;
+  deepReviewExplicit?: boolean;
   exportFormats: ReportExportFormat[];
   ci: boolean;
   failOnCritical: boolean;
   progress: boolean;
+  parallelExplicit?: boolean;
   keepLogs: boolean;
   auditProfile?: AuditProfileId;
   workspace?: string;
@@ -111,6 +117,7 @@ export interface PhaseReportStatus {
   qualityWarnings?: string[];
   qualityScore?: number;
   shards?: PhaseShardStatus[];
+  deepReviewShards?: PhaseShardStatus[];
 }
 
 export interface PhaseShardStatus {
@@ -186,13 +193,20 @@ export interface StructuredFinding {
   signature?: string;
   paths: string[];
   evidence?: string;
-  evidenceReferences?: string[];
+  evidenceReferences?: Array<string | FindingEvidenceReference>;
   evidenceDetails?: FindingEvidenceReference[];
   evidenceValidation?: FindingEvidenceValidation;
   recommendation?: string;
   problemRationale?: string;
+  reproduction?: string;
+  suggestedRegressionTest?: string;
+  minimumFixScope?: string;
   estimatedEffort?: string;
   confidence?: string;
+  parentId?: string;
+  parentTitle?: string;
+  childFindings?: StructuredFinding[];
+  findingType?: "theme" | "atomic";
   firstSeenRunId?: string;
   lastSeenRunId?: string;
   createdAt?: string;
@@ -291,6 +305,7 @@ export interface AuditMeta {
     strictReports: boolean;
     repairReports: boolean;
     repairAttempts?: number;
+    deepReview?: boolean;
     exportFormats: ReportExportFormat[];
     ci: boolean;
     failOnCritical: boolean;

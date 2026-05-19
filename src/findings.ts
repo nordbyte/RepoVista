@@ -14,6 +14,9 @@ const CONFIDENCE_PATTERN = /\bconfidence\s*:\s*([^\n]+)/i;
 const EVIDENCE_PATTERN = /\bevidence\s*:\s*([^\n]+)/i;
 const RECOMMENDATION_PATTERN = /\b(?:recommended fix|recommendation|concrete fix proposal)\s*:\s*([^\n]+)/i;
 const PROBLEM_RATIONALE_PATTERN = /\bproblem rationale\s*:\s*([^\n]+)/i;
+const REPRODUCTION_PATTERN = /\b(?:reproduction|repro)\s*:\s*([^\n]+)/i;
+const REGRESSION_TEST_PATTERN = /\b(?:suggested regression test|regression test)\s*:\s*([^\n]+)/i;
+const MINIMUM_FIX_SCOPE_PATTERN = /\b(?:minimum fix scope|min(?:imum)? scope)\s*:\s*([^\n]+)/i;
 const ESTIMATED_EFFORT_PATTERN = /\bestimated effort\s*:\s*([^\n]+)/i;
 const PATH_FIELD_PATTERN = /\b(?:file|path|affected paths?|affected files?)\s*:\s*([^\n]+)/i;
 const PATH_TOKEN_PATTERN = /`([^`]+)`|(?:^|[\s([:,])((?:\.?\/)?(?:(?:src|test|tests|lib|app|scripts|docs|\.github)\/[\w./-]+|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)))(?=$|[\s)\],.;:])/g;
@@ -39,18 +42,25 @@ export function extractFindingsWithSource(report: string, source = "03-risk-and-
 
 export function extractSchemaFindings(report: string, source = "03-risk-and-bug-report.md"): FindingExtractionResult {
   const warnings: string[] = [];
-  for (const block of jsonBlocks(report)) {
+  const allFindings: StructuredFinding[] = [];
+  let schemaFound = false;
+  for (const block of extractJsonObjectCandidates(report)) {
     const parsed = parseJsonObject(block);
     if (!parsed || !Array.isArray(parsed.findings)) {
       continue;
     }
 
+    schemaFound = true;
     const schemaVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : undefined;
-    const findings = parsed.findings
+    allFindings.push(...parsed.findings
       .map((item, index) => normalizeSchemaFinding(item, index, source, schemaVersion, warnings))
-      .filter((item): item is StructuredFinding => Boolean(item));
+      .filter((item): item is StructuredFinding => Boolean(item))
+      .flatMap(flattenFindingTree));
+  }
+
+  if (schemaFound) {
     return {
-      findings,
+      findings: mergeFindings(allFindings),
       source: "schema",
       schemaFound: true,
       warnings
@@ -89,10 +99,13 @@ function extractMarkdownFindings(report: string, source: string): StructuredFind
       triage: triageFor(cleanField(CATEGORY_PATTERN.exec(block)?.[1]), severity, cleanField(CONFIDENCE_PATTERN.exec(block)?.[1])),
       paths,
       evidence,
-      evidenceReferences,
+      evidenceReferences: evidenceReferences.map((reference) => ({ path: reference })),
       evidenceDetails: evidenceReferences.map((reference) => ({ path: reference })),
       recommendation: cleanField(RECOMMENDATION_PATTERN.exec(block)?.[1]),
       problemRationale: cleanField(PROBLEM_RATIONALE_PATTERN.exec(block)?.[1]),
+      reproduction: cleanField(REPRODUCTION_PATTERN.exec(block)?.[1]),
+      suggestedRegressionTest: cleanField(REGRESSION_TEST_PATTERN.exec(block)?.[1]),
+      minimumFixScope: cleanField(MINIMUM_FIX_SCOPE_PATTERN.exec(block)?.[1]),
       estimatedEffort: cleanField(ESTIMATED_EFFORT_PATTERN.exec(block)?.[1]),
       confidence: cleanField(CONFIDENCE_PATTERN.exec(block)?.[1])
     }));
@@ -106,7 +119,8 @@ function normalizeSchemaFinding(
   index: number,
   source: string,
   schemaVersion: number | undefined,
-  warnings: string[]
+  warnings: string[],
+  parent?: Pick<StructuredFinding, "id" | "title">
 ): StructuredFinding | undefined {
   if (!item || typeof item !== "object" || Array.isArray(item)) {
     warnings.push(`Finding ${index + 1} is not an object.`);
@@ -131,7 +145,8 @@ function normalizeSchemaFinding(
 
   const paths = readPathArray(record.affectedPaths ?? record.paths ?? record.affectedFiles);
   const evidenceDetails = readEvidenceReferences(record.evidenceReferences ?? record.evidenceDetails ?? record.evidencePaths ?? record.references);
-  const evidenceReferences = evidenceDetails.map((reference) => reference.path);
+  const fallbackReferences = extractPaths(readString(record.evidence) ?? "").map((reference) => ({ path: reference }));
+  const evidenceReferences = evidenceDetails.length ? evidenceDetails : fallbackReferences;
   const category = readString(record.category);
   const confidence = readString(record.confidence);
   const normalized: StructuredFinding = {
@@ -144,27 +159,102 @@ function normalizeSchemaFinding(
     triage: readString(record.triage) ?? triageFor(category, severity, confidence),
     paths,
     evidence: readString(record.evidence),
-    evidenceReferences: evidenceReferences.length ? evidenceReferences : extractPaths(readString(record.evidence) ?? ""),
-    evidenceDetails: evidenceDetails.length
-      ? evidenceDetails
-      : extractPaths(readString(record.evidence) ?? "").map((reference) => ({ path: reference })),
+    evidenceReferences,
+    evidenceDetails: evidenceReferences,
     recommendation: readString(record.recommendedFix ?? record.recommendation),
     problemRationale: readString(record.problemRationale ?? record.rationale),
+    reproduction: readString(record.reproduction ?? record.repro),
+    suggestedRegressionTest: readString(record.suggestedRegressionTest ?? record.regressionTest),
+    minimumFixScope: readString(record.minimumFixScope ?? record.minimumScope),
     estimatedEffort: readString(record.estimatedEffort ?? record.effort),
     confidence,
+    parentId: readString(record.parentId) ?? parent?.id,
+    parentTitle: readString(record.parentTitle) ?? parent?.title,
+    findingType: readFindingType(record.findingType),
     schemaVersion
   };
 
-  return withStableFindingIdentity(normalized);
+  let withIdentity = withStableFindingIdentity(normalized);
+  const children = readFindingChildren(record.childFindings ?? record.children)
+    .map((child, childIndex) => normalizeSchemaFinding(child, childIndex, source, schemaVersion, warnings, {
+      id: withIdentity.id,
+      title: withIdentity.title
+    }))
+    .filter((child): child is StructuredFinding => Boolean(child));
+  if (children.length) {
+    withIdentity = {
+      ...withIdentity,
+      findingType: "theme",
+      childFindings: mergeFindings(children)
+    };
+  }
+  return withIdentity;
 }
 
-function jsonBlocks(report: string): string[] {
-  const blocks: string[] = [];
-  const fencePattern = /```[ \t]*(?:json|repovista-findings)?[^\n]*\n([\s\S]*?)```/gi;
-  for (const match of report.matchAll(fencePattern)) {
-    blocks.push(match[1]);
+export function extractJsonObjectCandidates(report: string): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const sentinelPattern = /<!--\s*repovista-(?:findings|phase|schema):start\s*-->([\s\S]*?)<!--\s*repovista-(?:findings|phase|schema):end\s*-->/gi;
+  for (const match of report.matchAll(sentinelPattern)) {
+    for (const object of balancedJsonObjects(match[1] ?? "")) {
+      if (!seen.has(object)) {
+        seen.add(object);
+        candidates.push(object);
+      }
+    }
   }
-  return blocks;
+  for (const object of balancedJsonObjects(report)) {
+    if (!seen.has(object)) {
+      seen.add(object);
+      candidates.push(object);
+    }
+  }
+  return candidates;
+}
+
+function balancedJsonObjects(value: string): string[] {
+  const objects: string[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== "{") {
+      continue;
+    }
+    const end = findBalancedObjectEnd(value, index);
+    if (end > index) {
+      objects.push(value.slice(index, end + 1));
+      index = end;
+    }
+  }
+  return objects;
+}
+
+function findBalancedObjectEnd(value: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const char = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return -1;
 }
 
 function parseJsonObject(value: string): Record<string, unknown> | undefined {
@@ -224,6 +314,14 @@ function readEvidenceReferences(value: unknown): FindingEvidenceReference[] {
   return references.sort((left, right) => left.path.localeCompare(right.path) || (left.startLine ?? 0) - (right.startLine ?? 0));
 }
 
+function readFindingChildren(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function readFindingType(value: unknown): StructuredFinding["findingType"] | undefined {
+  return value === "theme" || value === "atomic" ? value : undefined;
+}
+
 function readEvidenceReference(value: unknown): FindingEvidenceReference | undefined {
   if (typeof value === "string") {
     const pathValue = normalizePathCandidate(value, true);
@@ -276,15 +374,137 @@ function normalizeStatus(value: string | undefined): FindingStatus | undefined {
 }
 
 function withStableFindingIdentity(finding: StructuredFinding): StructuredFinding {
-  const signature = findingSignature(finding);
-  const id = finding.id && finding.id.startsWith("fnd_") ? finding.id : stableFindingId(finding);
-  return {
+  const calibrated = {
     ...finding,
+    severity: calibrateSeverity(finding)
+  };
+  const signature = findingSignature(calibrated);
+  const id = calibrated.id && calibrated.id.startsWith("fnd_") ? calibrated.id : stableFindingId(calibrated);
+  return {
+    ...calibrated,
     id,
     signature,
-    status: finding.status ?? "open",
-    triage: finding.triage ?? triageFor(finding.category, finding.severity, finding.confidence)
+    status: calibrated.status ?? "open",
+    triage: calibrated.triage ?? triageFor(calibrated.category, calibrated.severity, calibrated.confidence),
+    findingType: calibrated.findingType ?? "atomic"
   };
+}
+
+export function mergeFindings(findings: StructuredFinding[]): StructuredFinding[] {
+  const byKey = new Map<string, StructuredFinding>();
+  for (const finding of findings) {
+    const key = finding.signature ?? findingKey(finding);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, finding);
+      continue;
+    }
+    byKey.set(key, mergeFinding(existing, finding));
+  }
+  return Array.from(byKey.values()).sort(compareFindings);
+}
+
+function mergeFinding(left: StructuredFinding, right: StructuredFinding): StructuredFinding {
+  const evidenceDetails = mergeEvidenceReferences([
+    ...(left.evidenceDetails ?? []),
+    ...(right.evidenceDetails ?? [])
+  ]);
+  return withStableFindingIdentity({
+    ...left,
+    severity: strongerSeverity(left.severity, right.severity),
+    paths: Array.from(new Set([...left.paths, ...right.paths])).sort(),
+    evidence: left.evidence ?? right.evidence,
+    evidenceDetails,
+    evidenceReferences: evidenceDetails,
+    recommendation: left.recommendation ?? right.recommendation,
+    problemRationale: left.problemRationale ?? right.problemRationale,
+    reproduction: left.reproduction ?? right.reproduction,
+    suggestedRegressionTest: left.suggestedRegressionTest ?? right.suggestedRegressionTest,
+    minimumFixScope: left.minimumFixScope ?? right.minimumFixScope,
+    childFindings: mergeFindings([
+      ...(left.childFindings ?? []),
+      ...(right.childFindings ?? [])
+    ])
+  });
+}
+
+function mergeEvidenceReferences(references: FindingEvidenceReference[]): FindingEvidenceReference[] {
+  const seen = new Set<string>();
+  const merged: FindingEvidenceReference[] = [];
+  for (const reference of references) {
+    const key = `${reference.path}:${reference.startLine ?? ""}:${reference.endLine ?? ""}:${reference.quote ?? ""}:${reference.symbol ?? ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(reference);
+    }
+  }
+  return merged.sort((left, right) => left.path.localeCompare(right.path) || (left.startLine ?? 0) - (right.startLine ?? 0));
+}
+
+function flattenFindingTree(finding: StructuredFinding): StructuredFinding[] {
+  return [
+    finding,
+    ...(finding.childFindings ?? []).flatMap(flattenFindingTree)
+  ];
+}
+
+function compareFindings(left: StructuredFinding, right: StructuredFinding): number {
+  return severityRank(right.severity) - severityRank(left.severity) ||
+    left.title.localeCompare(right.title) ||
+    left.id.localeCompare(right.id);
+}
+
+function severityRank(value: StructuredFinding["severity"]): number {
+  switch (value) {
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function strongerSeverity(left: StructuredFinding["severity"], right: StructuredFinding["severity"]): StructuredFinding["severity"] {
+  return severityRank(right) > severityRank(left) ? right : left;
+}
+
+function findingKey(finding: StructuredFinding): string {
+  return [
+    finding.title.toLowerCase().replace(/\s+/g, " ").trim(),
+    finding.category?.toLowerCase() ?? "",
+    finding.paths.join(",")
+  ].join("|");
+}
+
+function calibrateSeverity(finding: StructuredFinding): StructuredFinding["severity"] {
+  if (finding.severity === "critical") {
+    return "critical";
+  }
+  const haystack = [
+    finding.title,
+    finding.category,
+    finding.evidence,
+    finding.problemRationale,
+    finding.recommendation,
+    finding.paths.join(" ")
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (
+    /no-run-checks|cannot override.*run-check|project-controlled scripts|write-scoped permissions|pull-requests:\s*write|security-events:\s*write|stale reports?|same-size large-file|repo-local provider|inherited environment/.test(haystack)
+  ) {
+    return strongerSeverity(finding.severity, "high");
+  }
+  if (/secret|token|credential|path traversal|outside (?:the )?project root|workspace patterns? can escape|xss|csrf|ssrf|injection/.test(haystack)) {
+    return strongerSeverity(finding.severity, "medium");
+  }
+  if (/data loss|silently (?:treated|replaced|overwrite|drop)|malformed .*empty|corrupt/.test(haystack)) {
+    return strongerSeverity(finding.severity, "medium");
+  }
+  return finding.severity;
 }
 
 function triageFor(category: string | undefined, severity: StructuredFinding["severity"], confidence: string | undefined): string {

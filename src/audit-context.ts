@@ -59,6 +59,7 @@ export function createInitialMeta(
       incremental: options.incremental,
       repairReports: Boolean(options.repairReports),
       repairAttempts: options.repairAttempts,
+      deepReview: Boolean(options.deepReview),
       exportFormats: options.exportFormats ?? []
     },
     codex: {

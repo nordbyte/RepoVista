@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -59,6 +59,38 @@ test("finding lifecycle commands read, triage and revalidate persistent state", 
     const revalidated = (await loadStoredFindings(root, ".repovista"))[0];
     assert.equal(revalidated.status, "open");
     assert.equal(revalidated.evidenceValidation.passed, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("finding state uses collision-resistant filenames and rejects corrupt files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-finding-store-"));
+  try {
+    const first = {
+      id: "fnd/a",
+      source: "03-risk-and-bug-report.md",
+      title: "First",
+      severity: "medium",
+      paths: ["src/a.ts"]
+    };
+    const second = {
+      id: "fnd_a",
+      source: "03-risk-and-bug-report.md",
+      title: "Second",
+      severity: "medium",
+      paths: ["src/b.ts"]
+    };
+    const stateDir = await writeFindingState(root, ".repovista", [first, second], "run-1", new Date("2026-05-18T10:00:00.000Z"));
+    const files = (await readdir(stateDir)).filter((file) => file.endsWith(".json"));
+    assert.equal(files.length, 2);
+    assert.equal((await loadStoredFindings(root, ".repovista")).length, 2);
+
+    await writeFile(path.join(stateDir, "bad.json"), "{not-json", "utf8");
+    await assert.rejects(
+      () => loadStoredFindings(root, ".repovista"),
+      /finding state file/
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

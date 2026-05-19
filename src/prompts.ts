@@ -208,12 +208,15 @@ For each finding in the Markdown sections, use this field format:
 - Evidence: <specific code/config/test/local-check evidence>
 - Problem rationale: <why this is a real risk>
 - Recommended fix: <concrete fix proposal>
+- Reproduction: <minimal way to observe or reason about the failure; use "not required" only when inappropriate>
+- Suggested regression test: <specific automated test to add>
+- Minimum fix scope: <smallest code area that must change>
 - Estimated effort: <small, medium, large>
 - Confidence: High | Medium | Low
 
-Also include a fenced JSON block near the end of the report. This JSON schema is RepoVista's primary structured findings source, so keep it valid JSON and make it match the Markdown findings exactly:
+Also include a RepoVista findings JSON block near the end of the report. This JSON schema is RepoVista's primary structured findings source, so keep it valid JSON and make it match the Markdown findings exactly. Put it between the sentinel comments below, not in a Markdown code fence. This prevents evidence quotes containing code fences from breaking parsing:
 
-\`\`\`json
+<!-- repovista-findings:start -->
 {
   "schemaVersion": 1,
   "phaseId": "risk-and-bug",
@@ -237,12 +240,21 @@ Also include a fenced JSON block near the end of the report. This JSON schema is
       ],
       "problemRationale": "<why this is a real risk>",
       "recommendedFix": "<concrete fix proposal>",
+      "reproduction": "<minimal reproduction or reasoning path>",
+      "suggestedRegressionTest": "<specific automated regression test>",
+      "minimumFixScope": "<smallest code area to change>",
       "estimatedEffort": "small | medium | large",
-      "confidence": "high | medium | low"
+      "confidence": "high | medium | low",
+      "findingType": "atomic",
+      "parentId": "<optional parent finding id>",
+      "parentTitle": "<optional parent theme title>",
+      "childFindings": []
     }
   ]
 }
-\`\`\`
+<!-- repovista-findings:end -->
+
+Use parent/child findings when a broad theme contains multiple independent fixes: the parent should have findingType "theme" and childFindings should hold atomic findings with their own evidence, reproduction, regression test, minimum fix scope, and severity.
 
 If there are no findings, use '"findings": []' and still say explicitly in each severity section that no findings were detected. Mark uncertain findings explicitly as hypotheses.
 
@@ -354,9 +366,9 @@ function structuredSchemaInstructions(phaseId: string): string {
 \`\`\``;
   }
   if (phaseId === "risk-and-bug") {
-    return `Also include this second fenced JSON block for phase-level structure:
+    return `Also include this second JSON block for phase-level structure between sentinel comments:
 
-\`\`\`json
+<!-- repovista-phase:start -->
 {
   "schemaVersion": 1,
   "phaseId": "risk-and-bug",
@@ -365,7 +377,7 @@ function structuredSchemaInstructions(phaseId: string): string {
   "evidenceReferences": ["src/example.ts"],
   "recommendations": ["<highest-value fix>"]
 }
-\`\`\``;
+<!-- repovista-phase:end -->`;
   }
   return `Also include a fenced JSON block near the end of the report. This JSON is RepoVista's primary structured phase source:
 

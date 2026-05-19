@@ -13,14 +13,18 @@ interface ScanCacheFile {
   fileCount: number;
 }
 
-export function projectScanFingerprint(files: ProjectFileSummary[]): string {
+export function projectScanFingerprint(files: ProjectFileSummary[], context?: unknown): string {
   const hash = createHash("sha256");
+  if (context !== undefined) {
+    hash.update(JSON.stringify(context));
+    hash.update("\0");
+  }
   for (const file of [...files].sort((left, right) => left.relativePath.localeCompare(right.relativePath))) {
     hash.update(file.relativePath);
     hash.update("\0");
     hash.update(String(file.size));
     hash.update("\0");
-    hash.update(file.sha256 ?? "");
+    hash.update(file.sha256 ?? String(file.mtimeMs ?? ""));
     hash.update("\0");
   }
   return hash.digest("hex");

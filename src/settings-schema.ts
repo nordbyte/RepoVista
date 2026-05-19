@@ -28,6 +28,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   { key: "strictReports", type: "boolean", help: "Fail phases on report quality warnings" },
   { key: "repairReports", type: "boolean", help: "Repair reports that miss quality gates" },
   { key: "repairAttempts", type: "number", help: "Maximum report repair attempts" },
+  { key: "deepReview", type: "boolean", help: "Run feature-sliced deep review passes" },
   { key: "exportFormats", type: "list", help: "Default finding export formats" },
   { key: "json", type: "boolean", help: "Keep JSON provider events/log metadata" },
   { key: "keepLogs", type: "boolean", help: "Keep technical provider logs" },
@@ -61,6 +62,7 @@ export function parseSettingValue(key: keyof RepoVistaSettings, rawValue: string
     case "runChecks":
     case "strictReports":
     case "repairReports":
+    case "deepReview":
     case "json":
     case "keepLogs":
     case "progress":

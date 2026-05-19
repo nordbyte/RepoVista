@@ -69,6 +69,8 @@ export const CLI_OPTIONS: readonly CliOptionDefinition[] = [
   { name: "repair-reports", kind: "boolean", help: "Ask the provider to repair reports that miss quality gates" },
   { name: "no-repair-reports", kind: "boolean", help: "Disable saved report repair default" },
   { name: "repair-attempts", kind: "value", help: "Maximum repair attempts per phase, 1-3 (default: 1)" },
+  { name: "deep-review", kind: "boolean", help: "Run additional feature-sliced risk review passes and merge their findings" },
+  { name: "no-deep-review", kind: "boolean", help: "Disable saved feature-sliced deep review default" },
   { name: "export", kind: "value", help: "Export findings: sarif, html, jsonl, github" },
   { name: "format", kind: "value", help: "Output format for compare: markdown, json, html" },
   { name: "fail-on-regression", kind: "boolean", help: "Exit with code 2 when compare detects new critical/high findings" },

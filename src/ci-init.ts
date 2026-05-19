@@ -11,8 +11,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  pull-requests: write
 
 jobs:
   repovista:
@@ -31,8 +29,11 @@ jobs:
       - name: Install RepoVista
         run: npm install -g repovista
 
+      - name: Verify RepoVista provider
+        run: repovista providers test codex
+
       - name: Run RepoVista
-        run: repovista audit --ci --pr --run-checks --audit-profile pr-review --export sarif,github,jsonl,html
+        run: repovista audit --ci --pr --no-run-checks --audit-profile pr-review --export jsonl,html
 
       - name: Upload RepoVista report
         if: always()
@@ -40,12 +41,6 @@ jobs:
         with:
           name: repovista-report
           path: .repovista/
-
-      - name: Upload SARIF
-        if: always() && hashFiles('.repovista/**/findings.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: .repovista
 `;
 
 export async function runCiInitCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
