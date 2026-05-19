@@ -52,7 +52,7 @@ Or browse generated runs and sections in the terminal:
 repovista reports
 ```
 
-Interactive audits show a live progress TUI with the current step and elapsed counters. Press `q` or `Ctrl+C` to cancel. RepoVista cancels the audit, asks the running provider process group to stop with `SIGTERM`, and escalates to `SIGKILL` if the provider does not exit.
+Interactive audits show a live progress TUI with the current step and elapsed counters. Press `q` or `Ctrl+C` to cancel. RepoVista cancels the audit, sends `SIGINT` to the running provider process group so Codex/Claude can cancel cleanly, then escalates to `SIGTERM` and `SIGKILL` if the provider does not exit.
 
 Fresh installs are ready for a high-signal first audit. The built-in defaults use Codex CLI, `reasoning=xhigh`, read-only sandboxing, local checks, strict report gates, one repair attempt, incremental cache metadata, `parallel=auto`, and SARIF/HTML/JSONL exports.
 

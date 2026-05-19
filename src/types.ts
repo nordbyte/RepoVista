@@ -694,6 +694,8 @@ export interface ProviderRunDiagnostics {
   structuredOutputPath?: string;
   termination?: {
     reason: "timeout" | "interrupt";
+    sigintSent?: boolean;
+    sigintAt?: string;
     sigtermSent: boolean;
     sigtermAt?: string;
     sigkillSent: boolean;

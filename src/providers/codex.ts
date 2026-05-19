@@ -29,6 +29,7 @@ export function buildCodexExecArgs(request: ProviderRunRequest): string[] {
     "--sandbox",
     request.sandbox,
     "--skip-git-repo-check",
+    "--ephemeral",
     "--color",
     "never",
     "--output-last-message",

@@ -188,7 +188,7 @@ class TerminalAuditProgressController implements AuditProgressController {
     while (lines.length < rows - 2) {
       lines.push("");
     }
-    lines.push(colorize("The current provider process group receives SIGTERM, then SIGKILL if it does not exit.", TUI_ANSI.dim, this.color));
+    lines.push(colorize("Cancel sends SIGINT to the provider group, then SIGTERM/SIGKILL if it does not exit.", TUI_ANSI.dim, this.color));
     this.output.write(renderTuiTerminalFrame(lines.join("\n")));
   }
 

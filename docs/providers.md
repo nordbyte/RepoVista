@@ -31,6 +31,7 @@ Codex is the default provider. RepoVista uses non-interactive, read-only intent 
 - `--config approval_policy="never"`
 - `--sandbox read-only` by default
 - `--skip-git-repo-check`
+- `--ephemeral` so audit sessions are not persisted for later resume
 - `--output-last-message <report.md>`
 - `--output-schema <schema.json>` for phases with provider-native structured output
 - `--config model_reasoning_effort="<effort>"` when reasoning is configured

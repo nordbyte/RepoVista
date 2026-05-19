@@ -444,7 +444,7 @@ function phaseReviewNotes(phase: PhaseReportStatus | undefined): string[] {
   if (phase.providerRun) {
     const run = phase.providerRun;
     const termination = run.termination
-      ? `; termination=${run.termination.reason}, SIGTERM=${run.termination.sigtermSent ? "sent" : "not sent"}, SIGKILL=${run.termination.sigkillSent ? "sent" : "not sent"}${run.termination.forcedSettle ? ", forced settle" : ""}`
+      ? `; termination=${run.termination.reason}, SIGINT=${run.termination.sigintSent ? "sent" : "not sent"}, SIGTERM=${run.termination.sigtermSent ? "sent" : "not sent"}, SIGKILL=${run.termination.sigkillSent ? "sent" : "not sent"}${run.termination.forcedSettle ? ", forced settle" : ""}`
       : "";
     if (run.timedOut || run.interrupted || phase.status === "failed") {
       notes.push(`Provider process: pid=${run.pid ?? "n/a"}, timeout=${run.timeoutSeconds}s, timedOut=${run.timedOut}, interrupted=${run.interrupted}, exit=${run.exitCode ?? "n/a"}, signal=${run.signal ?? "n/a"}${termination}`);

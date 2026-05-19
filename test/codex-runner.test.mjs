@@ -78,6 +78,7 @@ test("codex args use read-only sandbox, target cwd and output-last-message", () 
   assert.ok(args.includes('approval_policy="never"'));
   assert.ok(args.includes("read-only"));
   assert.ok(args.includes("--skip-git-repo-check"));
+  assert.ok(args.includes("--ephemeral"));
   assert.ok(args.includes("--output-last-message"));
   assert.ok(args.includes("--json"));
   assert.ok(args.includes("--model"));
@@ -452,8 +453,9 @@ test("provider runner cancels a phase when the audit abort signal fires", async 
     assert.equal(result.success, false);
     assert.match(result.error, /interrupted and cancelled/);
     assert.equal(result.diagnostics.interrupted, true);
-    assert.equal(result.diagnostics.termination.sigtermSent, true);
-    assert.deepEqual(signals, ["SIGTERM"]);
+    assert.equal(result.diagnostics.termination.sigintSent, true);
+    assert.equal(result.diagnostics.termination.sigtermSent, false);
+    assert.deepEqual(signals, ["SIGINT"]);
     assert.match(await readFile(reportPath, "utf8"), /interrupted and cancelled/);
   } finally {
     await rm(root, { recursive: true, force: true });

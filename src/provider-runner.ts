@@ -120,7 +120,7 @@ export async function runProviderPhase(
     };
 
     const terminateChild = (reason: "timeout" | "interrupt") => {
-      if (settled || diagnostics.termination?.sigtermSent) {
+      if (settled || diagnostics.termination) {
         return;
       }
       if (reason === "timeout") {
@@ -136,47 +136,83 @@ export async function runProviderPhase(
       }
       diagnostics.termination = diagnostics.termination ?? {
         reason,
+        sigintSent: false,
         sigtermSent: false,
         sigkillSent: false,
         forcedSettle: false,
         errors: []
       };
       diagnostics.termination.reason = reason;
-      diagnostics.termination.sigtermSent = true;
-      diagnostics.termination.sigtermAt = new Date().toISOString();
-      diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGTERM"));
+      if (reason === "interrupt") {
+        diagnostics.termination.sigintSent = true;
+        diagnostics.termination.sigintAt = new Date().toISOString();
+        diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGINT"));
+      } else {
+        diagnostics.termination.sigtermSent = true;
+        diagnostics.termination.sigtermAt = new Date().toISOString();
+        diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGTERM"));
+      }
       forceKillTimer = setTimeout(() => {
         if (!settled) {
           diagnostics.termination = diagnostics.termination ?? {
             reason,
+            sigintSent: reason === "interrupt",
             sigtermSent: true,
             sigkillSent: false,
             forcedSettle: false,
             errors: []
           };
-          diagnostics.termination.sigkillSent = true;
-          diagnostics.termination.sigkillAt = new Date().toISOString();
-          if (child) {
-            diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGKILL"));
+          if (!diagnostics.termination.sigtermSent) {
+            diagnostics.termination.sigtermSent = true;
+            diagnostics.termination.sigtermAt = new Date().toISOString();
+            if (child) {
+              diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGTERM"));
+            }
+            forceKillTimer = setTimeout(() => {
+              if (!settled) {
+                sendSigkill(reason);
+              }
+            }, 3000);
+            forceKillTimer.unref();
+            return;
           }
-          forcedSettleTimer = setTimeout(() => {
-            if (settled) {
-              return;
-            }
-            if (diagnostics.termination) {
-              diagnostics.termination.forcedSettle = true;
-            }
-            const message = reason === "timeout"
-              ? `${provider.displayName} run timed out after ${providerRequest.timeoutSeconds} seconds and did not exit after SIGKILL.`
-              : `${provider.displayName} run was interrupted and did not exit after SIGKILL.`;
-            void writeProviderFailureReport(providerRequest, message, stdoutText, stderrText)
-              .then(() => finish({ success: false, exitCode: null, error: message }))
-              .catch(() => finish({ success: false, exitCode: null, error: message }));
-          }, 5000);
-          forcedSettleTimer.unref();
+          sendSigkill(reason);
         }
-      }, 5000);
+      }, reason === "interrupt" ? 2000 : 5000);
       forceKillTimer.unref();
+    };
+
+    const sendSigkill = (reason: "timeout" | "interrupt") => {
+      if (!settled) {
+        diagnostics.termination = diagnostics.termination ?? {
+          reason,
+          sigintSent: reason === "interrupt",
+          sigtermSent: true,
+          sigkillSent: false,
+          forcedSettle: false,
+          errors: []
+        };
+        diagnostics.termination.sigkillSent = true;
+        diagnostics.termination.sigkillAt = new Date().toISOString();
+        if (child) {
+          diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGKILL"));
+        }
+        forcedSettleTimer = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          if (diagnostics.termination) {
+            diagnostics.termination.forcedSettle = true;
+          }
+          const message = reason === "timeout"
+            ? `${provider.displayName} run timed out after ${providerRequest.timeoutSeconds} seconds and did not exit after SIGKILL.`
+            : `${provider.displayName} run was interrupted and did not exit after SIGKILL.`;
+          void writeProviderFailureReport(providerRequest, message, stdoutText, stderrText)
+            .then(() => finish({ success: false, exitCode: null, error: message }))
+            .catch(() => finish({ success: false, exitCode: null, error: message }));
+        }, 5000);
+        forcedSettleTimer.unref();
+      }
     };
 
     const interruptHandler = () => terminateChild("interrupt");
