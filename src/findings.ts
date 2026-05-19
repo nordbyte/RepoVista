@@ -21,6 +21,8 @@ const ESTIMATED_EFFORT_PATTERN = /\bestimated effort\s*:\s*([^\n]+)/i;
 const PATH_FIELD_PATTERN = /\b(?:file|path|affected paths?|affected files?)\s*:\s*([^\n]+)/i;
 const PATH_TOKEN_PATTERN = /`([^`]+)`|(?:^|[\s([:,])((?:\.?\/)?(?:(?:src|test|tests|lib|app|scripts|docs|\.github)\/[\w./-]+|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)))(?=$|[\s)\],.;:])/g;
 const PATH_ROOTS = new Set(["src", "test", "tests", "lib", "app", "scripts", "docs", ".github"]);
+const ROOT_FILE_PATTERN = /^(?:[\w.-]+\.(?:py|js|mjs|cjs|ts|tsx|jsx|go|rs|java|kt|kts|c|cc|cpp|h|hpp|cs|php|rb|sh|bash|zsh|fish|swift|scala|lua|r|pl|pm|sql|yml|yaml|toml|ini|cfg|conf|json|md)|Dockerfile|Makefile)$/;
+const EXPLICIT_RELATIVE_FILE_PATTERN = /^(?:[\w.-]+\/)+[\w.-]+$/;
 
 export function extractFindings(report: string, source = "03-risk-and-bug-report.md"): StructuredFinding[] {
   return extractFindingsWithSource(report, source).findings;
@@ -693,6 +695,14 @@ function normalizePathCandidate(value: string | undefined, allowRootDirectory: b
   }
 
   if (/^(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)$/.test(normalized)) {
+    return normalized;
+  }
+
+  if (allowRootDirectory && !normalized.includes("/") && ROOT_FILE_PATTERN.test(normalized)) {
+    return normalized;
+  }
+
+  if (allowRootDirectory && normalized.includes("/") && EXPLICIT_RELATIVE_FILE_PATTERN.test(normalized)) {
     return normalized;
   }
 

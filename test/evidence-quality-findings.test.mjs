@@ -254,6 +254,105 @@ Fix src/schema.ts, src/index.ts and test/schema.test.ts.
   assert.equal(quality.passed, true);
 });
 
+test("schema finding extractor preserves root-level script paths", () => {
+  const extraction = extractFindingsWithSource(`# Risk
+
+## Medium Findings
+
+One medium finding.
+
+<!-- repovista-findings:start -->
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Tray restart loses script context",
+      "severity": "medium",
+      "category": "Reliability",
+      "status": "open",
+      "signature": "restart|cwd|claude_status_tray.py",
+      "affectedPaths": ["claude_status_tray.py", "usage_cli.py"],
+      "evidence": "claude_status_tray.py launches usage_cli.py during status refresh.",
+      "evidenceReferences": [
+        {
+          "path": "claude_status_tray.py",
+          "startLine": 12,
+          "endLine": 14,
+          "quote": "usage_cli.py"
+        },
+        {
+          "path": "usage_cli.py",
+          "startLine": 1,
+          "endLine": 3,
+          "quote": "status"
+        }
+      ],
+      "problemRationale": "Small utility repositories often keep executable scripts at the repository root.",
+      "recommendedFix": "Preserve valid root script paths during finding normalization.",
+      "reproduction": "Parse a report that references root-level Python scripts.",
+      "suggestedRegressionTest": "Assert root script paths survive schema extraction.",
+      "minimumFixScope": "Normalize root script paths when explicit schema fields provide them.",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+<!-- repovista-findings:end -->
+`);
+
+  assert.equal(extraction.source, "schema");
+  assert.equal(extraction.findings.length, 1);
+  assert.deepEqual(extraction.findings[0].paths, ["claude_status_tray.py", "usage_cli.py"]);
+  assert.deepEqual(extraction.findings[0].evidenceDetails.map((reference) => reference.path), ["claude_status_tray.py", "usage_cli.py"]);
+  assert.equal(extraction.findings[0].evidenceDetails[0].startLine, 12);
+});
+
+test("schema finding extractor preserves explicit dot-directory config paths", () => {
+  const extraction = extractFindingsWithSource(`# Risk
+
+## Low Findings
+
+One low finding.
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Local agent permissions are broad",
+      "severity": "low",
+      "category": "Security",
+      "status": "open",
+      "signature": "permissions|.claude/settings.local.json",
+      "affectedPaths": [".claude/settings.local.json"],
+      "evidence": ".claude/settings.local.json allows broad local commands.",
+      "evidenceReferences": [
+        {
+          "path": ".claude/settings.local.json",
+          "startLine": 9,
+          "endLine": 9,
+          "quote": "Bash(sudo apt:*)"
+        }
+      ],
+      "problemRationale": "Project-local agent policy files are valid repository evidence.",
+      "recommendedFix": "Keep only the persistent permissions required by this repository.",
+      "reproduction": "Parse a report that references the local agent policy file.",
+      "suggestedRegressionTest": "Assert explicit dot-directory paths survive schema extraction.",
+      "minimumFixScope": "Normalize explicit schema paths without relying only on common source roots.",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
+`);
+
+  assert.equal(extraction.source, "schema");
+  assert.equal(extraction.findings.length, 1);
+  assert.deepEqual(extraction.findings[0].paths, [".claude/settings.local.json"]);
+  assert.deepEqual(extraction.findings[0].evidenceDetails.map((reference) => reference.path), [".claude/settings.local.json"]);
+});
+
 test("schema extractor handles sentinel JSON, fenced quote text and parent child findings", () => {
   const schema = {
     schemaVersion: 1,
