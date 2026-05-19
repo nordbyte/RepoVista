@@ -19,7 +19,9 @@ test("report browser lists report runs and renders sections", async () => {
     await writeRun(path.join(outRoot, "2026-05-19T10-00-00-000Z"), {
       runId: "2026-05-19T10-00-00-000Z",
       completedAt: "2026-05-19T10:00:00.000Z",
-      title: "Newer report"
+      title: "Newer report",
+      model: "Codex CLI configured default",
+      reasoning: "xhigh"
     });
 
     const runs = await listReportRuns(root, ".repovista");
@@ -37,7 +39,12 @@ test("report browser lists report runs and renders sections", async () => {
       scroll: 0
     }, { columns: 100, rows: 24, color: false });
     assert.match(listFrame, /RepoVista Reports/);
-    assert.match(listFrame, /Newer report|2026-05-19T10-00-00-000Z/);
+    assert.match(listFrame, /2026-05-19 10:00/);
+    assert.match(listFrame, /model: default/);
+    assert.match(listFrame, /model: gpt-5\.5/);
+    assert.match(listFrame, /reasoning: xhigh/);
+    assert.match(listFrame, /2026-05-19T10-00-00-000Z/);
+    assert.doesNotMatch(listFrame, /Codex CLI Codex CLI configured default/);
 
     const sectionFrame = renderReportsMenuFrame(runs, {
       screen: "sections",
@@ -69,8 +76,9 @@ async function writeRun(runDir, input) {
     completedAt: input.completedAt,
     ai: {
       provider: "codex",
-      displayName: "Codex",
-      model: "gpt-5.5"
+      displayName: "Codex CLI",
+      model: input.model ?? "gpt-5.5",
+      reasoning: input.reasoning ?? "high"
     },
     findingCounts: {
       high: 1

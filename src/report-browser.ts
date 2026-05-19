@@ -19,6 +19,7 @@ export interface ReportRunSummary {
   completedAt?: string;
   provider?: string;
   model?: string;
+  reasoning?: string;
   findingCount: number;
   exitCode?: number;
   sections: ReportSection[];
@@ -149,7 +150,8 @@ export function renderReportsMenuFrame(
     columns: options.columns,
     rows: options.rows,
     color: options.color,
-    emptyMessage: "No RepoVista report runs found."
+    emptyMessage: "No RepoVista report runs found.",
+    footer: run ? `${Math.min(state.runCursor + 1, runs.length)}/${runs.length} | ${run.runId} | ${run.runDir}` : undefined
   });
 }
 
@@ -234,7 +236,8 @@ async function loadReportRun(runDir: string, fallbackRunId: string): Promise<Rep
     startedAt: meta?.startedAt,
     completedAt: meta?.completedAt,
     provider: meta?.ai?.displayName ?? meta?.ai?.provider,
-    model: meta?.ai?.model,
+    model: cleanModelLabel(meta?.ai?.model, meta?.ai?.displayName) ?? cleanModelLabel(meta?.codex?.model, "Codex"),
+    reasoning: cleanReasoningLabel(meta?.ai?.reasoning ?? meta?.codex?.reasoning),
     findingCount: findings?.length ?? meta?.findings?.length ?? countFindings(meta?.findingCounts),
     exitCode: meta?.exitCode,
     sections
@@ -301,15 +304,55 @@ async function readText(filePath: string): Promise<string | undefined> {
 }
 
 function formatRunItem(run: ReportRunSummary): string {
-  const when = run.completedAt ?? run.startedAt ?? "unknown time";
-  const provider = [run.provider, run.model].filter(Boolean).join(" ");
+  const when = compactRunTime(run.completedAt ?? run.startedAt ?? run.runId);
+  const model = `model: ${run.model ?? "default"}`;
+  const reasoning = `reasoning: ${run.reasoning ?? "default"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
-  return `${run.runId}: ${when} | ${provider || "provider n/a"} | ${run.findingCount} finding(s) | ${exit}`;
+  return `${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit}`;
 }
 
 function formatSectionItem(section: ReportSection): string {
   const lines = section.content.split(/\r?\n/).length;
   return `${section.title}: ${section.fileName ?? "combined"} | ${lines} line(s)`;
+}
+
+function cleanModelLabel(value: string | undefined, providerDisplayName: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const lower = trimmed.toLowerCase();
+  const providerDefault = providerDisplayName ? `${providerDisplayName.toLowerCase()} configured default` : undefined;
+  if (
+    lower === providerDefault ||
+    lower === "codex configured default" ||
+    lower === "codex cli configured default" ||
+    lower === "model default" ||
+    lower === "configured default"
+  ) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function cleanReasoningLabel(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.toLowerCase() === "model default") {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function compactRunTime(value: string): string {
+  const iso = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (iso) {
+    return `${iso[1]} ${iso[2]}:${iso[3]}`;
+  }
+  const runId = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})/);
+  if (runId) {
+    return `${runId[1]} ${runId[2]}:${runId[3]}`;
+  }
+  return value;
 }
 
 function sortTime(run: ReportRunSummary): number {
