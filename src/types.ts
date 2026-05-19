@@ -72,6 +72,8 @@ export interface AuditOptions {
   reviewMode?: ReviewMode;
   promptFile?: string;
   exportFormats: ReportExportFormat[];
+  exportFormatsExplicit?: boolean;
+  exportFormatsCliExplicit?: boolean;
   ci: boolean;
   failOnCritical: boolean;
   progress: boolean;

@@ -31,9 +31,8 @@ Useful first commands:
 ```sh
 repovista settings
 repovista doctor
-repovista init
 repovista plan
-repovista audit --run-checks --strict-reports
+repovista audit
 ```
 
 The main report entry point is written to:
@@ -42,12 +41,14 @@ The main report entry point is written to:
 .repovista/<run-id>/index.md
 ```
 
+Fresh installs use quality-oriented defaults: Codex CLI, `reasoning=xhigh`, read-only sandbox, local checks, strict report gates, report repair, incremental cache, `parallel=auto`, and SARIF/HTML/JSONL exports.
+
 ## Common Examples
 
 ```sh
-repovista audit --model gpt-5.5 --reasoning xhigh
+repovista audit --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
-repovista audit --parallel auto
+repovista audit --no-parallel
 repovista audit --since origin/main
 repovista audit --ci --json --fail-on-critical
 repovista compare .repovista/old-run .repovista/new-run

@@ -6,25 +6,26 @@ import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, Compar
 export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
   provider: "codex",
-  parallel: "off",
+  parallel: "auto",
   outDir: ".repovista",
   sandbox: "read-only",
   language: "English",
+  reasoning: "xhigh",
   fastMode: false,
   json: false,
   includes: [],
   ignores: [],
   phases: [],
-  runChecks: false,
+  runChecks: true,
   checkCommands: [],
   checkTimeoutSeconds: 300,
   phaseTimeoutSeconds: 1800,
-  strictReports: false,
-  repairReports: false,
+  strictReports: true,
+  repairReports: true,
   repairAttempts: 1,
   deepReview: false,
   reviewMode: "default",
-  exportFormats: [],
+  exportFormats: ["sarif", "html", "jsonl"],
   ci: false,
   failOnCritical: false,
   progress: true,
@@ -32,6 +33,7 @@ export const DEFAULT_OPTIONS: AuditOptions = {
   providerRevalidate: false,
   dryRun: false,
   refresh: false,
+  incremental: true,
   issueLabels: [],
   issueAssignees: []
 };
@@ -232,6 +234,10 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
 
   if (wantsHelp) {
     return { action: "help", options };
+  }
+
+  if (command !== "audit" && !options.exportFormatsExplicit) {
+    options.exportFormats = [];
   }
 
   if (command === "compare") {
@@ -510,8 +516,13 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
       options.phaseTimeoutSeconds = parsePositiveMinutes(name, value);
       break;
     case "export":
+      if (!options.exportFormatsCliExplicit) {
+        options.exportFormats = [];
+      }
       options.exportFormats.push(...splitPatterns(value).map(validateExportFormat));
       options.exportFormats = Array.from(new Set(options.exportFormats));
+      options.exportFormatsExplicit = true;
+      options.exportFormatsCliExplicit = true;
       break;
     case "format":
       options.compareFormat = validateCompareFormat(value);

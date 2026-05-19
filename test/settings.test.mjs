@@ -11,7 +11,8 @@ import {
   renderSettingsMenuFrame,
   renderSettingsTerminalFrame,
   sanitizeSettings,
-  saveSettings
+  saveSettings,
+  summarizeSettings
 } from "../dist/index.js";
 
 test("settings sanitize persisted defaults", () => {
@@ -149,6 +150,19 @@ test("settings are saved as JSON", async () => {
   }
 });
 
+test("settings summary reflects built-in first-run defaults", () => {
+  const summary = summarizeSettings({});
+
+  assert.ok(summary.includes("Provider: Codex CLI"));
+  assert.ok(summary.includes("Parallel mode: auto"));
+  assert.ok(summary.includes("Reasoning: xhigh"));
+  assert.ok(summary.includes("Incremental scan cache: on"));
+  assert.ok(summary.includes("Run checks: on"));
+  assert.ok(summary.includes("Strict report gates: on"));
+  assert.ok(summary.includes("Repair reports: on"));
+  assert.ok(summary.includes("Export formats: sarif, html, jsonl"));
+});
+
 test("settings menu frame renders only the menu with ANSI styling", () => {
   const frame = renderSettingsMenuFrame({
     provider: "codex",
@@ -178,6 +192,20 @@ test("settings fast mode renders as on off selection", () => {
   const offFrame = renderSettingsMenuFrame({ fastMode: false }, { screen: "fastMode", columns: 80, rows: 12 });
   assert.match(offFrame, /\[ \] on/);
   assert.match(offFrame, /\[x\] off/);
+});
+
+test("settings default selections are visible without persisted overrides", () => {
+  const mainFrame = renderSettingsMenuFrame({}, { columns: 100, rows: 24 });
+  assert.match(mainFrame, /Parallel mode: auto/);
+  assert.match(mainFrame, /Reasoning: xhigh/);
+  assert.match(mainFrame, /\[x\] Incremental scan cache/);
+  assert.match(mainFrame, /\[x\] Run local checks before analysis/);
+
+  const exportFrame = renderSettingsMenuFrame({}, { screen: "exportFormats", columns: 80, rows: 12 });
+  assert.match(exportFrame, /\[x\] sarif/);
+  assert.match(exportFrame, /\[x\] html/);
+  assert.match(exportFrame, /\[x\] jsonl/);
+  assert.match(exportFrame, /\[ \] github/);
 });
 
 test("settings terminal frame clears every line ending", () => {

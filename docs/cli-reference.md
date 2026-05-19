@@ -71,7 +71,7 @@ repovista version
 |---|---|
 | `--provider <name>` | Provider: `codex`, `claude`, `gemini`, `opencode`, `aider`, or a loaded plugin. |
 | `--allow-repo-provider-plugin` | Allow execution of provider plugins declared by the current repository. |
-| `--parallel <mode>` | `off`, `auto`, or `1`-`5` threads. |
+| `--parallel <mode>` | `off`, `auto`, or `1`-`5` threads, default `auto`. |
 | `--no-parallel` | Disable a saved parallel default. |
 | `--out <dir>` | Output directory, default `.repovista`. |
 | `--resume <run-dir>` | Resume or complete an existing run directory. |
@@ -84,10 +84,10 @@ repovista version
 | `--prompt-file <path>` | Append additional read-only reviewer guidance. |
 | `--workspace <name-or-path>` | Focus one detected workspace. |
 | `--all-workspaces` | Record all detected workspaces. |
-| `--incremental` | Enable scan-cache metadata and reusable phase checks. |
+| `--incremental` | Enable scan-cache metadata and reusable phase checks, default on. |
 | `--model <name>` | Override provider model. |
 | `--profile <name>` | Use a provider profile, currently Codex profile for Codex. |
-| `--reasoning <effort>` | Override reasoning effort. |
+| `--reasoning <effort>` | Override reasoning effort, default `xhigh`. |
 | `--fast` | Use fast provider tier where supported. |
 | `--no-fast` | Disable fast provider tier. |
 | `--sandbox <mode>` | `read-only` or `workspace-write`. |
@@ -96,20 +96,20 @@ repovista version
 | `--include <patterns>` | Additional include patterns. |
 | `--ignore <patterns>` | Additional ignore patterns. |
 | `--phase <id>` | Selected phases, repeatable or comma-separated. |
-| `--run-checks` | Run detected or explicit local checks before analysis. |
+| `--run-checks` | Run detected or explicit local checks before analysis, default on. |
 | `--no-run-checks` | Disable saved run-checks default. |
 | `--check <command>` | Add a local check command. |
 | `--check-timeout <minutes>` | Timeout per check command. |
 | `--timeout <minutes>` | Timeout per provider phase. |
 | `--phase-timeout <minutes>` | Alias for `--timeout`. |
-| `--strict-reports` | Mark phases failed on quality warnings. |
+| `--strict-reports` | Mark phases failed on quality warnings, default on. |
 | `--no-strict-reports` | Disable saved strict-report default. |
-| `--repair-reports` | Ask provider to repair weak reports. |
+| `--repair-reports` | Ask provider to repair weak reports, default on. |
 | `--no-repair-reports` | Disable saved repair default. |
 | `--repair-attempts <n>` | Repair attempts per phase, `1`-`3`. |
 | `--deep-review` | Run feature-sliced risk review and merge findings. |
 | `--no-deep-review` | Disable saved deep-review default. |
-| `--export <formats>` | `sarif`, `html`, `jsonl`, `github`; comma-separated. |
+| `--export <formats>` | `sarif`, `html`, `jsonl`, `github`; comma-separated, default `sarif,html,jsonl`. |
 | `--ci` | CI-friendly mode without progress output. |
 | `--fail-on-critical` | Exit `2` when critical findings are found in CI. |
 | `--no-progress` | Reduce progress output. |

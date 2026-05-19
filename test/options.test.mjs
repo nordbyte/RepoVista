@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyAuditProfile, parseCliArgs, validateSandbox } from "../dist/index.js";
+import { applyAuditProfile, DEFAULT_OPTIONS, parseCliArgs, validateSandbox } from "../dist/index.js";
 
 test("default command runs audit with safe defaults", () => {
   const parsed = parseCliArgs([]);
@@ -8,10 +8,16 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.action, "audit");
   assert.equal(parsed.options.outDir, ".repovista");
   assert.equal(parsed.options.provider, "codex");
-  assert.equal(parsed.options.parallel, "off");
+  assert.equal(parsed.options.parallel, "auto");
   assert.equal(parsed.options.sandbox, "read-only");
   assert.equal(parsed.options.language, "English");
+  assert.equal(parsed.options.reasoning, "xhigh");
   assert.equal(parsed.options.fastMode, false);
+  assert.equal(parsed.options.runChecks, true);
+  assert.equal(parsed.options.strictReports, true);
+  assert.equal(parsed.options.repairReports, true);
+  assert.equal(parsed.options.incremental, true);
+  assert.deepEqual(parsed.options.exportFormats, ["sarif", "html", "jsonl"]);
   assert.equal(parsed.options.progress, true);
 });
 
@@ -82,6 +88,19 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.progress, false);
   assert.equal(parsed.options.failOnCritical, true);
   assert.equal(parsed.options.keepLogs, true);
+});
+
+test("explicit export options replace built-in or saved export defaults", () => {
+  assert.deepEqual(parseCliArgs(["audit", "--export", "github"]).options.exportFormats, ["github"]);
+  assert.deepEqual(parseCliArgs(["findings"]).options.exportFormats, []);
+  assert.deepEqual(parseCliArgs(["findings", "--export", "sarif"]).options.exportFormats, ["sarif"]);
+
+  const savedDefaults = {
+    ...DEFAULT_OPTIONS,
+    exportFormats: ["sarif"],
+    exportFormatsExplicit: true
+  };
+  assert.deepEqual(parseCliArgs(["audit", "--export", "github"], savedDefaults).options.exportFormats, ["github"]);
 });
 
 test("danger-full-access sandbox is rejected", () => {

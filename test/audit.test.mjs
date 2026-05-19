@@ -156,6 +156,53 @@ test("audit passes the selected provider through phases and metadata", async () 
   }
 });
 
+test("audit auto-initializes the project map for default parallel mode", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-auto-map-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+    const result = await runAudit({
+      ...DEFAULT_OPTIONS,
+      phases: ["summary"],
+      runChecks: false,
+      strictReports: false,
+      repairReports: false,
+      progress: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.3.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex 0.1.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        await writeFile(request.reportPath, "# Summary\n\nNo issues found.\n", "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 5,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.meta.options.parallel, "auto");
+    assert.equal(result.meta.ai.reasoning, "xhigh");
+    assert.ok(result.meta.parallel);
+    assert.ok(await readFile(path.join(root, ".repovista", "project-map.json"), "utf8"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("audit can split shardable phases across parallel provider sessions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-parallel-"));
   try {

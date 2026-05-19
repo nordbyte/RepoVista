@@ -18,7 +18,7 @@ import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createP
 import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PromptContext } from "./prompts.js";
 import { canParallelizePhase, runParallelPhase, runSinglePhase } from "./phase-runner.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
-import { createParallelExecutionMeta, createProjectMap, loadProjectMap } from "./project-map.js";
+import { createParallelExecutionMeta, createProjectMap, loadProjectMap, saveProjectMap } from "./project-map.js";
 import { scanProject } from "./project-scan.js";
 import { getReportProvider } from "./providers/index.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
@@ -208,7 +208,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
-    const parallel = await resolveParallelMeta(projectRoot, options, logger);
+    const parallel = await resolveParallelMeta(projectRoot, options, logger, featureMap);
     meta.parallel = parallel;
     let detailPhaseRan = false;
 
@@ -365,13 +365,19 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 async function resolveParallelMeta(
   projectRoot: string,
   options: AuditOptions,
-  logger: Logger
+  logger: Logger,
+  currentMap?: Awaited<ReturnType<typeof createProjectMap>>
 ): Promise<ParallelExecutionMeta | undefined> {
   const mode = options.parallel ?? "off";
   if (mode === "off" || mode === 1) {
     return undefined;
   }
-  const loaded = await loadProjectMap(projectRoot, options.outDir);
+  let loaded = await loadProjectMap(projectRoot, options.outDir);
+  if (!loaded && mode === "auto" && currentMap) {
+    const mapPath = await saveProjectMap(projectRoot, options, currentMap);
+    loaded = { map: currentMap, mapPath };
+    logger.info(`Initialized RepoVista project map for parallel auto mode: ${mapPath}`);
+  }
   if (!loaded) {
     throw new PreflightError("Parallel audit requires an initialized RepoVista project map. Run `repovista init` first or use `--parallel off`.");
   }

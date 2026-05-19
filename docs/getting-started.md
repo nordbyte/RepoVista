@@ -46,32 +46,32 @@ RepoVista writes reports to `.repovista/<run-id>/`. Start with:
 .repovista/<run-id>/index.md
 ```
 
+Fresh installs are ready for a high-signal first audit. The built-in defaults use Codex CLI, `reasoning=xhigh`, read-only sandboxing, local checks, strict report gates, one repair attempt, incremental cache metadata, `parallel=auto`, and SARIF/HTML/JSONL exports.
+
 ## Recommended First Setup
 
 ```sh
 repovista doctor
 repovista settings
-repovista init
 repovista plan
 ```
 
 - `doctor` checks the current project, output path, provider executable, plugin diagnostics, Git state, settings, and workspaces.
 - `settings` opens the interactive default-settings menu.
-- `init` writes `.repovista/project-map.json`.
 - `plan` shows whether parallel mode is useful for the current repository.
 
 ## Higher-Signal Audit
 
 ```sh
-repovista audit --run-checks --strict-reports --repair-reports
+repovista audit
 ```
 
-This collects local check results, applies stricter report quality gates, and lets the provider repair reports that miss required depth.
+This already collects local check results, applies strict report quality gates, lets the provider repair reports that miss required depth, and writes the default exports. Use `--no-run-checks`, `--no-strict-reports`, `--no-repair-reports`, or `--no-parallel` only when a repository needs a lighter run.
 
 ## Provider Examples
 
 ```sh
-repovista audit --provider codex --model gpt-5.5 --reasoning xhigh
+repovista audit --provider codex --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
 repovista audit --provider gemini --model gemini-2.5-pro
 repovista audit --provider opencode --model anthropic/claude-sonnet-4-5
@@ -105,4 +105,4 @@ repovista fix fnd_abc123def456 --dry-run
 : Use `read-only` for audits. Use `workspace-write` only for explicit fix workflows.
 
 Large repositories
-: Run `repovista init`, inspect `repovista plan`, and use `--parallel auto` when the project map recommends parallel work.
+: Inspect `repovista plan`. The first `parallel=auto` audit creates `.repovista/project-map.json` automatically when it is missing.

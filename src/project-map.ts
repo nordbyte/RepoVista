@@ -21,12 +21,21 @@ export async function initializeProjectMap(
   now = new Date()
 ): Promise<{ map: ProjectMap; mapPath: string }> {
   const map = await createProjectMap(projectRoot, options, now);
+  const mapPath = await saveProjectMap(projectRoot, options, map);
+  await syncFeatureRecords(projectRoot, options.outDir, map.features, "init", now);
+  return { map, mapPath };
+}
+
+export async function saveProjectMap(
+  projectRoot: string,
+  options: AuditOptions,
+  map: ProjectMap
+): Promise<string> {
   const outRoot = await validateReportRoot(projectRoot, options.outDir);
   const mapPath = path.join(outRoot, "project-map.json");
   await mkdir(path.dirname(mapPath), { recursive: true });
   await writeProjectMap(mapPath, map);
-  await syncFeatureRecords(projectRoot, options.outDir, map.features, "init", now);
-  return { map, mapPath };
+  return mapPath;
 }
 
 export async function createProjectMap(

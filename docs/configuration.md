@@ -31,6 +31,28 @@ REPOVISTA_CONFIG=/path/to/settings.json repovista settings get
 
 CLI flags override saved settings for the current command.
 
+## Built-In Defaults
+
+A fresh install has no persisted settings file yet, so RepoVista falls back to built-in first-run defaults:
+
+| Setting | Built-in default |
+|---|---|
+| `provider` | `codex` |
+| `parallel` | `auto` |
+| `reasoning` | `xhigh` |
+| `sandbox` | `read-only` |
+| `language` | `English` |
+| `outDir` | `.repovista` |
+| `runChecks` | `true` |
+| `strictReports` | `true` |
+| `repairReports` | `true` |
+| `repairAttempts` | `1` |
+| `incremental` | `true` |
+| `exportFormats` | `sarif`, `html`, `jsonl` |
+| `fastMode`, `deepReview`, `json`, `keepLogs`, `ci`, `failOnCritical` | `false` |
+
+`parallel=auto` creates `.repovista/project-map.json` during the first audit if the project has not been initialized yet. Saved settings only need to be changed when a repository needs different provider, model, workspace, check, export, or runtime behavior.
+
 ## Supported Settings
 
 | Setting | Type | Purpose |

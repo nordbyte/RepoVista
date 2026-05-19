@@ -94,7 +94,7 @@ export function applyAuditProfile(options: AuditOptions): AuditOptions {
     parallel: !options.parallelExplicit && options.parallel === "off" && profileOptions.parallel ? profileOptions.parallel : options.parallel,
     prMode: options.prMode ?? profileOptions.prMode,
     since: options.since ?? profileOptions.since,
-    exportFormats: options.exportFormats.length
+    exportFormats: options.exportFormatsExplicit
       ? options.exportFormats
       : [...(profileOptions.exportFormats ?? options.exportFormats)],
     incremental: options.incremental || Boolean(profileOptions.incremental)

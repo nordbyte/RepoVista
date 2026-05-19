@@ -11,6 +11,7 @@ import {
 import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
+import { DEFAULT_OPTIONS } from "./options.js";
 import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
@@ -175,35 +176,35 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
   const provider = getReportProvider(selectedProvider(settings));
   return [
     `Provider: ${provider.displayName}`,
-    `Parallel mode: ${formatParallel(settings.parallel ?? "off")}`,
+    `Parallel mode: ${formatParallel(effectiveParallel(settings))}`,
     `Audit profile: ${settings.auditProfile ?? "none"}`,
-    `Review mode: ${settings.reviewMode ?? "default"}`,
+    `Review mode: ${effectiveReviewMode(settings)}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
-    `Reasoning: ${settings.reasoning ?? "model default"}`,
+    `Reasoning: ${effectiveReasoning(settings) ?? "model default"}`,
     `Codex profile: ${settings.profile ?? "none"}`,
-    `Codex fast mode: ${settings.fastMode ? "on" : "off"}`,
-    `Sandbox: ${settings.sandbox ?? "read-only"}`,
-    `Language: ${settings.language ?? "English"}`,
-    `Output directory: ${settings.outDir ?? ".repovista"}`,
+    `Codex fast mode: ${effectiveBoolean(settings, "fastMode") ? "on" : "off"}`,
+    `Sandbox: ${settings.sandbox ?? DEFAULT_OPTIONS.sandbox}`,
+    `Language: ${settings.language ?? DEFAULT_OPTIONS.language}`,
+    `Output directory: ${settings.outDir ?? DEFAULT_OPTIONS.outDir}`,
     `Prompt file: ${settings.promptFile ?? "none"}`,
     `Workspace: ${settings.workspace ?? "all"}`,
-    `All workspaces: ${settings.allWorkspaces ? "on" : "off"}`,
-    `Incremental scan cache: ${settings.incremental ? "on" : "off"}`,
+    `All workspaces: ${effectiveBoolean(settings, "allWorkspaces") ? "on" : "off"}`,
+    `Incremental scan cache: ${effectiveBoolean(settings, "incremental") ? "on" : "off"}`,
     `Include patterns: ${formatArray(settings.includes)}`,
     `Ignore patterns: ${formatArray(settings.ignores)}`,
-    `Run checks: ${settings.runChecks ? "on" : "off"}`,
+    `Run checks: ${effectiveBoolean(settings, "runChecks") ? "on" : "off"}`,
     `Check commands: ${formatArray(settings.checkCommands)}`,
-    `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}`,
-    `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}`,
-    `Strict report gates: ${settings.strictReports ? "on" : "off"}`,
-    `Repair reports: ${settings.repairReports ? "on" : "off"}`,
-    `Deep review: ${settings.deepReview ? "on" : "off"}`,
-    `Export formats: ${formatArray(settings.exportFormats)}`,
-    `JSON: ${settings.json ? "on" : "off"}`,
-    `Keep logs: ${settings.keepLogs ? "on" : "off"}`,
-    `Progress output: ${settings.progress === false ? "reduced" : "on"}`,
-    `CI mode: ${settings.ci ? "on" : "off"}`,
-    `Fail on critical: ${settings.failOnCritical ? "on" : "off"}`
+    `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? DEFAULT_OPTIONS.checkTimeoutSeconds)}`,
+    `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? DEFAULT_OPTIONS.phaseTimeoutSeconds)}`,
+    `Strict report gates: ${effectiveBoolean(settings, "strictReports") ? "on" : "off"}`,
+    `Repair reports: ${effectiveBoolean(settings, "repairReports") ? "on" : "off"}`,
+    `Deep review: ${effectiveBoolean(settings, "deepReview") ? "on" : "off"}`,
+    `Export formats: ${formatArray(effectiveExportFormats(settings))}`,
+    `JSON: ${effectiveBoolean(settings, "json") ? "on" : "off"}`,
+    `Keep logs: ${effectiveBoolean(settings, "keepLogs") ? "on" : "off"}`,
+    `Progress output: ${effectiveBoolean(settings, "progress") ? "on" : "reduced"}`,
+    `CI mode: ${effectiveBoolean(settings, "ci") ? "on" : "off"}`,
+    `Fail on critical: ${effectiveBoolean(settings, "failOnCritical") ? "on" : "off"}`
   ];
 }
 
@@ -311,7 +312,7 @@ function toggleCurrentSelection(state: MenuState): void {
 
   if (state.screen === "provider") {
     const selected = REPORT_PROVIDER_IDS[state.cursor];
-    if (selected && state.settings.provider !== selected) {
+    if (selected && selected !== DEFAULT_OPTIONS.provider && state.settings.provider !== selected) {
       state.settings.provider = selected;
       state.settings.model = undefined;
       state.settings.reasoning = undefined;
@@ -325,7 +326,7 @@ function toggleCurrentSelection(state: MenuState): void {
 
   if (state.screen === "parallel") {
     const selected = PARALLEL_OPTIONS[state.cursor];
-    state.settings.parallel = state.settings.parallel === selected ? undefined : selected;
+    state.settings.parallel = selected === DEFAULT_OPTIONS.parallel || state.settings.parallel === selected ? undefined : selected;
     return;
   }
 
@@ -337,7 +338,7 @@ function toggleCurrentSelection(state: MenuState): void {
 
   if (state.screen === "reviewMode") {
     const selected = REVIEW_MODE_OPTIONS[state.cursor];
-    state.settings.reviewMode = state.settings.reviewMode === selected ? undefined : selected;
+    state.settings.reviewMode = selected === DEFAULT_OPTIONS.reviewMode || state.settings.reviewMode === selected ? undefined : selected;
     return;
   }
 
@@ -357,24 +358,24 @@ function toggleCurrentSelection(state: MenuState): void {
   if (state.screen === "reasoning") {
     const provider = selectedProvider(state.settings);
     const selected = reasoningOptionsForProviderModel(provider, currentModels(state), state.settings.model)[state.cursor]?.effort;
-    state.settings.reasoning = state.settings.reasoning === selected ? undefined : selected;
+    state.settings.reasoning = selected === DEFAULT_OPTIONS.reasoning || state.settings.reasoning === selected ? undefined : selected;
     return;
   }
 
   if (state.screen === "fastMode") {
-    state.settings.fastMode = FAST_MODE_OPTIONS[state.cursor] === "on";
+    setBooleanOverride(state.settings, "fastMode", FAST_MODE_OPTIONS[state.cursor] === "on");
     return;
   }
 
   if (state.screen === "sandbox") {
     const selected = SANDBOX_OPTIONS[state.cursor];
-    state.settings.sandbox = state.settings.sandbox === selected ? undefined : selected;
+    state.settings.sandbox = selected === DEFAULT_OPTIONS.sandbox || state.settings.sandbox === selected ? undefined : selected;
     return;
   }
 
   if (state.screen === "language") {
     const selected = LANGUAGE_OPTIONS[state.cursor];
-    state.settings.language = state.settings.language === selected ? undefined : selected;
+    state.settings.language = selected === DEFAULT_OPTIONS.language || state.settings.language === selected ? undefined : selected;
     return;
   }
 
@@ -389,29 +390,25 @@ function toggleCurrentSelection(state: MenuState): void {
   if (state.screen === "exportFormats") {
     const selected = EXPORT_FORMAT_OPTIONS[state.cursor];
     if (selected) {
-      state.settings.exportFormats = toggleListValue(state.settings.exportFormats, selected);
+      setExportFormatsOverride(state.settings, toggleListValue(effectiveExportFormats(state.settings), selected) ?? []);
     }
     return;
   }
 
   if (state.screen === "checkTimeout") {
     const selected = CHECK_TIMEOUT_OPTIONS[state.cursor];
-    state.settings.checkTimeoutSeconds = state.settings.checkTimeoutSeconds === selected ? undefined : selected;
+    state.settings.checkTimeoutSeconds = selected === DEFAULT_OPTIONS.checkTimeoutSeconds || state.settings.checkTimeoutSeconds === selected ? undefined : selected;
     return;
   }
 
   if (state.screen === "phaseTimeout") {
     const selected = PHASE_TIMEOUT_OPTIONS[state.cursor];
-    state.settings.phaseTimeoutSeconds = state.settings.phaseTimeoutSeconds === selected ? undefined : selected;
+    state.settings.phaseTimeoutSeconds = selected === DEFAULT_OPTIONS.phaseTimeoutSeconds || state.settings.phaseTimeoutSeconds === selected ? undefined : selected;
   }
 }
 
 function toggleBoolean(state: MenuState, key: keyof RepoVistaSettings): void {
-  if (key === "progress") {
-    state.settings.progress = state.settings.progress === false ? undefined : false;
-    return;
-  }
-  state.settings[key] = !state.settings[key] as never;
+  setBooleanOverride(state.settings, key, !effectiveBoolean(state.settings, key));
 }
 
 function render(state: MenuState, output: WriteStream): void {
@@ -607,29 +604,29 @@ function currentItems(state: MenuState): string[] {
         return checkbox(providerId === selectedProvider(state.settings), `${provider.displayName} (${providerId})`);
       });
     case "parallel":
-      return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === (state.settings.parallel ?? "off"), formatParallel(parallel)));
+      return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === effectiveParallel(state.settings), formatParallel(parallel)));
     case "auditProfile":
       return AUDIT_PROFILES.map((profile) => checkbox(profile.id === state.settings.auditProfile, `${profile.id} - ${profile.description}`));
     case "reviewMode":
-      return REVIEW_MODE_OPTIONS.map((mode) => checkbox(mode === (state.settings.reviewMode ?? "default"), mode));
+      return REVIEW_MODE_OPTIONS.map((mode) => checkbox(mode === effectiveReviewMode(state.settings), mode));
     case "model":
       return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
-      return reasoningOptionsForProviderModel(selectedProvider(state.settings), currentModels(state), state.settings.model).map((level) => checkbox(level.effort === state.settings.reasoning, `${level.effort}${level.description ? ` - ${level.description}` : ""}`));
+      return reasoningOptionsForProviderModel(selectedProvider(state.settings), currentModels(state), state.settings.model).map((level) => checkbox(level.effort === effectiveReasoning(state.settings), `${level.effort}${level.description ? ` - ${level.description}` : ""}`));
     case "fastMode":
-      return FAST_MODE_OPTIONS.map((mode) => checkbox((state.settings.fastMode ? "on" : "off") === mode, mode));
+      return FAST_MODE_OPTIONS.map((mode) => checkbox((effectiveBoolean(state.settings, "fastMode") ? "on" : "off") === mode, mode));
     case "sandbox":
-      return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === state.settings.sandbox, sandbox));
+      return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === (state.settings.sandbox ?? DEFAULT_OPTIONS.sandbox), sandbox));
     case "language":
-      return LANGUAGE_OPTIONS.map((language) => checkbox(language === state.settings.language, language));
+      return LANGUAGE_OPTIONS.map((language) => checkbox(language === (state.settings.language ?? DEFAULT_OPTIONS.language), language));
     case "checkCommands":
       return state.checkCommandOptions.map((command) => checkbox(Boolean(state.settings.checkCommands?.includes(command)), command));
     case "exportFormats":
-      return EXPORT_FORMAT_OPTIONS.map((format) => checkbox(Boolean(state.settings.exportFormats?.includes(format)), format));
+      return EXPORT_FORMAT_OPTIONS.map((format) => checkbox(effectiveExportFormats(state.settings).includes(format), format));
     case "checkTimeout":
-      return CHECK_TIMEOUT_OPTIONS.map((seconds) => checkbox(seconds === state.settings.checkTimeoutSeconds, formatSeconds(seconds)));
+      return CHECK_TIMEOUT_OPTIONS.map((seconds) => checkbox(seconds === (state.settings.checkTimeoutSeconds ?? DEFAULT_OPTIONS.checkTimeoutSeconds), formatSeconds(seconds)));
     case "phaseTimeout":
-      return PHASE_TIMEOUT_OPTIONS.map((seconds) => checkbox(seconds === state.settings.phaseTimeoutSeconds, formatSeconds(seconds)));
+      return PHASE_TIMEOUT_OPTIONS.map((seconds) => checkbox(seconds === (state.settings.phaseTimeoutSeconds ?? DEFAULT_OPTIONS.phaseTimeoutSeconds), formatSeconds(seconds)));
     case "main":
       return MAIN_ITEMS.map((item) => item.label(state.settings));
   }
@@ -717,7 +714,45 @@ function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
 }
 
 function selectedProvider(settings: RepoVistaSettings): AiProviderId {
-  return settings.provider ?? "codex";
+  return settings.provider ?? DEFAULT_OPTIONS.provider;
+}
+
+function effectiveParallel(settings: RepoVistaSettings): ParallelMode {
+  return settings.parallel ?? DEFAULT_OPTIONS.parallel;
+}
+
+function effectiveReviewMode(settings: RepoVistaSettings): ReviewMode {
+  return settings.reviewMode ?? DEFAULT_OPTIONS.reviewMode ?? "default";
+}
+
+function effectiveReasoning(settings: RepoVistaSettings): string | undefined {
+  return settings.reasoning ?? DEFAULT_OPTIONS.reasoning;
+}
+
+function effectiveExportFormats(settings: RepoVistaSettings): ReportExportFormat[] {
+  return settings.exportFormats ?? DEFAULT_OPTIONS.exportFormats;
+}
+
+function effectiveBoolean(settings: RepoVistaSettings, key: keyof RepoVistaSettings): boolean {
+  const value = settings[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const defaultValue = DEFAULT_OPTIONS[key as keyof typeof DEFAULT_OPTIONS];
+  return typeof defaultValue === "boolean" ? defaultValue : false;
+}
+
+function setBooleanOverride(settings: RepoVistaSettings, key: keyof RepoVistaSettings, value: boolean): void {
+  const defaultValue = DEFAULT_OPTIONS[key as keyof typeof DEFAULT_OPTIONS];
+  settings[key] = value === defaultValue ? undefined as never : value as never;
+}
+
+function setExportFormatsOverride(settings: RepoVistaSettings, values: ReportExportFormat[]): void {
+  settings.exportFormats = sameArray(values, DEFAULT_OPTIONS.exportFormats) ? undefined : values;
+}
+
+function sameArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function currentModels(state: MenuState): ProviderModelInfo[] {
@@ -777,35 +812,35 @@ function formatParallel(parallel: ParallelMode): string {
 
 const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
-  { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(settings.parallel ?? "off")}` },
+  { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(effectiveParallel(settings))}` },
   { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${settings.auditProfile ?? "none"}` },
-  { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${settings.reviewMode ?? "default"}` },
+  { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${effectiveReviewMode(settings)}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
-  { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${settings.reasoning ?? "model default"}` },
-  { id: "fastMode", type: "submenu", label: (settings) => `Fast mode: ${settings.fastMode ? "on" : "off"}` },
+  { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${effectiveReasoning(settings) ?? "model default"}` },
+  { id: "fastMode", type: "submenu", label: (settings) => `Fast mode: ${effectiveBoolean(settings, "fastMode") ? "on" : "off"}` },
   { id: "profile", type: "text", label: (settings) => `Codex profile: ${settings.profile ?? "none"}` },
-  { id: "sandbox", type: "submenu", label: (settings) => `Sandbox: ${settings.sandbox ?? "read-only"}` },
-  { id: "language", type: "submenu", label: (settings) => `Language: ${settings.language ?? "English"}` },
-  { id: "outDir", type: "text", label: (settings) => `Output directory: ${settings.outDir ?? ".repovista"}` },
+  { id: "sandbox", type: "submenu", label: (settings) => `Sandbox: ${settings.sandbox ?? DEFAULT_OPTIONS.sandbox}` },
+  { id: "language", type: "submenu", label: (settings) => `Language: ${settings.language ?? DEFAULT_OPTIONS.language}` },
+  { id: "outDir", type: "text", label: (settings) => `Output directory: ${settings.outDir ?? DEFAULT_OPTIONS.outDir}` },
   { id: "promptFile", type: "text", label: (settings) => `Prompt file: ${settings.promptFile ?? "none"}` },
   { id: "workspace", type: "text", label: (settings) => `Workspace: ${settings.workspace ?? "all"}` },
-  { id: "allWorkspaces", type: "toggle", label: (settings) => checkbox(Boolean(settings.allWorkspaces), "Record all detected workspaces") },
-  { id: "incremental", type: "toggle", label: (settings) => checkbox(Boolean(settings.incremental), "Incremental scan cache") },
+  { id: "allWorkspaces", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "allWorkspaces"), "Record all detected workspaces") },
+  { id: "incremental", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "incremental"), "Incremental scan cache") },
   { id: "includes", type: "text", label: (settings) => `Include patterns: ${formatArray(settings.includes)}` },
   { id: "ignores", type: "text", label: (settings) => `Ignore patterns: ${formatArray(settings.ignores)}` },
-  { id: "runChecks", type: "toggle", label: (settings) => checkbox(Boolean(settings.runChecks), "Run local checks before analysis") },
+  { id: "runChecks", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "runChecks"), "Run local checks before analysis") },
   { id: "checkCommands", type: "submenu", label: (settings) => `Check commands: ${formatArray(settings.checkCommands)}` },
-  { id: "checkTimeout", type: "submenu", label: (settings) => `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}` },
-  { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}` },
-  { id: "strictReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.strictReports), "Strict report quality gates") },
-  { id: "repairReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.repairReports), "Repair reports that miss quality gates") },
-  { id: "deepReview", type: "toggle", label: (settings) => checkbox(Boolean(settings.deepReview), "Feature-sliced deep review") },
-  { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(settings.exportFormats)}` },
-  { id: "json", type: "toggle", label: (settings) => checkbox(Boolean(settings.json), "JSON metadata and provider logs") },
-  { id: "keepLogs", type: "toggle", label: (settings) => checkbox(Boolean(settings.keepLogs), "Keep technical logs") },
-  { id: "progress", type: "toggle", label: (settings) => checkbox(settings.progress !== false, "Progress output") },
-  { id: "ci", type: "toggle", label: (settings) => checkbox(Boolean(settings.ci), "CI mode") },
-  { id: "failOnCritical", type: "toggle", label: (settings) => checkbox(Boolean(settings.failOnCritical), "Fail on critical findings") },
+  { id: "checkTimeout", type: "submenu", label: (settings) => `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? DEFAULT_OPTIONS.checkTimeoutSeconds)}` },
+  { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? DEFAULT_OPTIONS.phaseTimeoutSeconds)}` },
+  { id: "strictReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "strictReports"), "Strict report quality gates") },
+  { id: "repairReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "repairReports"), "Repair reports that miss quality gates") },
+  { id: "deepReview", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "deepReview"), "Feature-sliced deep review") },
+  { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(effectiveExportFormats(settings))}` },
+  { id: "json", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "json"), "JSON metadata and provider logs") },
+  { id: "keepLogs", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "keepLogs"), "Keep technical logs") },
+  { id: "progress", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "progress"), "Progress output") },
+  { id: "ci", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "ci"), "CI mode") },
+  { id: "failOnCritical", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnCritical"), "Fail on critical findings") },
   { id: "save", type: "command", label: () => "Save and exit" },
   { id: "exit", type: "command", label: () => "Exit without saving" }
 ];
