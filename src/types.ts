@@ -655,6 +655,7 @@ export interface ProviderRunRequest {
   outputSchemaPath?: string;
   structuredOutputPath?: string;
   promptFilePath?: string;
+  abortSignal?: AbortSignal;
 }
 
 export interface ProviderRunResult {

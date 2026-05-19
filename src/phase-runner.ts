@@ -25,6 +25,7 @@ export interface SinglePhaseInput {
   options: AuditOptions;
   runPhase: RunPhaseFunction;
   spawnAdapter?: SpawnAdapter;
+  abortSignal?: AbortSignal;
 }
 
 export interface ParallelPhaseInput {
@@ -40,6 +41,7 @@ export interface ParallelPhaseInput {
   resume: boolean;
   status: PhaseReportStatus;
   previousStatus?: PhaseReportStatus;
+  abortSignal?: AbortSignal;
 }
 
 export async function runSinglePhase(input: SinglePhaseInput): Promise<ProviderRunResult> {
@@ -61,7 +63,8 @@ export async function runSinglePhase(input: SinglePhaseInput): Promise<ProviderR
     keepLogs: input.options.keepLogs,
     timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
     outputSchema: structured.outputSchema,
-    outputSchemaKind: structured.outputSchemaKind
+    outputSchemaKind: structured.outputSchemaKind,
+    abortSignal: input.abortSignal
   }, input.spawnAdapter);
 }
 
@@ -115,7 +118,8 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
       keepLogs: input.options.keepLogs,
       timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
       outputSchema: structured.outputSchema,
-      outputSchemaKind: structured.outputSchemaKind
+      outputSchemaKind: structured.outputSchemaKind,
+      abortSignal: input.abortSignal
     }, input.spawnAdapter);
     if (shardStatus) {
       shardStatus.status = result.success ? "success" : "failed";
@@ -165,7 +169,8 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
     keepLogs: input.options.keepLogs,
     timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
     outputSchema: structured.outputSchema,
-    outputSchemaKind: structured.outputSchemaKind
+    outputSchemaKind: structured.outputSchemaKind,
+    abortSignal: input.abortSignal
   }, input.spawnAdapter);
 }
 

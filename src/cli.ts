@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runAudit } from "./audit.js";
+import { createAuditProgressController } from "./audit-progress.js";
 import { compareHasRegression, runCompareCommand } from "./compare.js";
 import { runBaselineCommand } from "./baseline.js";
 import { runCiInitCommand } from "./ci-init.js";
@@ -170,8 +171,36 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runOpenPrCommand(optionsWithSettings.options));
       return 0;
     }
-    const result = await runAudit(optionsWithSettings.options, { version });
-    return result.exitCode;
+    const abortController = new AbortController();
+    const progress = createAuditProgressController(optionsWithSettings.options, abortController);
+    const onInterrupt = (signal: NodeJS.Signals) => {
+      if (!abortController.signal.aborted) {
+        abortController.abort(new Error(`Cancelled by ${signal}.`));
+      }
+    };
+    process.once("SIGINT", onInterrupt);
+    process.once("SIGTERM", onInterrupt);
+    progress?.start();
+    let runDir: string | undefined;
+    let exitCode = 1;
+    let errorMessage: string | undefined;
+    try {
+      const result = await runAudit(optionsWithSettings.options, {
+        version,
+        abortSignal: abortController.signal,
+        loggerSink: progress
+      });
+      runDir = result.paths.runDir;
+      exitCode = result.exitCode;
+      return result.exitCode;
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      process.off("SIGINT", onInterrupt);
+      process.off("SIGTERM", onInterrupt);
+      progress?.finish({ exitCode, runDir, error: errorMessage });
+    }
   } catch (error) {
     if (error instanceof CliUsageError) {
       process.stderr.write(`Error: ${error.message}\n\n${renderHelp()}`);

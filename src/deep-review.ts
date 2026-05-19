@@ -31,6 +31,7 @@ export interface DeepRiskReviewInput {
   status: PhaseReportStatus;
   runPhase: RunPhaseFunction;
   spawnAdapter?: SpawnAdapter;
+  abortSignal?: AbortSignal;
 }
 
 export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promise<ProviderRunResult> {
@@ -155,7 +156,8 @@ async function runDeepShardWithAttempts(
         sandbox: input.options.sandbox,
         jsonEvents: input.options.json,
         keepLogs: input.options.keepLogs,
-        timeoutSeconds
+        timeoutSeconds,
+        abortSignal: input.abortSignal
       }, input.spawnAdapter);
       lastResult = result;
       if (result.success || !shouldRetryDeepShard(result)) {

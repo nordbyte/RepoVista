@@ -52,6 +52,7 @@ export async function runProviderPhase(
     let settled = false;
     let timedOut = false;
     let interrupted = false;
+    let cancellationRequested = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
     let forcedSettleTimer: NodeJS.Timeout | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
@@ -92,6 +93,7 @@ export async function runProviderPhase(
       }
       process.off("SIGINT", interruptHandler);
       process.off("SIGTERM", interruptHandler);
+      request.abortSignal?.removeEventListener("abort", abortHandler);
       diagnostics.endedAt = new Date().toISOString();
       writeMasked(stdoutLog, stdoutMasker.flush());
       writeMasked(stderrLog, stderrMasker.flush());
@@ -118,7 +120,7 @@ export async function runProviderPhase(
     };
 
     const terminateChild = (reason: "timeout" | "interrupt") => {
-      if (settled || !child) {
+      if (settled || diagnostics.termination?.sigtermSent) {
         return;
       }
       if (reason === "timeout") {
@@ -127,6 +129,10 @@ export async function runProviderPhase(
       } else {
         interrupted = true;
         diagnostics.interrupted = true;
+      }
+      if (!child) {
+        cancellationRequested = reason === "interrupt";
+        return;
       }
       diagnostics.termination = diagnostics.termination ?? {
         reason,
@@ -174,6 +180,14 @@ export async function runProviderPhase(
     };
 
     const interruptHandler = () => terminateChild("interrupt");
+    const abortHandler = () => {
+      cancellationRequested = true;
+      terminateChild("interrupt");
+    };
+    request.abortSignal?.addEventListener("abort", abortHandler, { once: true });
+    if (request.abortSignal?.aborted) {
+      abortHandler();
+    }
 
     try {
       child = spawnAdapter(provider.executable, args, {
@@ -183,6 +197,9 @@ export async function runProviderPhase(
         detached: useProcessGroup
       });
       diagnostics.pid = child.pid;
+      if (cancellationRequested) {
+        terminateChild("interrupt");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       void writeProviderFailureReport(providerRequest, `Could not start ${provider.displayName}: ${message}`, undefined, undefined)

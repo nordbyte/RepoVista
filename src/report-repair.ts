@@ -17,6 +17,7 @@ export interface RepairPhaseInput {
   options: AuditOptions;
   runPhase: RunPhaseFunction;
   spawnAdapter?: SpawnAdapter;
+  abortSignal?: AbortSignal;
   onRepairAttempt?: (attempt: {
     attempt: number;
     phaseId: string;
@@ -65,7 +66,8 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
       sandbox: input.options.sandbox,
       jsonEvents: input.options.json,
       keepLogs: input.options.keepLogs,
-      timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
+      timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+      abortSignal: input.abortSignal
     }, input.spawnAdapter);
     const repairAttempt: PhaseRepairAttempt = {
       attempt,

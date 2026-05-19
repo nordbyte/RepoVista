@@ -33,6 +33,7 @@ repovista settings
 repovista doctor
 repovista plan
 repovista audit
+repovista reports
 ```
 
 The main report entry point is written to:
@@ -40,6 +41,10 @@ The main report entry point is written to:
 ```text
 .repovista/<run-id>/index.md
 ```
+
+Use `repovista reports` to open the terminal report browser, select a generated run, and navigate the full report or individual sections.
+
+During an interactive audit, RepoVista shows a live progress TUI with the current step and elapsed counters. Press `q` or `Ctrl+C` to cancel; RepoVista stops the running provider process group with `SIGTERM` and escalates to `SIGKILL` if it does not exit.
 
 Fresh installs use quality-oriented defaults: Codex CLI, `reasoning=xhigh`, read-only sandbox, local checks, strict report gates, report repair, incremental cache, `parallel=auto`, and SARIF/HTML/JSONL exports.
 

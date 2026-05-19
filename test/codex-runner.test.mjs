@@ -419,6 +419,47 @@ test("codex runner cancels a phase after timeout", async () => {
   }
 });
 
+test("provider runner cancels a phase when the audit abort signal fires", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-abort-"));
+  try {
+    const reportPath = path.join(root, "report.md");
+    const child = new FakeChild();
+    const controller = new AbortController();
+    child.pid = 99999998;
+    const signals = [];
+    child.kill = (signal) => {
+      signals.push(signal);
+      setImmediate(() => child.emit("close", null, signal));
+      return true;
+    };
+    const result = await runProviderPhase({
+      provider: "codex",
+      phaseId: "architecture",
+      phaseTitle: "Architecture",
+      prompt: "prompt",
+      projectRoot: root,
+      reportPath,
+      sandbox: "read-only",
+      jsonEvents: false,
+      keepLogs: false,
+      timeoutSeconds: 60,
+      abortSignal: controller.signal
+    }, () => {
+      setImmediate(() => controller.abort(new Error("test cancellation")));
+      return child;
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.error, /interrupted and cancelled/);
+    assert.equal(result.diagnostics.interrupted, true);
+    assert.equal(result.diagnostics.termination.sigtermSent, true);
+    assert.deepEqual(signals, ["SIGTERM"]);
+    assert.match(await readFile(reportPath, "utf8"), /interrupted and cancelled/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function riskFindingFixture(title, signature) {
   return {
     title,

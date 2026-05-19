@@ -21,3 +21,10 @@ export class PreflightError extends RepoVistaError {
     this.name = "PreflightError";
   }
 }
+
+export class AuditCancelledError extends RepoVistaError {
+  constructor(message = "RepoVista audit was cancelled.") {
+    super(message, "AUDIT_CANCELLED");
+    this.name = "AuditCancelledError";
+  }
+}

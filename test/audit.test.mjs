@@ -782,6 +782,70 @@ test("risk phase auto-repairs missing findings schema before extraction", async 
   }
 });
 
+test("audit cancellation stops before starting later provider phases", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-cancel-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    const controller = new AbortController();
+    const seen = [];
+
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture", "code-quality"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      abortSignal: controller.signal,
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        seen.push(request.phaseId);
+        controller.abort(new Error("test cancellation"));
+        await writeFile(request.reportPath, phaseReportMarkdown(request.phaseTitle), "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 130);
+    assert.deepEqual(seen, ["architecture"]);
+    const meta = JSON.parse(await readFile(path.join(result.paths.runDir, "meta.json"), "utf8"));
+    assert.equal(meta.exitCode, 130);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("resume preserves completed phase reports without rerunning Codex", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-resume-"));
   try {

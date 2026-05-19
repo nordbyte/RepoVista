@@ -6,13 +6,13 @@ import { writeStructuredOutputs } from "./audit-outputs.js";
 import { applyBaselineToFindings } from "./baseline.js";
 import { projectScanFingerprint, updateAuditCache } from "./cache.js";
 import { maybeRunDeepRiskReview } from "./deep-review.js";
-import { PreflightError } from "./errors.js";
+import { AuditCancelledError, PreflightError } from "./errors.js";
 import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
 import { validateFindingsEvidence } from "./evidence-validation.js";
 import { assignFindingsToFeatures, syncFeatureRecords, updateFeatureRecordsFromFindings } from "./feature-state.js";
 import { extractFindings } from "./findings.js";
 import { createProjectInventory } from "./inventory.js";
-import { Logger } from "./logger.js";
+import { Logger, type LoggerSink } from "./logger.js";
 import { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport } from "./phase-schema.js";
 import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
 import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PromptContext } from "./prompts.js";
@@ -70,6 +70,8 @@ export interface AuditDependencies extends PreflightDependencies, EvidenceDepend
   runProvider?: typeof runProviderPhase;
   runCodex?: typeof runProviderPhase;
   spawnAdapter?: SpawnAdapter;
+  abortSignal?: AbortSignal;
+  loggerSink?: LoggerSink;
 }
 
 export interface AuditResult {
@@ -89,7 +91,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     ...options,
     includes: workspaceIncludes(options, workspaceScope)
   };
-  const logger = new Logger(options.progress);
+  const logger = new Logger(options.progress, dependencies.loggerSink);
+  const abortSignal = dependencies.abortSignal;
   const createLogs = options.keepLogs || options.json;
   const paths = await createRunPaths(projectRoot, options, now, createLogs);
   const provider = getReportProvider(options.provider ?? "codex");
@@ -101,12 +104,14 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
 
   try {
+    throwIfCancelled(abortSignal);
     if (options.resumeDir) {
       await loadExistingReports(paths, previousReports, meta.phases, previousMeta);
     }
 
     logger.step("Preflight checks");
     const preflight = await runPreflight(projectRoot, paths.runDir, options, dependencies);
+    throwIfCancelled(abortSignal);
     meta.preflight = preflight;
     for (const warning of preflight.warnings) {
       logger.warn(warning);
@@ -114,6 +119,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
     logger.step("Collecting evidence pack");
     const evidence = await collectEvidence(projectRoot, options, dependencies);
+    throwIfCancelled(abortSignal);
     meta.evidence = evidence;
     if (hasFailedChecks(evidence)) {
       logger.warn("One or more local check commands failed. The report will include the check output.");
@@ -127,6 +133,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       includes: options.includes,
       ignores: options.ignores
     });
+    throwIfCancelled(abortSignal);
     const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
 
     logger.step("Creating project inventory");
@@ -150,6 +157,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       scan: projectScan
     });
     recordReportDuration(meta, "00-inventory.md", Date.now() - inventoryStartedAtMs);
+    throwIfCancelled(abortSignal);
     for (const warning of inventory.warnings) {
       logger.warn(warning);
     }
@@ -221,6 +229,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     let detailPhaseRan = false;
 
     for (const phase of ANALYSIS_PHASES) {
+      throwIfCancelled(abortSignal);
       const status = phaseStatus(meta.phases, phase);
       const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
       if (!options.resumeDir && !selectedPhases && incrementalReports[phase.reportFile]) {
@@ -281,6 +290,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
             parallel,
             runPhase,
             spawnAdapter: dependencies.spawnAdapter,
+            abortSignal,
             resume: Boolean(options.resumeDir),
             status,
             previousStatus
@@ -293,8 +303,10 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
             paths,
             options,
             runPhase,
-            spawnAdapter: dependencies.spawnAdapter
+            spawnAdapter: dependencies.spawnAdapter,
+            abortSignal
           });
+      throwIfCancelled(abortSignal);
       result = await maybeRepairPhaseReport({
         phase,
         originalPrompt: prompt,
@@ -304,11 +316,13 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         options,
         runPhase,
         spawnAdapter: dependencies.spawnAdapter,
+        abortSignal,
         onRepairAttempt: ({ attempt, phaseTitle, warnings }) => {
           logger.step(phaseTitle);
           logger.warn(`Repair attempt ${attempt} triggered by: ${warnings.join("; ")}`);
         }
       });
+      throwIfCancelled(abortSignal);
       result = await maybeRunDeepRiskReview({
         phase,
         basePrompt: prompt,
@@ -320,8 +334,10 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         result,
         status,
         runPhase,
-        spawnAdapter: dependencies.spawnAdapter
+        spawnAdapter: dependencies.spawnAdapter,
+        abortSignal
       });
+      throwIfCancelled(abortSignal);
       result = await preservePreviousReportIfRetryFailed({
         phaseId: phase.id,
         result,
@@ -337,6 +353,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       }
     }
 
+    throwIfCancelled(abortSignal);
     const extractedFindings = await assignFindingsToFeatures(
       featureMap.features,
       filterFindingsForReviewMode(
@@ -366,8 +383,13 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings);
     await appendGithubStepSummary(meta);
   } catch (error) {
-    meta.exitCode = 1;
-    throw error;
+    if (isAuditCancelled(error, abortSignal)) {
+      meta.exitCode = 130;
+      logger.warn("RepoVista audit cancelled. Running provider sessions were asked to stop.");
+    } else {
+      meta.exitCode = 1;
+      throw error;
+    }
   } finally {
     completeRunTiming(meta, runStartedAtMs);
     await writeMeta(paths.runDir, meta);
@@ -463,6 +485,27 @@ function recordReportDuration(meta: AuditMeta, reportFile: string, durationMs: n
 function completeRunTiming(meta: AuditMeta, runStartedAtMs: number): void {
   meta.completedAt = new Date().toISOString();
   meta.durationMs = Math.max(0, Date.now() - runStartedAtMs);
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new AuditCancelledError(abortReason(signal));
+  }
+}
+
+function isAuditCancelled(error: unknown, signal: AbortSignal | undefined): boolean {
+  return error instanceof AuditCancelledError || Boolean(signal?.aborted);
+}
+
+function abortReason(signal: AbortSignal): string {
+  const reason = signal.reason;
+  if (reason instanceof Error && reason.message) {
+    return reason.message;
+  }
+  if (typeof reason === "string" && reason.trim()) {
+    return reason;
+  }
+  return "RepoVista audit was cancelled.";
 }
 
 async function preservePreviousReportIfRetryFailed(input: {
