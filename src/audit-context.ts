@@ -15,6 +15,8 @@ import type {
 
 export interface EffectiveAiSettings {
   model?: string;
+  reasoning?: string;
+  profile?: string;
 }
 
 export function createInitialMeta(
@@ -26,8 +28,9 @@ export function createInitialMeta(
   effectiveAi: EffectiveAiSettings = {}
 ): AuditMeta {
   const provider = getReportProvider(options.provider ?? "codex");
-  const providerDefaults = `${provider.displayName} configured default`;
-  const recordedModel = options.model ?? effectiveAi.model;
+  const recordedModel = effectiveAi.model ?? options.model ?? "not supplied";
+  const recordedReasoning = effectiveAi.reasoning ?? options.reasoning ?? "xhigh";
+  const recordedProfile = effectiveAi.profile ?? options.profile ?? "none";
   return {
     tool: {
       name: "RepoVista",
@@ -71,9 +74,9 @@ export function createInitialMeta(
       exportFormats: options.exportFormats ?? []
     },
     codex: {
-      model: recordedModel ?? "Codex configured default",
-      profile: options.profile ?? "none",
-      reasoning: options.reasoning ?? "model default",
+      model: recordedModel,
+      profile: recordedProfile,
+      reasoning: recordedReasoning,
       fastMode: options.fastMode,
       sandbox: options.sandbox
     },
@@ -81,9 +84,9 @@ export function createInitialMeta(
       provider: provider.id,
       displayName: provider.displayName,
       executable: provider.executable,
-      model: recordedModel ?? providerDefaults,
-      profile: options.profile ?? "none",
-      reasoning: options.reasoning ?? "model default",
+      model: recordedModel,
+      profile: recordedProfile,
+      reasoning: recordedReasoning,
       fastMode: options.fastMode,
       sandbox: options.sandbox
     },

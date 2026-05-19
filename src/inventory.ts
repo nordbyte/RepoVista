@@ -388,19 +388,18 @@ function renderAiSettings(ai: {
   fastMode: boolean;
   sandbox: SandboxMode;
 } | undefined): string {
-  const defaultModel = ai?.provider === "codex"
-    ? "Codex configured default"
-    : `${ai?.displayName ?? "Codex CLI"} configured default`;
   const permissionLine = ai?.provider === "claude"
     ? `- Claude permission mode: ${ai.sandbox === "read-only" ? "plan" : "default"}`
-    : "- Codex approval policy: never";
+    : ai?.provider === "codex" || !ai
+      ? "- Codex approval policy: never"
+      : `- Provider sandbox intent: ${ai.sandbox}`;
   return [
     `- Provider: ${ai?.displayName ?? "Codex CLI"}`,
     `- Executable: ${ai?.executable ?? "codex"}`,
-    `- Model: ${ai?.model ?? defaultModel}`,
-    `- Reasoning: ${ai?.reasoning ?? "model default"}`,
-    `- Codex fast mode: ${ai?.fastMode ? "on" : "off"}`,
-    `- Codex profile: ${ai?.profile ?? "none"}`,
+    `- Model: ${ai?.model ?? "not supplied"}`,
+    `- Reasoning: ${ai?.reasoning ?? "xhigh"}`,
+    `- Fast mode: ${ai?.fastMode ? "on" : "off"}`,
+    `- Provider profile: ${ai?.profile ?? "none"}`,
     `- Sandbox: ${ai?.sandbox ?? "read-only"}`,
     permissionLine
   ].join("\n");

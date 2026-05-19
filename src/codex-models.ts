@@ -20,6 +20,10 @@ export interface CodexModelInfo {
 export interface CodexConfigDefaults {
   model?: string;
   reasoning?: string;
+  profiles?: Record<string, {
+    model?: string;
+    reasoning?: string;
+  }>;
 }
 
 interface RawModelCatalog {
@@ -95,9 +99,9 @@ export function reasoningOptionsForModel(models: CodexModelInfo[], selectedModel
   return Array.from(byEffort.values());
 }
 
-export async function resolveCodexDefaultModel(configPath = defaultCodexConfigPath()): Promise<string | undefined> {
+export async function resolveCodexDefaultModel(configPath = defaultCodexConfigPath(), profile?: string): Promise<string | undefined> {
   const configured = await loadCodexConfigDefaults(configPath);
-  return configured.model ?? FALLBACK_CODEX_MODELS[0]?.slug;
+  return (profile ? configured.profiles?.[profile]?.model : undefined) ?? configured.model ?? FALLBACK_CODEX_MODELS[0]?.slug;
 }
 
 export async function loadCodexConfigDefaults(configPath = defaultCodexConfigPath()): Promise<CodexConfigDefaults> {
@@ -110,27 +114,63 @@ export async function loadCodexConfigDefaults(configPath = defaultCodexConfigPat
 
 export function parseCodexConfigDefaults(raw: string): CodexConfigDefaults {
   const defaults: CodexConfigDefaults = {};
+  let section: string | undefined;
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) {
       continue;
     }
     if (trimmed.startsWith("[")) {
-      break;
+      section = parseTomlSection(trimmed);
+      continue;
     }
     const match = trimmed.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
     if (!match) {
       continue;
     }
+    const target = defaultsForSection(defaults, section);
+    if (!target) {
+      continue;
+    }
     const key = match[1];
     const value = parseTomlScalar(match[2]);
     if (key === "model" && value) {
-      defaults.model = value;
+      target.model = value;
     } else if (key === "model_reasoning_effort" && value) {
-      defaults.reasoning = value;
+      target.reasoning = value;
     }
   }
   return defaults;
+}
+
+function defaultsForSection(
+  defaults: CodexConfigDefaults,
+  section: string | undefined
+): { model?: string; reasoning?: string } | undefined {
+  if (!section) {
+    return defaults;
+  }
+  const profileName = profileNameFromSection(section);
+  if (!profileName) {
+    return undefined;
+  }
+  defaults.profiles ??= {};
+  defaults.profiles[profileName] ??= {};
+  return defaults.profiles[profileName];
+}
+
+function parseTomlSection(raw: string): string | undefined {
+  const match = raw.match(/^\[\s*([^\]]+)\s*\]$/);
+  return match?.[1]?.trim();
+}
+
+function profileNameFromSection(section: string): string | undefined {
+  const plain = section.match(/^profiles\.([A-Za-z0-9_-]+)$/);
+  if (plain) {
+    return plain[1];
+  }
+  const quoted = section.match(/^profiles\.(["'])(.+)\1$/);
+  return quoted?.[2];
 }
 
 function runCodexDebugModels(): Promise<string> {

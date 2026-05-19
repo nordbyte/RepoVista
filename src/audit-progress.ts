@@ -1,7 +1,7 @@
 import readline from "node:readline";
 import type { ReadStream, WriteStream } from "node:tty";
 import { colorize, renderTuiTerminalFrame, shouldUseColor, TUI_ANSI } from "./tui.js";
-import type { LoggerSink } from "./logger.js";
+import type { AuditSettingsSummary, LoggerSink } from "./logger.js";
 import type { AuditOptions } from "./types.js";
 
 type ProgressStepStatus = "running" | "done" | "failed" | "cancelled";
@@ -41,6 +41,7 @@ class TerminalAuditProgressController implements AuditProgressController {
   private readonly color: boolean;
   private readonly steps: ProgressStep[] = [];
   private readonly messages: string[] = [];
+  private auditSettingsSummary?: AuditSettingsSummary;
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
   private previousRawMode = false;
@@ -97,6 +98,11 @@ class TerminalAuditProgressController implements AuditProgressController {
 
   info(message: string): void {
     this.pushMessage(message);
+  }
+
+  auditSettings(summary: AuditSettingsSummary): void {
+    this.auditSettingsSummary = summary;
+    this.render();
   }
 
   step(message: string): void {
@@ -169,7 +175,14 @@ class TerminalAuditProgressController implements AuditProgressController {
       colorize(`${this.statusLabel()} | total ${formatElapsed(Date.now() - this.startedAt)}`, TUI_ANSI.yellow, this.color),
       ""
     ];
-    const visibleStepCount = Math.max(4, rows - 10 - Math.min(this.messages.length, MAX_MESSAGES));
+    if (this.auditSettingsSummary) {
+      lines.push(colorize(this.auditSettingsSummary.title, TUI_ANSI.cyan, this.color));
+      for (const line of this.auditSettingsSummary.lines) {
+        lines.push(truncate(line, columns));
+      }
+      lines.push("");
+    }
+    const visibleStepCount = Math.max(4, rows - 10 - lines.length - Math.min(this.messages.length, MAX_MESSAGES));
     const visibleSteps = this.steps.slice(-visibleStepCount);
     if (!visibleSteps.length) {
       lines.push(colorize("  Waiting for the first audit step...", TUI_ANSI.dim, this.color));

@@ -26,12 +26,16 @@ test("audit creates the full report structure with mocked Codex phases", async (
       keepLogs: false
     };
 
+    const auditSettings = [];
     const result = await runAudit(options, {
       cwd: root,
       now: new Date("2026-05-18T14:57:32.123Z"),
       version: "0.1.0",
       commandExists: async () => true,
       resolveProviderDefaultModel: async () => "gpt-test-default",
+      loggerSink: {
+        auditSettings: (summary) => auditSettings.push(summary)
+      },
       runCodex: async (request) => {
         const content = request.phaseId === "risk-and-bug"
           ? "# Risk\n\n## Critical Findings\n\nNo critical findings.\n"
@@ -66,7 +70,7 @@ test("audit creates the full report structure with mocked Codex phases", async (
     const meta = JSON.parse(await readFile(path.join(result.paths.runDir, "meta.json"), "utf8"));
     assert.equal(meta.codex.sandbox, "read-only");
     assert.equal(meta.codex.model, "gpt-test-default");
-    assert.equal(meta.codex.reasoning, "model default");
+    assert.equal(meta.codex.reasoning, "xhigh");
     assert.equal(meta.ai.provider, "codex");
     assert.equal(meta.ai.model, "gpt-test-default");
     assert.equal(meta.phases.every((phase) => phase.status === "success"), true);
@@ -77,7 +81,14 @@ test("audit creates the full report structure with mocked Codex phases", async (
     assert.match(inventory, /## AI Provider Execution Settings/);
     assert.match(inventory, /Provider: Codex CLI/);
     assert.match(inventory, /Model: gpt-test-default/);
-    assert.match(inventory, /Reasoning: model default/);
+    assert.match(inventory, /Reasoning: xhigh/);
+
+    assert.equal(auditSettings.length, 1);
+    const settingsText = [auditSettings[0].title, ...auditSettings[0].lines].join("\n");
+    assert.match(settingsText, /Provider: Codex CLI \(codex\).*model: gpt-test-default.*reasoning: xhigh.*fast mode: off/);
+    assert.match(settingsText, /Report: audit profile: full audit.*review: general risk and quality.*phases: all phases/);
+    assert.match(settingsText, /Quality: checks: off.*strict gates: off.*repair: off/);
+    assert.doesNotMatch(settingsText, /configured default|model default/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { allowedEvidencePaths, collectAuditDiffScope, createInitialMeta, reportFolderName } from "./audit-context.js";
+import { createAuditSettingsSummary, createEffectiveAuditSettings } from "./audit-settings.js";
 import { writeStructuredOutputs } from "./audit-outputs.js";
 import { applyBaselineToFindings } from "./baseline.js";
 import { projectScanFingerprint, updateAuditCache } from "./cache.js";
@@ -97,9 +98,20 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const paths = await createRunPaths(projectRoot, options, now, createLogs);
   const provider = getReportProvider(options.provider ?? "codex");
   const effectiveModel = options.model ?? await (dependencies.resolveProviderDefaultModel ?? resolveProviderDefaultModel)(provider.id, options);
+  const effectiveSettings = createEffectiveAuditSettings(options, provider, effectiveModel);
+  options = {
+    ...options,
+    model: options.model ?? effectiveSettings.modelArgument,
+    reasoning: options.reasoning ?? effectiveSettings.reasoning
+  };
 
-  const meta = createInitialMeta(projectRoot, paths, options, version, now, { model: effectiveModel });
+  const meta = createInitialMeta(projectRoot, paths, options, version, now, {
+    model: effectiveSettings.model,
+    reasoning: effectiveSettings.reasoning,
+    profile: effectiveSettings.providerProfile
+  });
   meta.workspace = workspaceScope;
+  logger.auditSettings(createAuditSettingsSummary(effectiveSettings));
   const previousReports: Record<string, string> = {};
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
 
@@ -146,9 +158,9 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         provider: options.provider ?? "codex",
         displayName: provider.displayName,
         executable: provider.executable,
-        model: effectiveModel,
-        profile: options.profile,
-        reasoning: options.reasoning,
+        model: effectiveSettings.model,
+        profile: effectiveSettings.providerProfile,
+        reasoning: effectiveSettings.reasoning,
         fastMode: options.fastMode,
         sandbox: options.sandbox
       },

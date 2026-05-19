@@ -1,4 +1,5 @@
 export { runAudit, hasCriticalFindings } from "./audit.js";
+export { createAuditSettingsSummary, createEffectiveAuditSettings } from "./audit-settings.js";
 export { applyBaselineToFindings, baselineSummary, runBaselineCommand } from "./baseline.js";
 export { projectScanFingerprint, updateAuditCache } from "./cache.js";
 export { runCiInitCommand } from "./ci-init.js";

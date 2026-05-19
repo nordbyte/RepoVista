@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
   reasoningOptionsForModel,
   renderSettingsMenuFrame,
   renderSettingsTerminalFrame,
+  resolveCodexDefaultModel,
   sanitizeSettings,
   saveSettings,
   summarizeSettings
@@ -272,11 +273,42 @@ test("codex config default parsing reads top-level model settings", () => {
     "model_reasoning_effort = \"xhigh\" # comment",
     "",
     "[profiles.fast]",
-    "model = \"gpt-5.4-mini\""
+    "model = \"gpt-5.4-mini\"",
+    "model_reasoning_effort = \"low\"",
+    "",
+    "[profiles.\"deep-review\"]",
+    "model = \"gpt-5.5\""
   ].join("\n"));
 
   assert.deepEqual(defaults, {
     model: "gpt-5.5",
-    reasoning: "xhigh"
+    reasoning: "xhigh",
+    profiles: {
+      fast: {
+        model: "gpt-5.4-mini",
+        reasoning: "low"
+      },
+      "deep-review": {
+        model: "gpt-5.5"
+      }
+    }
   });
+});
+
+test("codex default model resolver honors selected profile", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-config-"));
+  try {
+    const configPath = path.join(root, "config.toml");
+    await writeFile(configPath, [
+      "model = \"gpt-5.5\"",
+      "",
+      "[profiles.audit]",
+      "model = \"gpt-5.4\""
+    ].join("\n"), "utf8");
+
+    assert.equal(await resolveCodexDefaultModel(configPath, "audit"), "gpt-5.4");
+    assert.equal(await resolveCodexDefaultModel(configPath, "missing"), "gpt-5.5");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

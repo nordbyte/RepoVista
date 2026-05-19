@@ -53,9 +53,24 @@ export async function loadProviderModels(provider: AiProviderId): Promise<Provid
   return [];
 }
 
-export async function resolveProviderDefaultModel(provider: AiProviderId): Promise<string | undefined> {
+export async function resolveProviderDefaultModel(
+  provider: AiProviderId,
+  options: { profile?: string } = {}
+): Promise<string | undefined> {
   if (provider === "codex") {
-    return resolveCodexDefaultModel();
+    return resolveCodexDefaultModel(undefined, options.profile);
+  }
+  if (provider === "claude") {
+    return FALLBACK_CLAUDE_MODELS[0]?.slug;
+  }
+  if (provider === "gemini") {
+    return FALLBACK_GEMINI_MODELS[0]?.slug;
+  }
+  if (provider === "opencode") {
+    return FALLBACK_OPENCODE_MODELS[0]?.slug;
+  }
+  if (provider === "aider") {
+    return FALLBACK_AIDER_MODELS[0]?.slug;
   }
   return undefined;
 }
