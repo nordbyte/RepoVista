@@ -76,7 +76,7 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `repairReports` | boolean | Repair reports that miss quality gates. |
 | `repairAttempts` | number | Maximum repair attempts. |
 | `deepReview` | boolean | Run feature-sliced risk review. |
-| `reviewMode` | enum | Risk review focus. |
+| `reviewMode` | enum | Risk review focus: `default`, `deslopify`, `security`, or `test-gaps`. |
 | `promptFile` | string | Additional prompt guidance file. |
 | `exportFormats` | list | Default finding export formats. |
 | `json` | boolean | Keep JSON events and metadata. |

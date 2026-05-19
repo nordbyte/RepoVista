@@ -157,6 +157,7 @@ test("settings summary reflects built-in first-run defaults", () => {
   assert.ok(summary.includes("Provider: Codex CLI"));
   assert.ok(summary.includes("Parallel mode: auto"));
   assert.ok(summary.includes("Audit profile: Default full audit"));
+  assert.ok(summary.includes("Review mode: default (general risk and quality review)"));
   assert.ok(summary.includes("Reasoning: xhigh"));
   assert.ok(summary.includes("Incremental scan cache: on"));
   assert.ok(summary.includes("Run checks: on"));
@@ -179,6 +180,7 @@ test("settings menu frame renders only the menu with ANSI styling", () => {
   assert.match(plain, />  Provider: Codex CLI /);
   assert.match(plain, /Model: gpt-5\.5/);
   assert.match(plain, /Fast mode: on/);
+  assert.match(plain, /Review mode: default \(general risk and quality review\)/);
   assert.equal(plain.match(/Provider: Codex CLI/g)?.length, 1);
   assert.equal(plain.match(/Reasoning: xhigh/g)?.length, 1);
   assert.ok(plain.indexOf("Reasoning: xhigh") < plain.indexOf("Fast mode: on"));
@@ -188,31 +190,46 @@ test("settings menu frame renders only the menu with ANSI styling", () => {
 test("settings fast mode renders as on off selection", () => {
   const onFrame = renderSettingsMenuFrame({ fastMode: true }, { screen: "fastMode", columns: 80, rows: 12 });
   assert.match(onFrame, /Fast mode/);
-  assert.match(onFrame, /\[x\] on/);
-  assert.match(onFrame, /\[ \] off/);
+  assert.match(onFrame, /\[x\] on \(request fast provider tier when supported\)/);
+  assert.match(onFrame, /\[ \] off \(standard provider tier\)/);
 
   const offFrame = renderSettingsMenuFrame({ fastMode: false }, { screen: "fastMode", columns: 80, rows: 12 });
-  assert.match(offFrame, /\[ \] on/);
-  assert.match(offFrame, /\[x\] off/);
+  assert.match(offFrame, /\[ \] on \(request fast provider tier when supported\)/);
+  assert.match(offFrame, /\[x\] off \(standard provider tier\)/);
 });
 
 test("settings default selections are visible without persisted overrides", () => {
   const mainFrame = renderSettingsMenuFrame({}, { columns: 100, rows: 24 });
   assert.match(mainFrame, /Parallel mode: auto/);
   assert.match(mainFrame, /Audit profile: Default full audit/);
+  assert.match(mainFrame, /Review mode: default \(general risk and quality review\)/);
   assert.match(mainFrame, /Reasoning: xhigh/);
   assert.match(mainFrame, /\[x\] Incremental scan cache/);
   assert.match(mainFrame, /\[x\] Run local checks before analysis/);
+
+  const parallelFrame = renderSettingsMenuFrame({}, { screen: "parallel", columns: 100, rows: 12 });
+  assert.match(parallelFrame, /\[ \] off \(single provider session\)/);
+  assert.match(parallelFrame, /\[x\] auto \(use RepoVista's project map recommendation\)/);
 
   const profileFrame = renderSettingsMenuFrame({}, { screen: "auditProfile", columns: 100, rows: 12 });
   assert.match(profileFrame, /\[x\] Full \(default\) - Standard complete audit without a profile/);
   assert.match(profileFrame, /\[ \] quick - Fast orientation pass/);
 
+  const reviewFrame = renderSettingsMenuFrame({}, { screen: "reviewMode", columns: 100, rows: 12 });
+  assert.match(reviewFrame, /\[x\] default \(general risk and quality review\)/);
+  assert.match(reviewFrame, /\[ \] deslopify \(simplification and maintainability focus\)/);
+  assert.match(reviewFrame, /\[ \] security \(security and abuse-case focus\)/);
+  assert.match(reviewFrame, /\[ \] test-gaps \(missing test and regression focus\)/);
+
+  const sandboxFrame = renderSettingsMenuFrame({}, { screen: "sandbox", columns: 100, rows: 12 });
+  assert.match(sandboxFrame, /\[x\] read-only \(audit only, no file writes\)/);
+  assert.match(sandboxFrame, /\[ \] workspace-write \(only for explicit fix workflows\)/);
+
   const exportFrame = renderSettingsMenuFrame({}, { screen: "exportFormats", columns: 80, rows: 12 });
-  assert.match(exportFrame, /\[x\] sarif/);
-  assert.match(exportFrame, /\[x\] html/);
-  assert.match(exportFrame, /\[x\] jsonl/);
-  assert.match(exportFrame, /\[ \] github/);
+  assert.match(exportFrame, /\[x\] sarif \(security tooling\)/);
+  assert.match(exportFrame, /\[x\] html \(browser dashboard\)/);
+  assert.match(exportFrame, /\[x\] jsonl \(line-oriented findings\)/);
+  assert.match(exportFrame, /\[ \] github \(GitHub annotations\)/);
 });
 
 test("settings terminal frame clears every line ending", () => {

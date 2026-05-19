@@ -50,6 +50,18 @@ const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "
 const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
 const FAST_MODE_OPTIONS = ["on", "off"] as const;
 const DEFAULT_AUDIT_PROFILE_LABEL = "Default full audit";
+const REVIEW_MODE_DESCRIPTIONS: Record<ReviewMode, string> = {
+  default: "general risk and quality review",
+  deslopify: "simplification and maintainability focus",
+  security: "security and abuse-case focus",
+  "test-gaps": "missing test and regression focus"
+};
+const EXPORT_FORMAT_DESCRIPTIONS: Record<ReportExportFormat, string> = {
+  sarif: "security tooling",
+  html: "browser dashboard",
+  jsonl: "line-oriented findings",
+  github: "GitHub annotations"
+};
 const RENDER_DEBOUNCE_MS = 16;
 
 export async function runSettingsMenu(
@@ -174,7 +186,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Provider: ${provider.displayName}`,
     `Parallel mode: ${formatParallel(effectiveParallel(settings))}`,
     `Audit profile: ${formatAuditProfile(settings.auditProfile)}`,
-    `Review mode: ${effectiveReviewMode(settings)}`,
+    `Review mode: ${formatReviewMode(effectiveReviewMode(settings))}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${effectiveReasoning(settings) ?? "model default"}`,
     `Codex profile: ${settings.profile ?? "none"}`,
@@ -521,28 +533,28 @@ function currentItems(state: MenuState): string[] {
         return checkbox(providerId === selectedProvider(state.settings), `${provider.displayName} (${providerId})`);
       });
     case "parallel":
-      return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === effectiveParallel(state.settings), formatParallel(parallel)));
+      return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === effectiveParallel(state.settings), formatParallelOption(parallel)));
     case "auditProfile":
       return [
         checkbox(!state.settings.auditProfile, "Full (default) - Standard complete audit without a profile"),
         ...AUDIT_PROFILES.map((profile) => checkbox(profile.id === state.settings.auditProfile, `${profile.id} - ${profile.description}`))
       ];
     case "reviewMode":
-      return REVIEW_MODE_OPTIONS.map((mode) => checkbox(mode === effectiveReviewMode(state.settings), mode));
+      return REVIEW_MODE_OPTIONS.map((mode) => checkbox(mode === effectiveReviewMode(state.settings), formatReviewMode(mode)));
     case "model":
       return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
       return reasoningOptionsForProviderModel(selectedProvider(state.settings), currentModels(state), state.settings.model).map((level) => checkbox(level.effort === effectiveReasoning(state.settings), `${level.effort}${level.description ? ` - ${level.description}` : ""}`));
     case "fastMode":
-      return FAST_MODE_OPTIONS.map((mode) => checkbox((effectiveBoolean(state.settings, "fastMode") ? "on" : "off") === mode, mode));
+      return FAST_MODE_OPTIONS.map((mode) => checkbox((effectiveBoolean(state.settings, "fastMode") ? "on" : "off") === mode, formatFastMode(mode)));
     case "sandbox":
-      return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === (state.settings.sandbox ?? DEFAULT_OPTIONS.sandbox), sandbox));
+      return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === (state.settings.sandbox ?? DEFAULT_OPTIONS.sandbox), formatSandbox(sandbox)));
     case "language":
       return LANGUAGE_OPTIONS.map((language) => checkbox(language === (state.settings.language ?? DEFAULT_OPTIONS.language), language));
     case "checkCommands":
       return state.checkCommandOptions.map((command) => checkbox(Boolean(state.settings.checkCommands?.includes(command)), command));
     case "exportFormats":
-      return EXPORT_FORMAT_OPTIONS.map((format) => checkbox(effectiveExportFormats(state.settings).includes(format), format));
+      return EXPORT_FORMAT_OPTIONS.map((format) => checkbox(effectiveExportFormats(state.settings).includes(format), formatExportFormat(format)));
     case "checkTimeout":
       return CHECK_TIMEOUT_OPTIONS.map((seconds) => checkbox(seconds === (state.settings.checkTimeoutSeconds ?? DEFAULT_OPTIONS.checkTimeoutSeconds), formatSeconds(seconds)));
     case "phaseTimeout":
@@ -718,6 +730,10 @@ function formatAuditProfile(profile: RepoVistaSettings["auditProfile"]): string 
   return profile ?? DEFAULT_AUDIT_PROFILE_LABEL;
 }
 
+function formatReviewMode(mode: ReviewMode): string {
+  return `${mode} (${REVIEW_MODE_DESCRIPTIONS[mode]})`;
+}
+
 function formatSeconds(seconds: number): string {
   if (seconds < 60) {
     return `${seconds}s`;
@@ -730,11 +746,36 @@ function formatParallel(parallel: ParallelMode): string {
   return typeof parallel === "number" ? `${parallel} threads` : parallel;
 }
 
+function formatParallelOption(parallel: ParallelMode): string {
+  if (parallel === "off") {
+    return "off (single provider session)";
+  }
+  if (parallel === "auto") {
+    return "auto (use RepoVista's project map recommendation)";
+  }
+  return `${parallel} threads (fixed parallel provider sessions)`;
+}
+
+function formatSandbox(sandbox: SandboxMode): string {
+  if (sandbox === "read-only") {
+    return "read-only (audit only, no file writes)";
+  }
+  return "workspace-write (only for explicit fix workflows)";
+}
+
+function formatFastMode(mode: typeof FAST_MODE_OPTIONS[number]): string {
+  return mode === "on" ? "on (request fast provider tier when supported)" : "off (standard provider tier)";
+}
+
+function formatExportFormat(format: ReportExportFormat): string {
+  return `${format} (${EXPORT_FORMAT_DESCRIPTIONS[format]})`;
+}
+
 const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
   { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(effectiveParallel(settings))}` },
   { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${formatAuditProfile(settings.auditProfile)}` },
-  { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${effectiveReviewMode(settings)}` },
+  { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${formatReviewMode(effectiveReviewMode(settings))}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${effectiveReasoning(settings) ?? "model default"}` },
   { id: "fastMode", type: "submenu", label: (settings) => `Fast mode: ${effectiveBoolean(settings, "fastMode") ? "on" : "off"}` },
@@ -752,15 +793,15 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "checkCommands", type: "submenu", label: (settings) => `Check commands: ${formatArray(settings.checkCommands)}` },
   { id: "checkTimeout", type: "submenu", label: (settings) => `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? DEFAULT_OPTIONS.checkTimeoutSeconds)}` },
   { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? DEFAULT_OPTIONS.phaseTimeoutSeconds)}` },
-  { id: "strictReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "strictReports"), "Strict report quality gates") },
-  { id: "repairReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "repairReports"), "Repair reports that miss quality gates") },
-  { id: "deepReview", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "deepReview"), "Feature-sliced deep review") },
+  { id: "strictReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "strictReports"), "Strict report quality gates (fail weak phases)") },
+  { id: "repairReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "repairReports"), "Repair reports that miss quality gates (provider repair pass)") },
+  { id: "deepReview", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "deepReview"), "Feature-sliced deep review (extra risk shards)") },
   { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(effectiveExportFormats(settings))}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "json"), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "keepLogs"), "Keep technical logs") },
-  { id: "progress", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "progress"), "Progress output") },
-  { id: "ci", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "ci"), "CI mode") },
-  { id: "failOnCritical", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnCritical"), "Fail on critical findings") },
+  { id: "progress", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "progress"), "Progress TUI and output") },
+  { id: "ci", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "ci"), "CI mode (non-interactive output)") },
+  { id: "failOnCritical", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnCritical"), "Fail on critical findings (CI exit 2)") },
   { id: "save", type: "command", label: () => "Save and exit" },
   { id: "exit", type: "command", label: () => "Exit without saving" }
 ];
