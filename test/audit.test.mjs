@@ -389,7 +389,10 @@ test("deep review runs feature-sliced risk shards and merges schema findings", a
     assert.ok(seen.some((phaseId) => phaseId.startsWith("risk-and-bug-deep-")));
     assert.ok(result.meta.phases.find((phase) => phase.id === "risk-and-bug").deepReviewShards.length > 0);
     const findings = JSON.parse(await readFile(path.join(result.paths.runDir, "findings.json"), "utf8"));
-    assert.ok(findings.some((finding) => finding.title === "Shard-specific missing guard"));
+    const shardFinding = findings.find((finding) => finding.title === "Shard-specific missing guard");
+    assert.ok(shardFinding);
+    assert.ok(shardFinding.featureId);
+    assert.equal(shardFinding.evidenceValidation.references[0].source, "prompt-context");
     assert.ok(await readFile(path.join(result.paths.runDir, "deep-review", "risk-and-bug", result.meta.phases.find((phase) => phase.id === "risk-and-bug").deepReviewShards[0].id + ".md"), "utf8"));
   } finally {
     await rm(root, { recursive: true, force: true });

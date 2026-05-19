@@ -35,6 +35,7 @@ export async function addPromptManifestPhase(
     prompt: string;
     inventoryPath: string;
     previousReports: Record<string, string>;
+    promptFilePath?: string;
     featureMapPath?: string;
     projectFiles?: ProjectFileSummary[];
     projectFileLimit?: number;
@@ -47,6 +48,10 @@ export async function addPromptManifestPhase(
 
   if (input.featureMapPath) {
     includedFiles.push(await fileEntry(input.featureMapPath, "feature-map"));
+  }
+
+  if (input.promptFilePath) {
+    includedFiles.push(await fileEntry(input.promptFilePath, "prompt-file"));
   }
 
   for (const [fileName, content] of Object.entries(input.previousReports)) {
@@ -115,6 +120,23 @@ export async function addPromptManifestPhase(
     omittedFiles
   };
   manifest.phases.push(phase);
+}
+
+export function allowedEvidencePathsFromPromptManifest(
+  manifest: PromptManifest,
+  phaseId: string
+): Set<string> | undefined {
+  const phase = [...manifest.phases].reverse().find((item) => item.phaseId === phaseId || item.phaseId.startsWith(`${phaseId}-`));
+  if (!phase) {
+    return undefined;
+  }
+  const values = new Set<string>();
+  for (const file of phase.includedFiles) {
+    if (file.role === "project-file" && file.readable) {
+      values.add(file.path);
+    }
+  }
+  return values.size ? values : undefined;
 }
 
 function approximateTokens(content: string): number {

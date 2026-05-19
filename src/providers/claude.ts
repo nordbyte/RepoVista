@@ -9,6 +9,13 @@ export const claudeProvider: ReportProvider = {
   executable: "claude",
   outputMode: "stdout",
   versionArgs: ["--version"],
+  capabilities: {
+    outputSchema: false,
+    readOnlySandbox: true,
+    workspaceWrite: true,
+    jsonEvents: false,
+    promptFile: false
+  },
   buildArgs: buildClaudeExecArgs,
   classifyError: classifyClaudeError,
   stdoutLogExtension: () => ".log"

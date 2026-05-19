@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { syncFeatureRecords } from "./feature-state.js";
 import { scanProject, type ProjectScanResult } from "./project-scan.js";
 import { validateReportRoot } from "./reports.js";
 import { buildSemanticFeatures } from "./semantic-features.js";
@@ -24,6 +25,7 @@ export async function initializeProjectMap(
   const mapPath = path.join(outRoot, "project-map.json");
   await mkdir(path.dirname(mapPath), { recursive: true });
   await writeProjectMap(mapPath, map);
+  await syncFeatureRecords(projectRoot, options.outDir, map.features, "init", now);
   return { map, mapPath };
 }
 
@@ -45,7 +47,7 @@ export async function createProjectMap(
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const languages = countLanguages(files);
   const areas = buildProjectAreas(files);
-  const features = buildSemanticFeatures(files, areas, since);
+  const features = buildSemanticFeatures(files, areas, since, packageJson);
   const recommendedParallelism = recommendParallelism(files.length, totalBytes, areas);
   const warnings: string[] = [];
   if (files.length >= MAX_PROJECT_MAP_FILES) {

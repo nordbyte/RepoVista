@@ -60,6 +60,8 @@ export function createInitialMeta(
       repairReports: Boolean(options.repairReports),
       repairAttempts: options.repairAttempts,
       deepReview: Boolean(options.deepReview),
+      reviewMode: options.reviewMode ?? "default",
+      promptFile: options.promptFile,
       exportFormats: options.exportFormats ?? []
     },
     codex: {

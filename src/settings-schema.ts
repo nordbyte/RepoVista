@@ -29,6 +29,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   { key: "repairReports", type: "boolean", help: "Repair reports that miss quality gates" },
   { key: "repairAttempts", type: "number", help: "Maximum report repair attempts" },
   { key: "deepReview", type: "boolean", help: "Run feature-sliced deep review passes" },
+  { key: "reviewMode", type: "enum", help: "Default review mode" },
+  { key: "promptFile", type: "string", help: "Default prompt guidance file" },
   { key: "exportFormats", type: "list", help: "Default finding export formats" },
   { key: "json", type: "boolean", help: "Keep JSON provider events/log metadata" },
   { key: "keepLogs", type: "boolean", help: "Keep technical provider logs" },
@@ -73,6 +75,8 @@ export function parseSettingValue(key: keyof RepoVistaSettings, rawValue: string
       return parseBoolean(rawValue, key);
     case "auditProfile":
       return parseAuditProfile(rawValue);
+    case "reviewMode":
+      return parseReviewMode(rawValue);
     case "includes":
     case "ignores":
     case "checkCommands":
@@ -86,6 +90,14 @@ export function parseSettingValue(key: keyof RepoVistaSettings, rawValue: string
     default:
       return rawValue.trim();
   }
+}
+
+function parseReviewMode(value: string): RepoVistaSettings["reviewMode"] {
+  const normalized = value.trim();
+  if (normalized === "default" || normalized === "deslopify" || normalized === "security" || normalized === "test-gaps") {
+    return normalized;
+  }
+  throw new RepoVistaError("reviewMode supports default, deslopify, security, and test-gaps.");
 }
 
 function parseAuditProfile(value: string): RepoVistaSettings["auditProfile"] {

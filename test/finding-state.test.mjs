@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   loadStoredFindings,
   runNextFindingCommand,
+  runFixFindingCommand,
   runRevalidateFindingCommand,
   runShowFindingCommand,
   runTriageFindingCommand,
@@ -42,6 +43,10 @@ test("finding lifecycle commands read, triage and revalidate persistent state", 
 
     const shown = await runShowFindingCommand({ outDir: ".repovista", findingId: "fnd_fixture" }, root);
     assert.match(shown, /History/);
+
+    const fixPreview = await runFixFindingCommand({ outDir: ".repovista", findingId: "fnd_fixture", dryRun: true }, { projectRoot: root });
+    assert.match(fixPreview, /RepoVista fix dry run/);
+    assert.match(fixPreview, /Fixture finding/);
 
     const triaged = await runTriageFindingCommand({
       outDir: ".repovista",

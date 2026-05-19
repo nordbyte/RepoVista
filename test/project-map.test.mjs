@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_OPTIONS, initializeProjectMap, loadProjectMap, renderProjectPlan } from "../dist/index.js";
+import { DEFAULT_OPTIONS, initializeProjectMap, loadFeatureRecords, loadProjectMap, renderProjectPlan } from "../dist/index.js";
 
 test("project initialization writes a map with thread recommendations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-project-map-"));
@@ -34,6 +34,11 @@ test("project initialization writes a map with thread recommendations", async ()
     assert.ok(map.recommendedShards.length >= 2);
     assert.ok(map.features.length >= 2);
     assert.ok(map.features.some((feature) => feature.kind === "cli" || feature.kind === "integration" || feature.kind === "test-suite"));
+    assert.ok(map.features.some((feature) => feature.source === "mapper"));
+    assert.ok(map.features.some((feature) => feature.validationCommands?.length));
+    const records = await loadFeatureRecords(root, ".repovista");
+    assert.equal(records.length, map.features.length);
+    assert.equal(records.every((feature) => feature.status === "pending"), true);
     assert.match(plan, /Thread assignments/);
     assert.match(plan, /Semantic features/);
     assert.ok(await readFile(mapPath, "utf8"));

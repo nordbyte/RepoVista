@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { allowedEvidencePaths, collectAuditDiffScope, createInitialMeta, reportFolderName } from "./audit-context.js";
 import { writeStructuredOutputs } from "./audit-outputs.js";
 import { applyBaselineToFindings } from "./baseline.js";
@@ -6,11 +8,12 @@ import { maybeRunDeepRiskReview } from "./deep-review.js";
 import { PreflightError } from "./errors.js";
 import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
 import { validateFindingsEvidence } from "./evidence-validation.js";
+import { assignFindingsToFeatures, syncFeatureRecords, updateFeatureRecordsFromFindings } from "./feature-state.js";
 import { extractFindings } from "./findings.js";
 import { createProjectInventory } from "./inventory.js";
 import { Logger } from "./logger.js";
 import { extractStructuredPhaseReport } from "./phase-schema.js";
-import { addPromptManifestPhase, createPromptManifest } from "./prompt-manifest.js";
+import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
 import { ANALYSIS_PHASES, type PromptContext } from "./prompts.js";
 import { canParallelizePhase, runParallelPhase, runSinglePhase } from "./phase-runner.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
@@ -43,6 +46,7 @@ import {
   writeMarkdownReport
 } from "./reports.js";
 import { resolveWorkspaceScope, workspaceIncludes } from "./workspaces.js";
+import { appendGithubStepSummary } from "./ci-summary.js";
 import type {
   AuditMeta,
   AuditOptions,
@@ -156,18 +160,21 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     for (const warning of inventory.warnings) {
       logger.warn(warning);
     }
+    const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
 
     const inventoryPath = reportPath(paths.runDir, "00-inventory.md");
     await writeMarkdownReport(inventoryPath, inventory.markdown);
     previousReports["00-inventory.md"] = inventory.markdown;
 
     const featureMap = await createProjectMap(projectRoot, options, now, diffScope, projectScan);
+    const featureStateDir = await syncFeatureRecords(projectRoot, options.outDir, featureMap.features, paths.runId, now);
     const featuresPath = reportPath(paths.runDir, "features.json");
     await writeJsonFile(featuresPath, {
       schemaVersion: 1,
       runId: paths.runId,
       since: diffScope,
-      features: featureMap.features
+      features: featureMap.features,
+      featureStateDir
     });
     const promptManifest = createPromptManifest(paths.runId, now, featureMap.features, diffScope);
 
@@ -206,7 +213,9 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         inventoryMarkdown: inventory.markdown,
         previousReports,
         since: diffScope,
-        features: featureMap.features
+        features: featureMap.features,
+        reviewMode: options.reviewMode ?? "default",
+        additionalGuidance: promptGuidance.content
       };
       const prompt = phase.buildPrompt(context);
       await addPromptManifestPhase(promptManifest, {
@@ -215,6 +224,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         prompt,
         inventoryPath,
         previousReports,
+        promptFilePath: promptGuidance.path,
         featureMapPath: featuresPath,
         projectFiles: projectScan.files,
         omittedProjectFileCount: projectScan.omittedFileCount
@@ -275,11 +285,17 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       }
     }
 
-    const extractedFindings = extractFindings(previousReports["03-risk-and-bug-report.md"] ?? "");
+    const extractedFindings = await assignFindingsToFeatures(
+      featureMap.features,
+      filterFindingsForReviewMode(
+        extractFindings(previousReports["03-risk-and-bug-report.md"] ?? ""),
+        options.reviewMode ?? "default"
+      )
+    );
     const validatedFindings = await validateFindingsEvidence(
       projectRoot,
       extractedFindings,
-      allowedEvidencePaths(featureMap.features),
+      allowedEvidencePathsFromPromptManifest(promptManifest, "risk-and-bug") ?? allowedEvidencePaths(featureMap.features),
       now
     );
     const baseline = await applyBaselineToFindings(projectRoot, options.outDir, validatedFindings, paths.runId, now);
@@ -294,7 +310,9 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     meta.suppressedFindings = suppressedFindings;
     meta.exitCode = determineExitCode(options, meta.phases, previousReports["03-risk-and-bug-report.md"], findings, evidence);
     meta.completedAt = new Date().toISOString();
+    await updateFeatureRecordsFromFindings(projectRoot, options.outDir, findings, paths.runId, now);
     await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings);
+    await appendGithubStepSummary(meta);
   } catch (error) {
     meta.exitCode = 1;
     throw error;
@@ -376,6 +394,41 @@ async function loadReusableReportsFromRun(runDir: string): Promise<Record<string
   return reports;
 }
 
+async function loadPromptGuidance(
+  promptFile: string | undefined,
+  projectRoot: string
+): Promise<{ path?: string; content?: string }> {
+  if (!promptFile) {
+    return {};
+  }
+  const filePath = path.resolve(projectRoot, promptFile);
+  try {
+    return {
+      path: filePath,
+      content: await readFile(filePath, "utf8")
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PreflightError(`Could not read --prompt-file ${promptFile}: ${message}`);
+  }
+}
+
+function filterFindingsForReviewMode(findings: StructuredFinding[], mode: NonNullable<AuditOptions["reviewMode"]>): StructuredFinding[] {
+  if (mode === "default") {
+    return findings;
+  }
+  return findings.filter((finding) => {
+    const category = `${finding.category ?? ""} ${finding.title} ${finding.problemRationale ?? ""}`.toLowerCase();
+    if (mode === "deslopify") {
+      return /maintainability|performance|duplication|complexity|dead|wrapper|simplif/.test(category);
+    }
+    if (mode === "security") {
+      return /security|auth|authorization|authentication|secret|credential|token|injection|xss|csrf|ssrf|path|command|permission|supply/.test(category);
+    }
+    return /test|coverage|regression|fixture|assert|validation/.test(category);
+  });
+}
+
 function determineExitCode(
   options: AuditOptions,
   phases: PhaseReportStatus[],
@@ -414,6 +467,8 @@ function auditCacheContext(options: AuditOptions, diffScope: DiffScope | undefin
     strictReports: Boolean(options.strictReports),
     repairReports: Boolean(options.repairReports),
     deepReview: Boolean(options.deepReview),
+    reviewMode: options.reviewMode ?? "default",
+    promptFile: options.promptFile ?? null,
     auditProfile: options.auditProfile ?? null,
     workspace: options.workspace ?? null,
     allWorkspaces: Boolean(options.allWorkspaces),

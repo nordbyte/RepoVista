@@ -164,6 +164,25 @@ test("new operational commands and options are recognized", () => {
   const compare = parseCliArgs(["compare", "old", "new", "--format", "json", "--fail-on-regression"]);
   assert.equal(compare.options.compareFormat, "json");
   assert.equal(compare.options.compareFailOnRegression, true);
+
+  const cleanLocks = parseCliArgs(["clean-locks", "--force"]);
+  assert.equal(cleanLocks.action, "clean-locks");
+  assert.equal(cleanLocks.options.force, true);
+
+  const fix = parseCliArgs(["fix", "fnd_123", "--dry-run"]);
+  assert.equal(fix.action, "fix");
+  assert.equal(fix.options.findingId, "fnd_123");
+  assert.equal(fix.options.dryRun, true);
+
+  const patches = parseCliArgs(["patches", "pat_123"]);
+  assert.equal(patches.action, "patches");
+  assert.equal(patches.options.patchId, "pat_123");
+
+  const openPr = parseCliArgs(["open-pr", "pat_123", "--branch", "repovista/fix", "--title", "Fix"]);
+  assert.equal(openPr.action, "open-pr");
+  assert.equal(openPr.options.patchId, "pat_123");
+  assert.equal(openPr.options.patchBranch, "repovista/fix");
+  assert.equal(openPr.options.patchTitle, "Fix");
 });
 
 test("audit profiles, workspaces, issue metadata, and incremental mode parse", () => {
@@ -171,6 +190,10 @@ test("audit profiles, workspaces, issue metadata, and incremental mode parse", (
     "audit",
     "--audit-profile",
     "release-readiness",
+    "--review-mode",
+    "deslopify",
+    "--prompt-file",
+    "review.md",
     "--workspace",
     "packages/api",
     "--all-workspaces",
@@ -183,6 +206,8 @@ test("audit profiles, workspaces, issue metadata, and incremental mode parse", (
   ]);
 
   assert.equal(parsed.options.auditProfile, "release-readiness");
+  assert.equal(parsed.options.reviewMode, "deslopify");
+  assert.equal(parsed.options.promptFile, "review.md");
   assert.equal(parsed.options.workspace, "packages/api");
   assert.equal(parsed.options.allWorkspaces, true);
   assert.equal(parsed.options.incremental, true);

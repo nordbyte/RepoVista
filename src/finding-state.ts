@@ -12,6 +12,7 @@ import {
   safeFindingFileName,
   writeFindingFileAtomic
 } from "./finding-store.js";
+import { revalidationJsonSchema } from "./provider-schema.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
 import type { AuditOptions, FindingStatus, StructuredFinding } from "./types.js";
@@ -255,7 +256,9 @@ export async function runProviderRevalidateFindingCommand(
       sandbox: options.sandbox,
       jsonEvents: options.json,
       keepLogs: options.keepLogs,
-      timeoutSeconds: options.phaseTimeoutSeconds ?? 1800
+      timeoutSeconds: options.phaseTimeoutSeconds ?? 1800,
+      outputSchema: revalidationJsonSchema,
+      outputSchemaKind: "revalidation"
     }, dependencies.spawnAdapter);
     const providerStatus = result.success
       ? parseProviderRevalidationStatus(await safeRead(reportPath))

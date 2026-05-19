@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { createIgnoreMatcher, normalizeRelative } from "./ignore.js";
+import { createIgnoreMatcher, normalizeRelative, readRepositoryIgnorePatterns } from "./ignore.js";
 import { languageForPath } from "./work-partitioner.js";
 import type { ProjectFileSummary } from "./types.js";
 
@@ -25,11 +25,12 @@ const MAX_HASH_BYTES = 1024 * 1024;
 
 export async function scanProject(projectRoot: string, options: ProjectScanOptions): Promise<ProjectScanResult> {
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_SCAN_FILES;
+  const repositoryIgnores = await readRepositoryIgnorePatterns(projectRoot);
   const matcher = createIgnoreMatcher({
     projectRoot,
     outDir: options.outDir,
     includePatterns: options.includes,
-    ignorePatterns: options.ignores
+    ignorePatterns: [...repositoryIgnores, ...options.ignores]
   });
   const state = {
     files: [] as ProjectFileSummary[],

@@ -1,5 +1,6 @@
 import { hasFailedChecks } from "./evidence.js";
 import { writeFindingExports } from "./exporters.js";
+import { featureStateDirectory } from "./feature-state.js";
 import { writeFindingState } from "./finding-state.js";
 import { findingCountsBySeverity } from "./findings.js";
 import { reportPath, writeJsonFile } from "./reports.js";
@@ -28,6 +29,7 @@ export async function writeStructuredOutputs(
   const promptManifestPath = reportPath(paths.runDir, "prompt-manifest.json");
   const structuredReportsPath = reportPath(paths.runDir, "structured-reports.json");
   const findingStateDir = await writeFindingState(meta.projectRoot, meta.options.outDir, findings, meta.runId);
+  const featureStateDir = await featureStateDirectory(meta.projectRoot, meta.options.outDir);
   const findingCounts = findingCountsBySeverity(findings);
   const suppressedFindingCounts = findingCountsBySeverity(suppressedFindings);
   meta.findingCounts = findingCounts;
@@ -88,6 +90,7 @@ export async function writeStructuredOutputs(
       reportJson: reportJsonPath,
       promptManifestJson: promptManifestPath,
       findingStateDir,
+      featureStateDir,
       featuresJson: featuresPath,
       structuredReportsJson: structuredReportsPath,
       ...exportOutputs
@@ -99,6 +102,7 @@ export async function writeStructuredOutputs(
     reportJson: reportJsonPath,
     promptManifestJson: promptManifestPath,
     findingStateDir,
+    featureStateDir,
     featuresJson: featuresPath,
     structuredReportsJson: structuredReportsPath,
     ...exportOutputs

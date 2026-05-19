@@ -1,7 +1,7 @@
 import { CliUsageError } from "./errors.js";
 import { BOOLEAN_OPTION_NAMES, renderCliHelp, VALUE_OPTION_NAMES } from "./cli-schema.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, FindingStatus, ParallelMode, ReportExportFormat, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, FindingStatus, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = {
   command: "audit",
@@ -23,6 +23,7 @@ export const DEFAULT_OPTIONS: AuditOptions = {
   repairReports: false,
   repairAttempts: 1,
   deepReview: false,
+  reviewMode: "default",
   exportFormats: [],
   ci: false,
   failOnCritical: false,
@@ -302,6 +303,13 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "suppress", options };
   }
 
+  if (command === "clean-locks") {
+    if (positionals.length > 1) {
+      throw new CliUsageError("Command clean-locks does not take positional arguments.");
+    }
+    return { action: "clean-locks", options };
+  }
+
   if (command === "settings") {
     const subcommand = positionals[1];
     if (!subcommand) {
@@ -366,6 +374,36 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "issue", options };
   }
 
+  if (command === "fix") {
+    if (positionals.length > 2) {
+      throw new CliUsageError("Command fix accepts at most one finding id.");
+    }
+    if (positionals[1]) {
+      options.findingId = requireNonEmpty("finding", positionals[1]);
+    }
+    return { action: "fix", options };
+  }
+
+  if (command === "patches") {
+    if (positionals.length > 2) {
+      throw new CliUsageError("Command patches accepts at most one patch id.");
+    }
+    if (positionals[1]) {
+      options.patchId = requireNonEmpty("patch", positionals[1]);
+    }
+    return { action: "patches", options };
+  }
+
+  if (command === "open-pr") {
+    if (positionals.length > 2) {
+      throw new CliUsageError("Command open-pr accepts at most one patch id.");
+    }
+    if (positionals[1]) {
+      options.patchId = requireNonEmpty("patch", positionals[1]);
+    }
+    return { action: "open-pr", options };
+  }
+
   if (positionals.length > 1) {
     throw new CliUsageError(`Too many positional arguments: ${positionals.join(" ")}`);
   }
@@ -407,6 +445,12 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
       break;
     case "audit-profile":
       options.auditProfile = validateAuditProfile(value);
+      break;
+    case "review-mode":
+      options.reviewMode = validateReviewMode(value);
+      break;
+    case "prompt-file":
+      options.promptFile = requireNonEmpty(name, value);
       break;
     case "workspace":
       options.workspace = requireNonEmpty(name, value);
@@ -471,6 +515,15 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "assignee":
       options.issueAssignees = [...(options.issueAssignees ?? []), requireNonEmpty(name, value)];
       break;
+    case "patch":
+      options.patchId = requireNonEmpty(name, value);
+      break;
+    case "branch":
+      options.patchBranch = requireNonEmpty(name, value);
+      break;
+    case "title":
+      options.patchTitle = requireNonEmpty(name, value);
+      break;
   }
 }
 
@@ -484,6 +537,7 @@ function isCommand(value: string): boolean {
     value === "ci" ||
     value === "baseline" ||
     value === "suppress" ||
+    value === "clean-locks" ||
     value === "settings" ||
     value === "findings" ||
     value === "compare" ||
@@ -491,6 +545,9 @@ function isCommand(value: string): boolean {
     value === "show" ||
     value === "triage" ||
     value === "revalidate" ||
+    value === "fix" ||
+    value === "patches" ||
+    value === "open-pr" ||
     value === "issue";
 }
 
@@ -507,6 +564,9 @@ function maxPositionalsFor(positionals: string[]): number {
   }
   if (command === "baseline" && (positionals[1] === "add" || positionals[1] === "remove")) {
     return 3;
+  }
+  if (command === "fix" || command === "patches" || command === "open-pr") {
+    return 2;
   }
   if (command === "ci") {
     return 2;
@@ -605,6 +665,13 @@ function validateAuditProfile(value: string): AuditProfileId {
     return value;
   }
   throw new CliUsageError("Option --audit-profile must be quick, security, pr-review, release-readiness, or architecture.");
+}
+
+function validateReviewMode(value: string): ReviewMode {
+  if (value === "default" || value === "deslopify" || value === "security" || value === "test-gaps") {
+    return value;
+  }
+  throw new CliUsageError("Option --review-mode must be default, deslopify, security, or test-gaps.");
 }
 
 export function validateSandbox(value: string): SandboxMode {

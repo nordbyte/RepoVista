@@ -4,6 +4,8 @@ import { type PhaseDefinition, type PromptContext } from "./prompts.js";
 import { reportPath } from "./reports.js";
 import { canReuseShardReport, safeReadReport } from "./resume-manager.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
+import { getReportProvider } from "./providers/index.js";
+import { schemaForPhase, structuredRiskPrompt } from "./provider-schema.js";
 import type {
   AuditOptions,
   ParallelExecutionMeta,
@@ -41,11 +43,12 @@ export interface ParallelPhaseInput {
 }
 
 export async function runSinglePhase(input: SinglePhaseInput): Promise<ProviderRunResult> {
+  const structured = structuredRequest(input.options, input.phase.id, input.prompt);
   return input.runPhase({
     provider: input.options.provider ?? "codex",
     phaseId: input.phase.id,
     phaseTitle: input.phase.title,
-    prompt: input.prompt,
+    prompt: structured.prompt,
     projectRoot: input.projectRoot,
     reportPath: input.phaseReportPath,
     logsDir: input.paths.logsDir,
@@ -56,7 +59,9 @@ export async function runSinglePhase(input: SinglePhaseInput): Promise<ProviderR
     sandbox: input.options.sandbox,
     jsonEvents: input.options.json,
     keepLogs: input.options.keepLogs,
-    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
+    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+    outputSchema: structured.outputSchema,
+    outputSchemaKind: structured.outputSchemaKind
   }, input.spawnAdapter);
 }
 
@@ -91,11 +96,13 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
       };
     }
 
+    const shardPrompt = buildShardPrompt(input.prompt, shard);
+    const structured = structuredRequest(input.options, input.phase.id, shardPrompt);
     const result = await input.runPhase({
       provider: input.options.provider ?? "codex",
       phaseId: `${input.phase.id}-${shard.id}`,
       phaseTitle: `${input.phase.title} (${shard.title})`,
-      prompt: buildShardPrompt(input.prompt, shard),
+      prompt: structured.prompt,
       projectRoot: input.projectRoot,
       reportPath: report,
       logsDir: input.paths.logsDir,
@@ -106,7 +113,9 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
       sandbox: input.options.sandbox,
       jsonEvents: input.options.json,
       keepLogs: input.options.keepLogs,
-      timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
+      timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+      outputSchema: structured.outputSchema,
+      outputSchemaKind: structured.outputSchemaKind
     }, input.spawnAdapter);
     if (shardStatus) {
       shardStatus.status = result.success ? "success" : "failed";
@@ -136,11 +145,12 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
   }
 
   const synthesisPrompt = buildSynthesisPrompt(input.phase, input.context, input.prompt, shardReports);
+  const structured = structuredRequest(input.options, input.phase.id, synthesisPrompt);
   return input.runPhase({
     provider: input.options.provider ?? "codex",
     phaseId: `${input.phase.id}-synthesis`,
     phaseTitle: `${input.phase.title} Synthesis`,
-    prompt: synthesisPrompt,
+    prompt: structured.prompt,
     projectRoot: input.projectRoot,
     reportPath: finalReportPath,
     logsDir: input.paths.logsDir,
@@ -151,7 +161,9 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
     sandbox: input.options.sandbox,
     jsonEvents: input.options.json,
     keepLogs: input.options.keepLogs,
-    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
+    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+    outputSchema: structured.outputSchema,
+    outputSchemaKind: structured.outputSchemaKind
   }, input.spawnAdapter);
 }
 
@@ -237,4 +249,21 @@ async function runWithConcurrency<T, R>(
 
 function shardReportPath(shardDirectory: string, shardId: string): string {
   return path.join(shardDirectory, `${shardId}.md`);
+}
+
+function structuredRequest(
+  options: AuditOptions,
+  phaseId: string,
+  prompt: string
+): { prompt: string; outputSchema?: Record<string, unknown>; outputSchemaKind?: "risk-report" } {
+  const provider = getReportProvider(options.provider ?? "codex");
+  const schema = schemaForPhase(phaseId);
+  if (!schema || !provider.capabilities.outputSchema) {
+    return { prompt };
+  }
+  return {
+    prompt: structuredRiskPrompt(prompt),
+    outputSchema: schema.schema,
+    outputSchemaKind: schema.kind
+  };
 }

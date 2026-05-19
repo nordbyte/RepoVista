@@ -10,9 +10,9 @@ import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
 import { parseSettingValue } from "./settings-schema.js";
-import type { AiProviderId, ParallelMode, SandboxMode } from "./types.js";
+import type { AiProviderId, ParallelMode, ReviewMode, SandboxMode } from "./types.js";
 
-type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
+type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
@@ -25,9 +25,9 @@ interface MenuState {
 }
 
 type MainItem =
-  | { id: "provider" | "parallel" | "auditProfile" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
   | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
-  | { id: "profile" | "workspace" | "outDir" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
+  | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
 const LANGUAGE_OPTIONS = ["English", "German", "Spanish", "French", "Italian", "Portuguese"];
@@ -35,6 +35,7 @@ const SANDBOX_OPTIONS: SandboxMode[] = ["read-only", "workspace-write"];
 const CHECK_TIMEOUT_OPTIONS = [60, 300, 600, 900, 1800, 3600];
 const PHASE_TIMEOUT_OPTIONS = [900, 1800, 3600, 5400, 7200];
 const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
+const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "test-gaps"];
 
 export async function runSettingsMenu(
   input = process.stdin as ReadStream,
@@ -129,6 +130,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Provider: ${provider.displayName}`,
     `Parallel mode: ${formatParallel(settings.parallel ?? "off")}`,
     `Audit profile: ${settings.auditProfile ?? "none"}`,
+    `Review mode: ${settings.reviewMode ?? "default"}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${settings.reasoning ?? "model default"}`,
     `Codex profile: ${settings.profile ?? "none"}`,
@@ -136,6 +138,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Sandbox: ${settings.sandbox ?? "read-only"}`,
     `Language: ${settings.language ?? "English"}`,
     `Output directory: ${settings.outDir ?? ".repovista"}`,
+    `Prompt file: ${settings.promptFile ?? "none"}`,
     `Workspace: ${settings.workspace ?? "all"}`,
     `All workspaces: ${settings.allWorkspaces ? "on" : "off"}`,
     `Incremental scan cache: ${settings.incremental ? "on" : "off"}`,
@@ -198,6 +201,7 @@ function activateCurrentItem(state: MenuState): void {
     case "provider":
     case "parallel":
     case "auditProfile":
+    case "reviewMode":
     case "model":
     case "reasoning":
     case "sandbox":
@@ -216,6 +220,7 @@ function activateCurrentItem(state: MenuState): void {
     case "failOnCritical":
     case "strictReports":
     case "repairReports":
+    case "deepReview":
     case "allWorkspaces":
     case "incremental":
       toggleBoolean(state, item.id);
@@ -223,6 +228,7 @@ function activateCurrentItem(state: MenuState): void {
     case "profile":
     case "workspace":
     case "outDir":
+    case "promptFile":
     case "includes":
     case "ignores":
     case "checkCommands":
@@ -271,6 +277,12 @@ function toggleCurrentSelection(state: MenuState): void {
   if (state.screen === "auditProfile") {
     const selected = AUDIT_PROFILES[state.cursor]?.id;
     state.settings.auditProfile = state.settings.auditProfile === selected ? undefined : selected;
+    return;
+  }
+
+  if (state.screen === "reviewMode") {
+    const selected = REVIEW_MODE_OPTIONS[state.cursor];
+    state.settings.reviewMode = state.settings.reviewMode === selected ? undefined : selected;
     return;
   }
 
@@ -357,6 +369,8 @@ function currentItems(state: MenuState): string[] {
       return PARALLEL_OPTIONS.map((parallel) => checkbox(parallel === (state.settings.parallel ?? "off"), formatParallel(parallel)));
     case "auditProfile":
       return AUDIT_PROFILES.map((profile) => checkbox(profile.id === state.settings.auditProfile, `${profile.id} - ${profile.description}`));
+    case "reviewMode":
+      return REVIEW_MODE_OPTIONS.map((mode) => checkbox(mode === (state.settings.reviewMode ?? "default"), mode));
     case "model":
       return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
@@ -394,7 +408,7 @@ async function editTextSetting(
   const answer = await promptForText(input, output, `${label}${current ? ` [${current}]` : ""}`);
   const trimmed = answer.trim();
 
-  if (id === "profile" || id === "outDir" || id === "workspace") {
+  if (id === "profile" || id === "outDir" || id === "workspace" || id === "promptFile") {
     state.settings[id] = trimmed || undefined;
     return;
   }
@@ -429,7 +443,7 @@ function promptForText(input: ReadStream, output: WriteStream, label: string): P
 }
 
 function textValueForSetting(settings: RepoVistaSettings, id: Extract<MainItem, { type: "text" }>["id"]): string {
-  if (id === "profile" || id === "outDir" || id === "workspace") {
+  if (id === "profile" || id === "outDir" || id === "workspace" || id === "promptFile") {
     return settings[id] ?? "";
   }
   if (id === "includes") {
@@ -452,6 +466,8 @@ function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
       return "Workspace name or path, empty audits all";
     case "outDir":
       return "Output directory, empty clears";
+    case "promptFile":
+      return "Prompt guidance file, empty clears";
     case "includes":
       return "Include patterns, comma-separated, empty clears";
     case "ignores":
@@ -502,6 +518,7 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
   { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(settings.parallel ?? "off")}` },
   { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${settings.auditProfile ?? "none"}` },
+  { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${settings.reviewMode ?? "default"}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${settings.reasoning ?? "model default"}` },
   { id: "profile", type: "text", label: (settings) => `Codex profile: ${settings.profile ?? "none"}` },
@@ -509,6 +526,7 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "sandbox", type: "submenu", label: (settings) => `Sandbox: ${settings.sandbox ?? "read-only"}` },
   { id: "language", type: "submenu", label: (settings) => `Language: ${settings.language ?? "English"}` },
   { id: "outDir", type: "text", label: (settings) => `Output directory: ${settings.outDir ?? ".repovista"}` },
+  { id: "promptFile", type: "text", label: (settings) => `Prompt file: ${settings.promptFile ?? "none"}` },
   { id: "workspace", type: "text", label: (settings) => `Workspace: ${settings.workspace ?? "all"}` },
   { id: "allWorkspaces", type: "toggle", label: (settings) => checkbox(Boolean(settings.allWorkspaces), "Record all detected workspaces") },
   { id: "incremental", type: "toggle", label: (settings) => checkbox(Boolean(settings.incremental), "Incremental scan cache") },

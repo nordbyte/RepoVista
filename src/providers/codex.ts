@@ -7,6 +7,13 @@ export const codexProvider: ReportProvider = {
   executable: "codex",
   outputMode: "report-file",
   versionArgs: ["--version"],
+  capabilities: {
+    outputSchema: true,
+    readOnlySandbox: true,
+    workspaceWrite: true,
+    jsonEvents: true,
+    promptFile: false
+  },
   buildArgs: buildCodexExecArgs,
   classifyError: classifyCodexError,
   stdoutLogExtension: (request) => request.jsonEvents ? ".jsonl" : ".log"
@@ -25,8 +32,12 @@ export function buildCodexExecArgs(request: ProviderRunRequest): string[] {
     "--color",
     "never",
     "--output-last-message",
-    request.reportPath
+    request.structuredOutputPath ?? request.reportPath
   ];
+
+  if (request.outputSchemaPath) {
+    args.push("--output-schema", request.outputSchemaPath);
+  }
 
   if (request.model) {
     args.push("--model", request.model);

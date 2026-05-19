@@ -6,6 +6,7 @@ export type ParallelMode = "off" | "auto" | number;
 export type ReportExportFormat = "sarif" | "html" | "jsonl" | "github";
 export type CompareFormat = "markdown" | "json" | "html";
 export type AuditProfileId = "quick" | "security" | "pr-review" | "release-readiness" | "architecture";
+export type ReviewMode = "default" | "deslopify" | "security" | "test-gaps";
 
 export type CliAction =
   | "audit"
@@ -21,6 +22,10 @@ export type CliAction =
   | "providers"
   | "baseline"
   | "suppress"
+  | "clean-locks"
+  | "fix"
+  | "patches"
+  | "open-pr"
   | "ci-init"
   | "profiles"
   | "next"
@@ -61,6 +66,8 @@ export interface AuditOptions {
   repairAttempts: number;
   deepReview: boolean;
   deepReviewExplicit?: boolean;
+  reviewMode?: ReviewMode;
+  promptFile?: string;
   exportFormats: ReportExportFormat[];
   ci: boolean;
   failOnCritical: boolean;
@@ -90,6 +97,9 @@ export interface AuditOptions {
   issueLabels?: string[];
   issueAssignees?: string[];
   issueUpdateExisting?: boolean;
+  patchId?: string;
+  patchBranch?: string;
+  patchTitle?: string;
   settingsKey?: string;
   settingsValue?: string;
 }
@@ -207,6 +217,7 @@ export interface StructuredFinding {
   parentTitle?: string;
   childFindings?: StructuredFinding[];
   findingType?: "theme" | "atomic";
+  featureId?: string;
   firstSeenRunId?: string;
   lastSeenRunId?: string;
   createdAt?: string;
@@ -262,6 +273,8 @@ export interface FindingEvidenceValidationReference {
   insideRoot: boolean;
   lineRangeValid?: boolean;
   quoteMatches?: boolean;
+  source?: "prompt-context" | "evidence-pack" | "provider-discovered";
+  promptIncluded?: boolean;
   warning?: string;
 }
 
@@ -306,6 +319,8 @@ export interface AuditMeta {
     repairReports: boolean;
     repairAttempts?: number;
     deepReview?: boolean;
+    reviewMode?: ReviewMode;
+    promptFile?: string;
     exportFormats: ReportExportFormat[];
     ci: boolean;
     failOnCritical: boolean;
@@ -361,6 +376,7 @@ export interface AuditMeta {
     reportJson?: string;
     promptManifestJson?: string;
     findingStateDir?: string;
+    featureStateDir?: string;
     featuresJson?: string;
     findingsSarif?: string;
     findingsJsonl?: string;
@@ -427,6 +443,8 @@ export interface WorkShard {
   estimatedFiles: number;
   estimatedBytes: number;
   focus: string;
+  featureIds?: string[];
+  validationCommands?: string[];
 }
 
 export interface SemanticFeature {
@@ -437,10 +455,43 @@ export interface SemanticFeature {
   ownedFiles: string[];
   contextFiles: string[];
   tests: string[];
+  entrypoints?: string[];
+  validationCommands?: string[];
   tags: string[];
   trustBoundaries: string[];
-  source: "project-map" | "diff";
+  source: "project-map" | "diff" | "mapper";
   confidence: "high" | "medium" | "low";
+}
+
+export type FeatureStatus = "pending" | "claimed" | "reviewed" | "needs-fix" | "fixed" | "skipped" | "error" | "revalidated";
+
+export interface FeatureLock {
+  runId: string;
+  command: string;
+  pid: number;
+  createdAt: string;
+}
+
+export interface FeatureHistoryEntry {
+  runId?: string;
+  kind: "map" | "claim" | "review" | "audit" | "fix" | "revalidate" | "error";
+  status?: FeatureStatus;
+  note?: string;
+  findingIds?: string[];
+  createdAt: string;
+}
+
+export interface FeatureRecord extends SemanticFeature {
+  schemaVersion: 1;
+  featureId: string;
+  status: FeatureStatus;
+  signature: string;
+  findingIds: string[];
+  patchAttemptIds: string[];
+  lock: FeatureLock | null;
+  analysisHistory: FeatureHistoryEntry[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DiffScope {
@@ -457,7 +508,7 @@ export interface DiffFileStatus {
 
 export interface PromptManifestFile {
   path: string;
-  role: "inventory" | "previous-report" | "project-file" | "feature-map";
+  role: "inventory" | "previous-report" | "project-file" | "feature-map" | "prompt-file";
   bytes: number;
   includedBytes: number;
   truncated: boolean;
@@ -532,6 +583,10 @@ export interface ProviderRunRequest {
   jsonEvents: boolean;
   keepLogs: boolean;
   timeoutSeconds: number;
+  outputSchema?: Record<string, unknown>;
+  outputSchemaKind?: "risk-report" | "fix-plan" | "revalidation";
+  outputSchemaPath?: string;
+  structuredOutputPath?: string;
 }
 
 export interface ProviderRunResult {
@@ -543,6 +598,43 @@ export interface ProviderRunResult {
   error?: string;
   stdoutLogPath?: string;
   stderrLogPath?: string;
+  structuredOutputPath?: string;
+}
+
+export interface ProviderCapabilities {
+  outputSchema: boolean;
+  readOnlySandbox: boolean;
+  workspaceWrite: boolean;
+  jsonEvents: boolean;
+  promptFile: boolean;
+}
+
+export type PatchAttemptStatus = "planned" | "applied" | "failed" | "validated" | "pr-opened";
+
+export interface PatchAttempt {
+  schemaVersion: 1;
+  patchAttemptId: string;
+  findingIds: string[];
+  featureIds: string[];
+  status: PatchAttemptStatus;
+  plan: string;
+  filesChanged: string[];
+  commandsRun: EvidenceCommandResult[];
+  provider?: {
+    id: AiProviderId;
+    model?: string;
+    reasoning?: string;
+    reportPath?: string;
+  };
+  git: {
+    baseSha?: string;
+    branchName?: string;
+    commitSha?: string;
+    prUrl?: string;
+  };
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type CodexRunRequest = Omit<ProviderRunRequest, "provider"> & {

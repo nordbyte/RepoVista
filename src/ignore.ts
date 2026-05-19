@@ -1,10 +1,12 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 
 const DEFAULT_IGNORED_DIRECTORIES = new Set([
   ".git",
   ".hg",
   ".svn",
   ".repovista",
+  ".nordrelay",
   ".codex",
   ".agents",
   "node_modules",
@@ -127,13 +129,48 @@ export function createIgnoreMatcher(options: IgnoreMatcherOptions): IgnoreMatche
   };
 }
 
+export async function readRepositoryIgnorePatterns(projectRoot: string): Promise<string[]> {
+  const files = [".gitignore", ".repovistaignore"];
+  const patterns: string[] = [];
+  for (const fileName of files) {
+    const filePath = path.join(projectRoot, fileName);
+    try {
+      const content = await readFile(filePath, "utf8");
+      patterns.push(...parseIgnoreFile(content));
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+      if (code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+  return patterns;
+}
+
+function parseIgnoreFile(content: string): string[] {
+  const patterns: string[] = [];
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith("!")) {
+      continue;
+    }
+    patterns.push(normalizeIgnorePattern(line));
+  }
+  return patterns.filter(Boolean);
+}
+
+function normalizeIgnorePattern(pattern: string): string {
+  const withoutRoot = pattern.replace(/^\//, "");
+  return withoutRoot.replace(/\/+$/g, "");
+}
+
 export function normalizeRelative(relativePath: string): string {
   return relativePath.split(path.sep).join("/").replace(/^\.\//, "");
 }
 
 export function matchesPattern(relativePath: string, pattern: string): boolean {
   const normalizedPath = normalizeRelative(relativePath);
-  const normalizedPattern = normalizeRelative(pattern);
+  const normalizedPattern = normalizeRelative(pattern).replace(/\/+$/g, "");
 
   if (!normalizedPattern) {
     return false;

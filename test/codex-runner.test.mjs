@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildClaudeExecArgs, buildCodexExecArgs, runCodexPhase, runProviderPhase } from "../dist/index.js";
+import { buildClaudeExecArgs, buildCodexExecArgs, riskReportJsonSchema, runCodexPhase, runProviderPhase } from "../dist/index.js";
 
 class FakeChild extends EventEmitter {
   stdin = new PassThrough();
@@ -145,6 +145,80 @@ test("provider runner writes claude stdout as the final report", async () => {
 
     assert.equal(result.success, true);
     assert.equal(await readFile(reportPath, "utf8"), "# Claude Report\n\nOK\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("codex provider-native schema output is rendered into markdown", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-schema-"));
+  try {
+    const reportPath = path.join(root, "risk.md");
+    const child = new FakeChild();
+    const spawnAdapter = (_command, args, options) => {
+      assert.equal(options.cwd, root);
+      assert.ok(args.includes("--output-schema"));
+      const outputPath = args[args.indexOf("--output-last-message") + 1];
+      setImmediate(async () => {
+        await writeFile(outputPath, JSON.stringify({
+          schemaVersion: 1,
+          phaseId: "risk-and-bug",
+          executiveSummary: "One issue.",
+          severitySummary: {
+            critical: "No critical findings.",
+            high: "One high finding.",
+            medium: "No medium findings.",
+            low: "No low findings."
+          },
+          findings: [
+            {
+              title: "Missing guard",
+              severity: "high",
+              category: "reliability",
+              status: "open",
+              signature: "high|reliability|src/index.ts|guard",
+              affectedPaths: ["src/index.ts"],
+              evidence: "src/index.ts lacks a guard",
+              evidenceReferences: [{ path: "src/index.ts", startLine: 1, endLine: 1, quote: "export", symbol: null }],
+              problemRationale: "The guard is missing.",
+              recommendedFix: "Add the guard.",
+              reproduction: "Inspect src/index.ts.",
+              suggestedRegressionTest: "Add a guard test.",
+              minimumFixScope: "src/index.ts",
+              estimatedEffort: "small",
+              confidence: "high"
+            }
+          ],
+          recommendations: ["Add the guard."],
+          inspected: { files: ["src/index.ts"], symbols: [], notes: [] }
+        }), "utf8");
+        child.emit("close", 0);
+      });
+      return child;
+    };
+
+    const result = await runProviderPhase({
+      provider: "codex",
+      phaseId: "risk-and-bug",
+      phaseTitle: "Risk",
+      prompt: "return json",
+      projectRoot: root,
+      reportPath,
+      sandbox: "read-only",
+      jsonEvents: false,
+      keepLogs: false,
+      fastMode: false,
+      timeoutSeconds: 60,
+      outputSchema: riskReportJsonSchema,
+      outputSchemaKind: "risk-report"
+    }, spawnAdapter);
+
+    const report = await readFile(reportPath, "utf8");
+    assert.equal(result.success, true);
+    assert.match(report, /Risk and Bug Analysis/);
+    assert.match(report, /Missing guard/);
+    assert.match(report, /repovista-findings:start/);
+    assert.ok(result.structuredOutputPath.endsWith(".structured.json"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

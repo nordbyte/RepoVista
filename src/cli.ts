@@ -18,9 +18,11 @@ import {
   runTriageFindingCommand
 } from "./finding-state.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
+import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
 import { runProfilesCommand } from "./profiles.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
+import { runCleanLocksCommand } from "./feature-state.js";
 import { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
 import { applySettingsToDefaults, loadSettings } from "./settings-config.js";
@@ -102,6 +104,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runBaselineCommand(optionsWithSettings.options));
       return 0;
     }
+    if (optionsWithSettings.action === "clean-locks") {
+      process.stdout.write(await runCleanLocksCommand(optionsWithSettings.options));
+      return 0;
+    }
     if (optionsWithSettings.action === "next") {
       process.stdout.write(await runNextFindingCommand(optionsWithSettings.options));
       return 0;
@@ -126,6 +132,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "issue") {
       process.stdout.write(await runCreateIssueCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "fix") {
+      process.stdout.write(await runFixFindingCommand(optionsWithSettings.options, { projectRoot: process.cwd() }));
+      return 0;
+    }
+    if (optionsWithSettings.action === "patches") {
+      process.stdout.write(await runPatchesCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "open-pr") {
+      process.stdout.write(await runOpenPrCommand(optionsWithSettings.options));
       return 0;
     }
     const result = await runAudit(optionsWithSettings.options, { version });

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { maskSensitiveText } from "../secrets.js";
-import type { ProviderRunRequest } from "../types.js";
+import type { ProviderCapabilities, ProviderRunRequest } from "../types.js";
 import type { ProviderOutputMode, ReportProvider } from "./types.js";
 
 interface ProviderPluginDefinition {
@@ -12,6 +12,7 @@ interface ProviderPluginDefinition {
   versionArgs?: string[];
   args: string[];
   stdoutLogExtension?: string;
+  capabilities?: Partial<ProviderCapabilities>;
 }
 
 export interface ProviderPluginDiagnostic {
@@ -130,6 +131,13 @@ function loadPluginDefinition(
     executable: definition.executable,
     outputMode: definition.outputMode ?? "stdout",
     versionArgs: definition.versionArgs ?? ["--version"],
+    capabilities: {
+      outputSchema: Boolean(definition.capabilities?.outputSchema),
+      readOnlySandbox: definition.capabilities?.readOnlySandbox ?? true,
+      workspaceWrite: Boolean(definition.capabilities?.workspaceWrite),
+      jsonEvents: Boolean(definition.capabilities?.jsonEvents),
+      promptFile: Boolean(definition.capabilities?.promptFile)
+    },
     buildArgs: (request) => buildPluginArgs(definition, request),
     classifyError: (_stderrText, code) => `${definition.displayName ?? definition.id} run exited with code ${code ?? "unknown"}.`,
     stdoutLogExtension: () => definition.stdoutLogExtension ?? ".log"

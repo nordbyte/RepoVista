@@ -37,7 +37,8 @@ export async function runProvidersCommand(options: AuditOptions, projectRoot = p
       id: provider.id,
       displayName: provider.displayName,
       executable: provider.executable,
-      outputMode: provider.outputMode
+      outputMode: provider.outputMode,
+      capabilities: provider.capabilities
     })),
     pluginDiagnostics: getPluginProviderDiagnostics()
   };
@@ -47,7 +48,7 @@ export async function runProvidersCommand(options: AuditOptions, projectRoot = p
   }
 
   const providerLines = payload.providers.map((provider) =>
-    `- ${provider.id}: ${provider.displayName} (${provider.executable}, ${provider.outputMode})`
+    `- ${provider.id}: ${provider.displayName} (${provider.executable}, ${provider.outputMode}; capabilities: ${renderCapabilities(provider.capabilities)})`
   );
   const diagnosticLines = payload.pluginDiagnostics.length
     ? payload.pluginDiagnostics.map((diagnostic) => [
@@ -57,4 +58,11 @@ export async function runProvidersCommand(options: AuditOptions, projectRoot = p
     : ["- none"];
 
   return `RepoVista providers:\n${providerLines.join("\n")}\n\nPlugin diagnostics:\n${diagnosticLines.join("\n")}\n`;
+}
+
+function renderCapabilities(capabilities: (typeof REPORT_PROVIDERS)[number]["capabilities"]): string {
+  return Object.entries(capabilities)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name)
+    .join(", ") || "basic";
 }

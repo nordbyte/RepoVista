@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { extractFindings, mergeFindings } from "./findings.js";
+import { claimFeature, releaseFeature } from "./feature-state.js";
 import { type PhaseDefinition, type PromptContext } from "./prompts.js";
 import { reportPath } from "./reports.js";
 import { safeReadReport } from "./resume-manager.js";
@@ -55,6 +56,27 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
   const shardResults = await runWithConcurrency(shards, concurrency, async (shard) => {
     const report = shardReportPath(deepDir, shard.id);
     const shardStatus = input.status.deepReviewShards?.find((item) => item.id === shard.id);
+    const claimed = await claimShardFeatures(input, shard).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (shardStatus) {
+        shardStatus.status = "failed";
+        shardStatus.error = message;
+      }
+      return { claimed: [] as string[], error: message };
+    });
+    if ("error" in claimed) {
+      return {
+        shard,
+        result: {
+          phaseId: `${input.phase.id}-deep-${shard.id}`,
+          success: false,
+          reportPath: report,
+          durationMs: 0,
+          exitCode: 1,
+          error: claimed.error
+        } satisfies ProviderRunResult
+      };
+    }
     const result = await input.runPhase({
       provider: input.options.provider ?? "codex",
       phaseId: `${input.phase.id}-deep-${shard.id}`,
@@ -72,6 +94,16 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
       keepLogs: input.options.keepLogs,
       timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
     }, input.spawnAdapter);
+    await Promise.all(claimed.claimed.map((featureId) =>
+      releaseFeature(
+        input.projectRoot,
+        input.options.outDir,
+        featureId,
+        result.success ? "reviewed" : "error",
+        result.error,
+        new Date()
+      )
+    ));
     if (shardStatus) {
       shardStatus.status = result.success ? "success" : "failed";
       shardStatus.durationMs = result.durationMs;
@@ -109,6 +141,24 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
 }
 
 function deepReviewShards(projectMap: ProjectMap): WorkShard[] {
+  const featureShards = projectMap.features
+    .filter((feature) => feature.ownedFiles.length && !["documentation", "package-script"].includes(feature.kind))
+    .slice(0, 5)
+    .map((feature, index) => ({
+      id: `feature-${index + 1}`,
+      title: feature.title,
+      description: `${feature.kind} feature`,
+      paths: feature.paths,
+      primaryLanguages: feature.tags.filter((tag) => /^[a-z+#.]+$/i.test(tag)).slice(0, 5),
+      estimatedFiles: feature.ownedFiles.length,
+      estimatedBytes: 0,
+      focus: `${feature.kind} feature from ${feature.source}; owned files: ${feature.ownedFiles.slice(0, 12).join(", ") || "n/a"}`,
+      featureIds: [feature.id],
+      validationCommands: feature.validationCommands
+    }));
+  if (featureShards.length) {
+    return featureShards;
+  }
   const recommended = projectMap.recommendedShards.length
     ? projectMap.recommendedShards
     : [];
@@ -128,6 +178,26 @@ function deepReviewShards(projectMap: ProjectMap): WorkShard[] {
       estimatedBytes: area.bytes,
       focus: area.description
     }));
+}
+
+async function claimShardFeatures(input: DeepRiskReviewInput, shard: WorkShard): Promise<{ claimed: string[] }> {
+  const featureIds = shard.featureIds ?? [];
+  const claimed: string[] = [];
+  try {
+    for (const featureId of featureIds) {
+      await claimFeature(input.projectRoot, input.options.outDir, featureId, {
+        runId: input.paths.runId,
+        command: `deep-review:${input.phase.id}:${shard.id}`,
+        pid: process.pid,
+        createdAt: new Date().toISOString()
+      }, { allowNonPending: true });
+      claimed.push(featureId);
+    }
+    return { claimed };
+  } catch (error) {
+    await Promise.all(claimed.map((featureId) => releaseFeature(input.projectRoot, input.options.outDir, featureId)));
+    throw error;
+  }
 }
 
 function buildDeepReviewPrompt(basePrompt: string, context: PromptContext, shard: WorkShard): string {

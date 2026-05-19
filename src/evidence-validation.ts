@@ -86,6 +86,8 @@ async function validateReference(
       path: reference.path,
       exists: false,
       insideRoot: false,
+      source: "provider-discovered",
+      promptIncluded: false,
       warning: `Evidence path is not a safe relative project path: ${reference.path}`
     };
   }
@@ -95,6 +97,8 @@ async function validateReference(
       path: normalizedPath,
       exists: false,
       insideRoot: false,
+      source: "provider-discovered",
+      promptIncluded: false,
       warning: `Evidence path was not part of the provider context manifest: ${normalizedPath}`
     };
   }
@@ -106,6 +110,8 @@ async function validateReference(
       path: normalizedPath,
       exists: false,
       insideRoot: false,
+      source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
+      promptIncluded: allowedPaths?.size ? true : undefined,
       warning: `Evidence path resolves outside the project root: ${normalizedPath}`
     };
   }
@@ -117,6 +123,8 @@ async function validateReference(
         path: normalizedPath,
         exists: true,
         insideRoot: true,
+        source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
+        promptIncluded: allowedPaths?.size ? true : undefined,
         warning: `Evidence path is not a file: ${normalizedPath}`
       };
     }
@@ -125,6 +133,8 @@ async function validateReference(
       path: normalizedPath,
       exists: false,
       insideRoot: true,
+      source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
+      promptIncluded: allowedPaths?.size ? true : undefined,
       warning: `Evidence path does not exist: ${normalizedPath}`
     };
   }
@@ -134,6 +144,8 @@ async function validateReference(
     path: normalizedPath,
     exists: true,
     insideRoot: true,
+    source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
+    promptIncluded: allowedPaths?.size ? true : undefined,
     ...lineCheck
   };
 }

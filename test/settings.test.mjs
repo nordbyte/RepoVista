@@ -32,6 +32,8 @@ test("settings sanitize persisted defaults", () => {
     repairReports: true,
     repairAttempts: 2,
     deepReview: true,
+    reviewMode: "deslopify",
+    promptFile: " review.md ",
     exportFormats: ["sarif", "invalid", "html"],
     json: true,
     keepLogs: true,
@@ -61,6 +63,8 @@ test("settings sanitize persisted defaults", () => {
     repairReports: true,
     repairAttempts: 2,
     deepReview: true,
+    reviewMode: "deslopify",
+    promptFile: "review.md",
     exportFormats: ["sarif", "html"],
     json: true,
     keepLogs: true,
@@ -86,6 +90,8 @@ test("settings apply to audit defaults while preserving include and ignore array
     strictReports: true,
     repairReports: true,
     deepReview: true,
+    reviewMode: "security",
+    promptFile: "review.md",
     exportFormats: ["sarif"]
   });
 
@@ -103,6 +109,8 @@ test("settings apply to audit defaults while preserving include and ignore array
   assert.equal(options.strictReports, true);
   assert.equal(options.repairReports, true);
   assert.equal(options.deepReview, true);
+  assert.equal(options.reviewMode, "security");
+  assert.equal(options.promptFile, "review.md");
   assert.deepEqual(options.exportFormats, ["sarif"]);
 });
 

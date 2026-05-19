@@ -1,10 +1,12 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
 import type { WriteStream } from "node:fs";
 import { getReportProvider } from "./providers/index.js";
+import { renderStructuredProviderOutput } from "./provider-schema.js";
 import { createSensitiveTextMasker, maskSensitiveText } from "./secrets.js";
 import type { ProviderRunRequest, ProviderRunResult } from "./types.js";
 
@@ -22,7 +24,11 @@ export async function runProviderPhase(
 ): Promise<ProviderRunResult> {
   const startedAt = Date.now();
   const provider = getReportProvider(request.provider);
-  const args = provider.buildArgs(request);
+  const structured = await prepareStructuredOutput(request, provider.capabilities.outputSchema);
+  const providerRequest = structured
+    ? { ...request, outputSchemaPath: structured.schemaPath, structuredOutputPath: structured.outputPath }
+    : request;
+  const args = provider.buildArgs(providerRequest);
   const shouldStoreLogs = request.keepLogs || request.jsonEvents;
   const stdoutLogPath = shouldStoreLogs && request.logsDir
     ? path.join(request.logsDir, `${request.phaseId}.stdout${provider.stdoutLogExtension(request)}`)
@@ -72,13 +78,17 @@ export async function runProviderPhase(
         closeLog(stderrLog)
       ]);
       resolve({
-        phaseId: request.phaseId,
-        reportPath: request.reportPath,
+        phaseId: providerRequest.phaseId,
+        reportPath: providerRequest.reportPath,
         durationMs: Date.now() - startedAt,
         stdoutLogPath,
         stderrLogPath,
+        structuredOutputPath: structured?.outputPath,
         ...result
       });
+      if (structured?.tempDir) {
+        await rm(structured.tempDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     };
 
     const terminateChild = (reason: "timeout" | "interrupt") => {
@@ -109,7 +119,7 @@ export async function runProviderPhase(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      void writeProviderFailureReport(request, `Could not start ${provider.displayName}: ${message}`, undefined, undefined)
+      void writeProviderFailureReport(providerRequest, `Could not start ${provider.displayName}: ${message}`, undefined, undefined)
         .then(() => finish({ success: false, error: maskSensitiveText(message) }))
         .catch(() => finish({ success: false, error: maskSensitiveText(message) }));
       return;
@@ -139,7 +149,7 @@ export async function runProviderPhase(
 
     child.on("error", (error) => {
       const message = error.message;
-      void writeProviderFailureReport(request, `Could not start ${provider.displayName}: ${message}`, stdoutText, stderrText)
+      void writeProviderFailureReport(providerRequest, `Could not start ${provider.displayName}: ${message}`, stdoutText, stderrText)
         .then(() => finish({ success: false, error: maskSensitiveText(message) }))
         .catch(() => finish({ success: false, error: maskSensitiveText(message) }));
     });
@@ -152,16 +162,16 @@ export async function runProviderPhase(
 
         if (timedOut || interrupted) {
           const message = timedOut
-            ? `${provider.displayName} run timed out after ${request.timeoutSeconds} seconds.`
+            ? `${provider.displayName} run timed out after ${providerRequest.timeoutSeconds} seconds.`
             : `${provider.displayName} run was interrupted and cancelled.`;
-          await writeProviderFailureReport(request, message, stdoutText, stderrText);
+          await writeProviderFailureReport(providerRequest, message, stdoutText, stderrText);
           await finish({ success: false, exitCode: code, error: signal ? `${message} Signal: ${signal}.` : message });
           return;
         }
 
         if (code !== 0) {
           const message = provider.classifyError(stderrText, code);
-          await writeProviderFailureReport(request, message, stdoutText, stderrText);
+          await writeProviderFailureReport(providerRequest, message, stdoutText, stderrText);
           await finish({ success: false, exitCode: code, error: maskSensitiveText(message) });
           return;
         }
@@ -169,14 +179,25 @@ export async function runProviderPhase(
         if (provider.outputMode === "stdout") {
           const report = stdoutOutput.trim();
           if (report) {
-            await writeFile(request.reportPath, `${report}\n`, "utf8");
+            await writeFile(structured?.outputPath ?? providerRequest.reportPath, `${report}\n`, "utf8");
           }
         }
 
-        const hasReport = await hasUsableReport(request.reportPath);
+        if (structured) {
+          const rendered = await renderStructuredReport(structured.kind, structured.outputPath);
+          if (!rendered.ok) {
+            const message = `${provider.displayName} run succeeded but produced malformed structured output: ${rendered.error}`;
+            await writeProviderFailureReport(providerRequest, message, stdoutText, stderrText);
+            await finish({ success: false, exitCode: code, error: maskSensitiveText(message) });
+            return;
+          }
+          await writeFile(providerRequest.reportPath, rendered.markdown, "utf8");
+        }
+
+        const hasReport = await hasUsableReport(providerRequest.reportPath);
         if (!hasReport) {
           const message = `${provider.displayName} run succeeded but did not produce a usable final answer.`;
-          await writeProviderFailureReport(request, message, stdoutText, stderrText);
+          await writeProviderFailureReport(providerRequest, message, stdoutText, stderrText);
           await finish({ success: false, exitCode: code, error: message });
           return;
         }
@@ -185,7 +206,7 @@ export async function runProviderPhase(
       })().catch(async (error) => {
         const message = maskSensitiveText(error instanceof Error ? error.message : String(error));
         try {
-          await writeProviderFailureReport(request, message, stdoutText, stderrText);
+          await writeProviderFailureReport(providerRequest, message, stdoutText, stderrText);
         } catch {
           // The run still has to settle even if the failure report cannot be written.
         }
@@ -193,9 +214,39 @@ export async function runProviderPhase(
       });
     });
 
-    child.stdin.write(request.prompt);
+    child.stdin.write(providerRequest.prompt);
     child.stdin.end();
   });
+}
+
+async function prepareStructuredOutput(
+  request: ProviderRunRequest,
+  providerSupportsSchema: boolean
+): Promise<{ tempDir: string; schemaPath: string; outputPath: string; kind: NonNullable<ProviderRunRequest["outputSchemaKind"]> } | undefined> {
+  if (!request.outputSchema || !request.outputSchemaKind || !providerSupportsSchema) {
+    return undefined;
+  }
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repovista-schema-"));
+  const schemaPath = path.join(tempDir, "schema.json");
+  const outputPath = path.join(
+    path.dirname(request.reportPath),
+    `${path.basename(request.reportPath, path.extname(request.reportPath))}.structured.json`
+  );
+  await writeFile(schemaPath, JSON.stringify(request.outputSchema), "utf8");
+  return { tempDir, schemaPath, outputPath, kind: request.outputSchemaKind };
+}
+
+async function renderStructuredReport(
+  kind: NonNullable<ProviderRunRequest["outputSchemaKind"]>,
+  outputPath: string
+): Promise<{ ok: true; markdown: string } | { ok: false; error: string }> {
+  try {
+    const raw = await readFile(outputPath, "utf8");
+    const markdown = renderStructuredProviderOutput(kind, raw);
+    return { ok: true, markdown };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function writeMasked(stream: WriteStream | undefined, value: string): void {

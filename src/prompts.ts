@@ -22,6 +22,8 @@ export interface PromptContext {
     tests: string[];
     trustBoundaries: string[];
   }>;
+  reviewMode?: "default" | "deslopify" | "security" | "test-gaps";
+  additionalGuidance?: string;
 }
 
 export interface PhaseDefinition {
@@ -94,6 +96,8 @@ ${clip(context.inventoryMarkdown)}
 ${renderDiffScope(context)}
 
 ${renderFeatureMap(context)}
+
+${renderAdditionalGuidance(context)}
 `;
 }
 
@@ -188,6 +192,8 @@ Analyze:
 - Logging of sensitive data.
 - Missing tests for critical paths.
 - Incorrect assumptions in business logic.
+
+${reviewModeInstructions(context.reviewMode ?? "default")}
 
 The report must contain these sections:
 1. Executive Summary
@@ -436,6 +442,37 @@ function renderFeatureMap(context: PromptContext): string {
 
 ${featureLines.join("\n")}
 `;
+}
+
+function renderAdditionalGuidance(context: PromptContext): string {
+  if (!context.additionalGuidance?.trim()) {
+    return "";
+  }
+  return `Additional reviewer guidance from --prompt-file:
+
+${clip(context.additionalGuidance.trim())}
+`;
+}
+
+function reviewModeInstructions(mode: NonNullable<PromptContext["reviewMode"]>): string {
+  if (mode === "default") {
+    return "";
+  }
+  if (mode === "deslopify") {
+    return `Review mode: deslopify.
+- Report only simplification findings in maintainability or performance.
+- Focus on locally provable accidental complexity, duplicated behavior, dead compatibility paths, wrapper layers, generated-looking boilerplate, broad defensive code without a real trust boundary, and tests that preserve implementation details.
+- Prefer deletion, consolidation, or reuse of existing local patterns over new abstractions.
+- Do not report style taste, broad architecture opinions, or correctness/security issues unless the root cause is accidental complexity and the minimum fix is simplification.`;
+  }
+  if (mode === "security") {
+    return `Review mode: security.
+- Prioritize authentication, authorization, secrets, unsafe file/path handling, command execution, dependency supply-chain, injection, XSS/CSRF/SSRF, release credential, and sensitive logging risks.
+- Do not include non-security maintainability findings unless they directly create a security or data-integrity risk.`;
+  }
+  return `Review mode: test-gaps.
+- Prioritize missing or weak automated coverage for behavior that is security-sensitive, release-critical, data-loss-prone, or central to user workflows.
+- Every finding should name the expected regression test and the smallest code path it should exercise.`;
 }
 
 function clip(content: string): string {

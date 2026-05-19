@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isReportProviderId } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, ParallelMode, ReportExportFormat, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export interface RepoVistaSettings {
   provider?: AiProviderId;
@@ -24,6 +24,8 @@ export interface RepoVistaSettings {
   repairReports?: boolean;
   repairAttempts?: number;
   deepReview?: boolean;
+  reviewMode?: ReviewMode;
+  promptFile?: string;
   exportFormats?: ReportExportFormat[];
   json?: boolean;
   keepLogs?: boolean;
@@ -94,6 +96,8 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     repairReports: settings.repairReports ?? defaults.repairReports,
     repairAttempts: settings.repairAttempts ?? defaults.repairAttempts,
     deepReview: settings.deepReview ?? defaults.deepReview,
+    reviewMode: settings.reviewMode ?? defaults.reviewMode,
+    promptFile: settings.promptFile ?? defaults.promptFile,
     exportFormats: settings.exportFormats !== undefined ? [...settings.exportFormats] : [...defaults.exportFormats],
     includes: settings.includes !== undefined ? [...settings.includes] : [...defaults.includes],
     ignores: settings.ignores !== undefined ? [...settings.ignores] : [...defaults.ignores],
@@ -114,7 +118,7 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     sanitized.parallel = settings.parallel;
   }
 
-  for (const key of ["model", "profile", "reasoning", "language", "outDir", "workspace"] as const) {
+  for (const key of ["model", "profile", "reasoning", "language", "outDir", "workspace", "promptFile"] as const) {
     const value = settings[key];
     if (typeof value === "string" && value.trim()) {
       sanitized[key] = value.trim();
@@ -133,6 +137,15 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     settings.auditProfile === "architecture"
   ) {
     sanitized.auditProfile = settings.auditProfile;
+  }
+
+  if (
+    settings.reviewMode === "default" ||
+    settings.reviewMode === "deslopify" ||
+    settings.reviewMode === "security" ||
+    settings.reviewMode === "test-gaps"
+  ) {
+    sanitized.reviewMode = settings.reviewMode;
   }
 
   for (const key of ["includes", "ignores", "checkCommands"] as const) {
