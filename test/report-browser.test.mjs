@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { listReportRuns, renderReportsMenuFrame } from "../dist/index.js";
+import { deleteMarkedReportRuns, listReportRuns, renderReportsMenuFrame } from "../dist/index.js";
 
 test("report browser lists report runs and renders sections", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-report-browser-"));
@@ -43,8 +43,30 @@ test("report browser lists report runs and renders sections", async () => {
     assert.match(listFrame, /model: default/);
     assert.match(listFrame, /model: gpt-5\.5/);
     assert.match(listFrame, /reasoning: xhigh/);
+    assert.match(listFrame, /\[ \] 2026-05-19 10:00/);
     assert.match(listFrame, /2026-05-19T10-00-00-000Z/);
     assert.doesNotMatch(listFrame, /Codex CLI Codex CLI configured default/);
+
+    const markedFrame = renderReportsMenuFrame(runs, {
+      screen: "runs",
+      runCursor: 0,
+      sectionCursor: 0,
+      scroll: 0,
+      markedRunDirs: new Set([runs[0].runDir])
+    }, { columns: 100, rows: 24, color: false });
+    assert.match(markedFrame, /\[x\] 2026-05-19 10:00/);
+    assert.match(markedFrame, /1 marked/);
+
+    const confirmFrame = renderReportsMenuFrame(runs, {
+      screen: "confirm-delete",
+      runCursor: 0,
+      sectionCursor: 0,
+      scroll: 0,
+      markedRunDirs: new Set([runs[0].runDir])
+    }, { columns: 100, rows: 24, color: false });
+    assert.match(confirmFrame, /Confirm deletion of 1 report run/);
+    assert.match(confirmFrame, /Enter deletes marked reports/);
+    assert.match(confirmFrame, /2026-05-19T10-00-00-000Z/);
 
     const sectionFrame = renderReportsMenuFrame(runs, {
       screen: "sections",
@@ -63,6 +85,38 @@ test("report browser lists report runs and renders sections", async () => {
     }, { columns: 100, rows: 24, color: false });
     assert.match(viewerFrame, /# Summary/);
     assert.match(viewerFrame, /Newer report/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("report browser deletes marked report run directories", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-report-delete-"));
+  try {
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    const outRoot = path.join(root, ".repovista");
+    await mkdir(outRoot, { recursive: true });
+    const deleteRunDir = path.join(outRoot, "2026-05-19T10-00-00-000Z");
+    const keepRunDir = path.join(outRoot, "2026-05-18T10-00-00-000Z");
+    await writeRun(deleteRunDir, {
+      runId: "2026-05-19T10-00-00-000Z",
+      completedAt: "2026-05-19T10:00:00.000Z",
+      title: "Delete report"
+    });
+    await writeRun(keepRunDir, {
+      runId: "2026-05-18T10-00-00-000Z",
+      completedAt: "2026-05-18T10:00:00.000Z",
+      title: "Keep report"
+    });
+
+    const runs = await listReportRuns(root, ".repovista");
+    const deleted = await deleteMarkedReportRuns(runs, new Set([runs[0].runDir]));
+
+    assert.equal(deleted, 1);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].runId, "2026-05-18T10-00-00-000Z");
+    await assert.rejects(stat(deleteRunDir), /ENOENT/);
+    assert.equal((await stat(keepRunDir)).isDirectory(), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

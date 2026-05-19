@@ -58,7 +58,7 @@ repovista version
 | `clean-locks` | Remove stale feature locks. |
 | `findings` | List persisted findings, emit JSON, or export findings. |
 | `findings-ui` | Open an interactive finding triage TUI. |
-| `reports` | Browse completed report runs and navigate full reports or individual sections in a TUI. |
+| `reports` | Browse, navigate, mark, and delete completed report runs in a TUI. |
 | `next` | Show the next prioritized finding. |
 | `show` | Show one finding with evidence and lifecycle history. |
 | `triage` | Update one finding or all findings. |

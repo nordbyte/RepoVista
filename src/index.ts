@@ -11,7 +11,7 @@ export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider
 export { runProviderPhase } from "./provider-runner.js";
 export { commandAvailable, runProcess, signalProcess } from "./process-runner.js";
 export { runRepairRunCommand } from "./repair-run.js";
-export { listReportRuns, renderReportsMenuFrame, runReportsMenu } from "./report-browser.js";
+export { deleteMarkedReportRuns, listReportRuns, renderReportsMenuFrame, runReportsMenu } from "./report-browser.js";
 export type { ReportBrowserState, ReportRunSummary, ReportSection } from "./report-browser.js";
 export { renderPrComment, renderRunReview, reviewRunDirectory, runPrCommentCommand, runReviewCommand } from "./report-review.js";
 export { renderGithubStepSummary } from "./ci-summary.js";

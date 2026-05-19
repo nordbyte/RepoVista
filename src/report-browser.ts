@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { validateReportRoot } from "./reports.js";
@@ -32,13 +32,15 @@ export interface ReportSection {
   content: string;
 }
 
-export type ReportBrowserScreen = "runs" | "sections" | "viewer";
+export type ReportBrowserScreen = "runs" | "sections" | "viewer" | "confirm-delete";
 
 export interface ReportBrowserState {
   screen: ReportBrowserScreen;
   runCursor: number;
   sectionCursor: number;
   scroll: number;
+  markedRunDirs?: Set<string>;
+  notice?: string;
 }
 
 const REPORT_SECTION_FILES: Array<{ id: string; title: string; fileName: string }> = [
@@ -78,8 +80,8 @@ export async function runReportsMenu(
       rows: output.rows ?? 30,
       color: shouldUseColor(output)
     }),
-    onKey: (key, controls) => {
-      handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100);
+    onKey: async (key, controls) => {
+      await handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100);
       if ((key.ctrl && key.name === "c") || key.name === "q") {
         controls.finish();
       }
@@ -112,6 +114,22 @@ export function renderReportsMenuFrame(
 ): string {
   const run = runs[state.runCursor];
   const section = run?.sections[state.sectionCursor];
+  const markedRuns = selectedMarkedRuns(runs, state);
+  if (state.screen === "confirm-delete") {
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter deletes marked reports | Esc cancels | q exits",
+      sectionTitle: `Confirm deletion of ${markedRuns.length} report run(s)`,
+      items: markedRuns.map(formatDeleteItem),
+      cursor: -1,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No report runs are marked for deletion.",
+      footer: "Deletion removes the complete run directories."
+    });
+  }
+
   if (state.screen === "viewer" && run && section) {
     return renderTuiTextFrame({
       title: "RepoVista Reports",
@@ -143,31 +161,65 @@ export function renderReportsMenuFrame(
 
   return renderTuiListFrame({
     title: "RepoVista Reports",
-    help: "Up/Down move | Enter opens report | q exits",
+    help: "Up/Down move | Enter opens report | Space marks delete | d deletes marked | q exits",
     sectionTitle: "Report runs",
-    items: runs.map(formatRunItem),
+    items: runs.map((item) => formatRunItem(item, isRunMarked(state, item))),
     cursor: state.runCursor,
     columns: options.columns,
     rows: options.rows,
     color: options.color,
     emptyMessage: "No RepoVista report runs found.",
-    footer: run ? `${Math.min(state.runCursor + 1, runs.length)}/${runs.length} | ${run.runId} | ${run.runDir}` : undefined
+    footer: run ? formatRunsFooter(run, state, runs.length, markedRuns.length) : state.notice
   });
 }
 
-function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserState, key: TuiKey, rows: number, columns: number): void {
+async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserState, key: TuiKey, rows: number, columns: number): Promise<void> {
   if ((key.ctrl && key.name === "c") || key.name === "q") {
     return;
   }
+  if (state.screen === "confirm-delete") {
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = "runs";
+      state.notice = "Deletion cancelled.";
+    } else if (key.name === "return" || key.name === "enter" || key.name === "d" || key.name === "delete") {
+      state.screen = "runs";
+      state.runCursor = clampCursor(state.runCursor, runs.length);
+      state.sectionCursor = 0;
+      state.scroll = 0;
+      try {
+        const deleted = await deleteMarkedReportRuns(runs, markedRunDirs(state));
+        state.runCursor = clampCursor(state.runCursor, runs.length);
+        state.notice = `Deleted ${deleted} report run(s).`;
+      } catch (error) {
+        state.notice = `Delete failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+    return;
+  }
+
   if (state.screen === "runs") {
     if (key.name === "up") {
       state.runCursor = wrapIndex(state.runCursor - 1, runs.length);
+      state.notice = undefined;
     } else if (key.name === "down") {
       state.runCursor = wrapIndex(state.runCursor + 1, runs.length);
+      state.notice = undefined;
+    } else if (key.name === "space") {
+      toggleMarkedRun(runs[state.runCursor], state);
+    } else if (key.name === "d" || key.name === "delete") {
+      if (selectedMarkedRuns(runs, state).length) {
+        state.screen = "confirm-delete";
+        state.notice = undefined;
+      } else {
+        state.notice = "No report runs marked for deletion.";
+      }
     } else if (key.name === "return" || key.name === "enter") {
-      state.screen = "sections";
-      state.sectionCursor = 0;
-      state.scroll = 0;
+      if (runs[state.runCursor]) {
+        state.screen = "sections";
+        state.sectionCursor = 0;
+        state.scroll = 0;
+        state.notice = undefined;
+      }
     }
     return;
   }
@@ -215,6 +267,22 @@ function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserSt
       state.scroll = maxScroll;
     }
   }
+}
+
+export async function deleteMarkedReportRuns(runs: ReportRunSummary[], markedDirs: Set<string>): Promise<number> {
+  const selected = runs.filter((run) => markedDirs.has(run.runDir));
+  let deleted = 0;
+  for (const run of selected) {
+    await assertDeletableReportRun(run);
+    await rm(run.runDir, { recursive: true, force: false });
+    markedDirs.delete(run.runDir);
+    const index = runs.findIndex((item) => item.runDir === run.runDir);
+    if (index >= 0) {
+      runs.splice(index, 1);
+    }
+    deleted += 1;
+  }
+  return deleted;
 }
 
 async function loadReportRun(runDir: string, fallbackRunId: string): Promise<ReportRunSummary | undefined> {
@@ -303,12 +371,16 @@ async function readText(filePath: string): Promise<string | undefined> {
   }
 }
 
-function formatRunItem(run: ReportRunSummary): string {
+function formatRunItem(run: ReportRunSummary, marked: boolean): string {
   const when = compactRunTime(run.completedAt ?? run.startedAt ?? run.runId);
   const model = `model: ${run.model ?? "default"}`;
   const reasoning = `reasoning: ${run.reasoning ?? "default"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
-  return `${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit}`;
+  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit}`;
+}
+
+function formatDeleteItem(run: ReportRunSummary): string {
+  return `${compactRunTime(run.completedAt ?? run.startedAt ?? run.runId)} | ${run.runId} | ${run.runDir}`;
 }
 
 function formatSectionItem(section: ReportSection): string {
@@ -353,6 +425,63 @@ function compactRunTime(value: string): string {
     return `${runId[1]} ${runId[2]}:${runId[3]}`;
   }
   return value;
+}
+
+function formatRunsFooter(run: ReportRunSummary, state: ReportBrowserState, totalRuns: number, markedCount: number): string {
+  const parts = [
+    state.notice,
+    `${Math.min(state.runCursor + 1, totalRuns)}/${totalRuns}`,
+    `${markedCount} marked`,
+    run.runId,
+    run.runDir
+  ];
+  return parts.filter(Boolean).join(" | ");
+}
+
+function selectedMarkedRuns(runs: ReportRunSummary[], state: ReportBrowserState): ReportRunSummary[] {
+  const marked = markedRunDirs(state);
+  return runs.filter((run) => marked.has(run.runDir));
+}
+
+function markedRunDirs(state: ReportBrowserState): Set<string> {
+  state.markedRunDirs ??= new Set<string>();
+  return state.markedRunDirs;
+}
+
+function isRunMarked(state: ReportBrowserState, run: ReportRunSummary): boolean {
+  return markedRunDirs(state).has(run.runDir);
+}
+
+function toggleMarkedRun(run: ReportRunSummary | undefined, state: ReportBrowserState): void {
+  if (!run) {
+    state.notice = "No report run selected.";
+    return;
+  }
+  const marked = markedRunDirs(state);
+  if (marked.has(run.runDir)) {
+    marked.delete(run.runDir);
+    state.notice = `Unmarked ${run.runId}.`;
+  } else {
+    marked.add(run.runDir);
+    state.notice = `Marked ${run.runId} for deletion.`;
+  }
+}
+
+async function assertDeletableReportRun(run: ReportRunSummary): Promise<void> {
+  const runStat = await lstat(run.runDir);
+  if (!runStat.isDirectory()) {
+    throw new Error(`Report run is not a directory: ${run.runDir}`);
+  }
+  if (!(await hasRunMarker(run.runDir))) {
+    throw new Error(`Report run is missing RepoVista marker files: ${run.runDir}`);
+  }
+}
+
+function clampCursor(cursor: number, length: number): number {
+  if (length <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(0, cursor), length - 1);
 }
 
 function sortTime(run: ReportRunSummary): number {
