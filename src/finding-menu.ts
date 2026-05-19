@@ -1,7 +1,6 @@
-import readline from "node:readline";
 import type { ReadStream, WriteStream } from "node:tty";
-import { RepoVistaError } from "./errors.js";
 import { loadStoredFindings, rewriteFindingStateAtomic } from "./finding-store.js";
+import { renderTuiListFrame, renderTuiTextFrame, runTuiSession, shouldUseColor, wrappedLineCount, type TuiKey } from "./tui.js";
 import type { AuditOptions, FindingStatus, StructuredFinding } from "./types.js";
 
 const STATUS_KEYS: Record<string, FindingStatus> = {
@@ -19,94 +18,163 @@ export async function runFindingsMenu(
   projectRoot = process.cwd(),
   now = new Date()
 ): Promise<string> {
-  if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") {
-    throw new RepoVistaError("The findings-ui command requires an interactive terminal.", "FINDINGS_UI_NOT_INTERACTIVE");
-  }
   const findings = await loadStoredFindings(projectRoot, options.outDir);
   if (!findings.length) {
     return "No RepoVista findings found.\n";
   }
 
-  let cursor = 0;
-  let detail = false;
+  const state = {
+    cursor: 0,
+    detail: false,
+    scroll: 0
+  };
   let dirty = false;
-  let done = false;
-  readline.emitKeypressEvents(input);
-  input.setRawMode(true);
-  input.resume();
-  output.write("\x1b[?25l");
 
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      input.off("keypress", onKeypress);
-      input.setRawMode(false);
-      input.pause();
-      output.write("\x1b[?25h");
-    };
-    const finish = async () => {
-      cleanup();
+  return runTuiSession({
+    input,
+    output,
+    notInteractiveMessage: "The findings-ui command requires an interactive terminal.",
+    notInteractiveCode: "FINDINGS_UI_NOT_INTERACTIVE",
+    render: () => renderFindingsMenuFrame(findings, state, {
+      columns: output.columns ?? 100,
+      rows: output.rows ?? 30,
+      color: shouldUseColor(output)
+    }),
+    onKey: (key, controls) => {
+      const updated = handleFindingsMenuKey(findings, state, key, now, output.rows ?? 30, output.columns ?? 100);
+      dirty = dirty || updated;
+      if ((key.ctrl && key.name === "c") || key.name === "q") {
+        controls.finish();
+      }
+    },
+    onFinish: async () => {
       if (dirty) {
         await rewriteFindingStateAtomic(projectRoot, options.outDir, findings);
       }
-      resolve(dirty ? "\nSaved RepoVista finding state.\n" : "\nFinding state unchanged.\n");
-    };
-    const onKeypress = (_value: string, key: { name?: string; ctrl?: boolean }) => {
-      void (async () => {
-        if (key.ctrl && key.name === "c") {
-          done = true;
-        } else if (key.name === "up") {
-          cursor = (cursor - 1 + findings.length) % findings.length;
-        } else if (key.name === "down") {
-          cursor = (cursor + 1) % findings.length;
-        } else if (key.name === "return" || key.name === "enter") {
-          detail = !detail;
-        } else if (key.name === "q" || key.name === "escape") {
-          done = true;
-        } else if (key.name && STATUS_KEYS[key.name]) {
-          const finding = findings[cursor];
-          const status = STATUS_KEYS[key.name];
-          finding.status = status;
-          finding.updatedAt = now.toISOString();
-          finding.history = [
-            ...(finding.history ?? []),
-            {
-              kind: "triage",
-              status,
-              note: "Updated from findings-ui.",
-              commands: [],
-              createdAt: now.toISOString()
-            }
-          ];
-          dirty = true;
-        }
-        render();
-        if (done) {
-          await finish();
-        }
-      })().catch((error) => {
-        cleanup();
-        reject(error);
-      });
-    };
-    const render = () => renderFindingMenu(findings, cursor, detail, output);
-    render();
-    input.on("keypress", onKeypress);
+      return dirty ? "\nSaved RepoVista finding state.\n" : "\nFinding state unchanged.\n";
+    }
   });
 }
 
-function renderFindingMenu(findings: StructuredFinding[], cursor: number, detail: boolean, output: WriteStream): void {
-  output.write("\x1b[2J\x1b[H");
-  output.write("RepoVista Findings\n\n");
-  output.write("Up/Down move, Enter toggles detail, o/f/p/w/u sets status, q exits.\n\n");
-  findings.forEach((finding, index) => {
-    const marker = index === cursor ? ">" : " ";
-    output.write(`${marker} ${finding.severity.toUpperCase().padEnd(8)} ${(finding.status ?? "open").padEnd(14)} ${finding.id} ${finding.title}\n`);
-  });
-  if (detail) {
-    const finding = findings[cursor];
-    output.write(`\n${finding.title}\n`);
-    output.write(`Paths: ${finding.paths.join(", ") || "n/a"}\n`);
-    output.write(`Evidence: ${finding.evidence ?? "n/a"}\n`);
-    output.write(`Recommendation: ${finding.recommendation ?? "n/a"}\n`);
+export function renderFindingsMenuFrame(
+  findings: StructuredFinding[],
+  state: { cursor: number; detail: boolean; scroll: number },
+  options: { columns: number; rows: number; color: boolean }
+): string {
+  const finding = findings[state.cursor];
+  if (state.detail && finding) {
+    return renderTuiTextFrame({
+      title: "RepoVista Findings",
+      help: "Up/Down scroll | Enter/Esc returns | o/f/p/w/u sets status | q exits",
+      sectionTitle: `${finding.id} / ${finding.status ?? "open"}`,
+      lines: findingDetailLines(finding),
+      scroll: state.scroll,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      footer: `${state.cursor + 1}/${findings.length}`
+    });
   }
+
+  return renderTuiListFrame({
+    title: "RepoVista Findings",
+    help: "Up/Down move | Enter opens detail | o/f/p/w/u sets status | q exits",
+    sectionTitle: "Persisted findings",
+    items: findings.map(formatFindingItem),
+    cursor: state.cursor,
+    columns: options.columns,
+    rows: options.rows,
+    color: options.color,
+    emptyMessage: "No RepoVista findings found."
+  });
+}
+
+function handleFindingsMenuKey(
+  findings: StructuredFinding[],
+  state: { cursor: number; detail: boolean; scroll: number },
+  key: TuiKey,
+  now: Date,
+  rows: number,
+  columns: number
+): boolean {
+  if ((key.ctrl && key.name === "c") || key.name === "q") {
+    return false;
+  }
+  if (key.name && STATUS_KEYS[key.name]) {
+    const finding = findings[state.cursor];
+    const status = STATUS_KEYS[key.name];
+    finding.status = status;
+    finding.updatedAt = now.toISOString();
+    finding.history = [
+      ...(finding.history ?? []),
+      {
+        kind: "triage",
+        status,
+        note: "Updated from findings-ui.",
+        commands: [],
+        createdAt: now.toISOString()
+      }
+    ];
+    return true;
+  }
+  if (state.detail) {
+    const finding = findings[state.cursor];
+    const lineCount = finding ? wrappedLineCount(findingDetailLines(finding), columns) : 0;
+    const page = Math.max(4, rows - 8);
+    const maxScroll = Math.max(0, lineCount - page);
+    if (key.name === "escape" || key.name === "backspace" || key.name === "left" || key.name === "return" || key.name === "enter") {
+      state.detail = false;
+      state.scroll = 0;
+    } else if (key.name === "up") {
+      state.scroll = Math.max(0, state.scroll - 1);
+    } else if (key.name === "down") {
+      state.scroll = Math.min(maxScroll, state.scroll + 1);
+    } else if (key.name === "pageup") {
+      state.scroll = Math.max(0, state.scroll - page);
+    } else if (key.name === "pagedown" || key.name === "space") {
+      state.scroll = Math.min(maxScroll, state.scroll + page);
+    } else if (key.name === "home") {
+      state.scroll = 0;
+    } else if (key.name === "end") {
+      state.scroll = maxScroll;
+    }
+    return false;
+  }
+  if (key.name === "up") {
+    state.cursor = wrapIndex(state.cursor - 1, findings.length);
+  } else if (key.name === "down") {
+    state.cursor = wrapIndex(state.cursor + 1, findings.length);
+  } else if (key.name === "return" || key.name === "enter" || key.name === "right") {
+    state.detail = true;
+    state.scroll = 0;
+  }
+  return false;
+}
+
+function formatFindingItem(finding: StructuredFinding): string {
+  return `${finding.severity.toUpperCase().padEnd(8)} ${(finding.status ?? "open").padEnd(14)} ${finding.id} ${finding.title}`;
+}
+
+function findingDetailLines(finding: StructuredFinding): string[] {
+  return [
+    finding.title,
+    "",
+    `Severity: ${finding.severity}`,
+    `Status: ${finding.status ?? "open"}`,
+    `Category: ${finding.category ?? "n/a"}`,
+    `Paths: ${finding.paths.join(", ") || "n/a"}`,
+    "",
+    `Evidence: ${finding.evidence ?? "n/a"}`,
+    "",
+    `Recommendation: ${finding.recommendation ?? "n/a"}`,
+    "",
+    `Rationale: ${finding.problemRationale ?? "n/a"}`
+  ];
+}
+
+function wrapIndex(index: number, length: number): number {
+  if (length <= 0) {
+    return 0;
+  }
+  return (index + length) % length;
 }

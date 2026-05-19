@@ -11,6 +11,8 @@ export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider
 export { runProviderPhase } from "./provider-runner.js";
 export { commandAvailable, runProcess, signalProcess } from "./process-runner.js";
 export { runRepairRunCommand } from "./repair-run.js";
+export { listReportRuns, renderReportsMenuFrame, runReportsMenu } from "./report-browser.js";
+export type { ReportBrowserState, ReportRunSummary, ReportSection } from "./report-browser.js";
 export { renderPrComment, renderRunReview, reviewRunDirectory, runPrCommentCommand, runReviewCommand } from "./report-review.js";
 export { renderGithubStepSummary } from "./ci-summary.js";
 export { writeFindingExports } from "./exporters.js";
@@ -47,7 +49,7 @@ export {
   runTriageFindingCommand,
   writeFindingState
 } from "./finding-state.js";
-export { runFindingsMenu } from "./finding-menu.js";
+export { renderFindingsMenuFrame, runFindingsMenu } from "./finding-menu.js";
 export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
 export { fixPlanJsonSchema, phaseReportJsonSchema, revalidationJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity, findingDedupeKey } from "./findings.js";
@@ -69,6 +71,7 @@ export { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand }
 export { SETTING_DEFINITIONS, SETTING_KEYS, normalizeSettingKey, parseSettingValue } from "./settings-schema.js";
 export { assertSettingsMenuRegistryCoverage, renderSettingsMenuFrame, renderSettingsTerminalFrame, SETTINGS_MENU_ITEM_IDS, summarizeSettings } from "./settings-menu.js";
 export { findingSignature, stableFindingId, stableId } from "./stable-id.js";
+export { checkbox, colorize, renderTuiListFrame, renderTuiTerminalFrame, renderTuiTextFrame, runTuiSession, shouldUseColor, wrappedLineCount } from "./tui.js";
 export { detectWorkspaces, resolveWorkspaceScope, workspaceIncludes } from "./workspaces.js";
 export type {
   AuditCacheMeta,

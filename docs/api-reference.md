@@ -244,6 +244,13 @@ Important types:
 | `renderSettingsMenuFrame(settings, options?)` | Render settings TUI frame for tests/tools. |
 | `renderSettingsTerminalFrame(frame)` | Render terminal frame with line clearing. |
 | `summarizeSettings(settings)` | Return settings summary lines. |
+| `listReportRuns(projectRoot, outDir)` | List completed report runs for the report browser. |
+| `runReportsMenu(options)` | Open the report browser TUI. |
+| `renderReportsMenuFrame(runs, state, options)` | Render the report browser TUI frame for tests/tools. |
+| `renderFindingsMenuFrame(findings, state, options)` | Render the findings TUI frame for tests/tools. |
+| `renderTuiListFrame(options)` | Render a shared TUI list frame. |
+| `renderTuiTextFrame(options)` | Render a shared TUI text viewer frame. |
+| `wrappedLineCount(lines, columns)` | Count wrapped terminal rows for shared TUI viewers. |
 | `readStateFile(path, options)` | Read versioned state. |
 | `writeStateFileAtomic(path, kind, schemaVersion, data)` | Write versioned state atomically. |
 | `writeJsonAtomic(path, data)` | Write JSON atomically. |

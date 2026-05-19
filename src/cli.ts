@@ -22,6 +22,7 @@ import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
 import { runRepairRunCommand } from "./repair-run.js";
+import { runReportsMenu } from "./report-browser.js";
 import { runPrCommentCommand, runReviewCommand } from "./report-review.js";
 import { runProfilesCommand } from "./profiles.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
@@ -133,6 +134,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "findings-ui") {
       process.stdout.write(await runFindingsMenu(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "reports-ui") {
+      process.stdout.write(await runReportsMenu(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "show") {

@@ -18,6 +18,7 @@ export type CliAction =
   | "settings-reset"
   | "findings"
   | "findings-ui"
+  | "reports-ui"
   | "compare"
   | "review"
   | "pr-comment"

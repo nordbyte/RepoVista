@@ -13,6 +13,12 @@ import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
 import { DEFAULT_OPTIONS } from "./options.js";
 import { menuItemIdsFromRegistry } from "./option-registry.js";
+import {
+  checkbox,
+  renderTuiListFrame,
+  renderTuiTerminalFrame,
+  shouldUseColor
+} from "./tui.js";
 import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
@@ -44,18 +50,6 @@ const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "
 const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
 const FAST_MODE_OPTIONS = ["on", "off"] as const;
 const RENDER_DEBOUNCE_MS = 16;
-
-const ANSI = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  cyan: "\x1b[36m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  gray: "\x1b[90m",
-  white: "\x1b[97m",
-  bgCyan: "\x1b[46m"
-} as const;
 
 export async function runSettingsMenu(
   input = process.stdin as ReadStream,
@@ -458,98 +452,27 @@ export function renderSettingsMenuFrame(
 }
 
 export function renderSettingsTerminalFrame(frame: string): string {
-  const clearedLines = frame
-    .split("\n")
-    .map((line) => `${line}\x1b[K`)
-    .join("\n");
-  return `\x1b[H${clearedLines}\x1b[J`;
+  return renderTuiTerminalFrame(frame);
 }
 
 function buildSettingsMenuFrame(state: MenuState, options: { columns: number; rows: number; color: boolean }): string {
-  const columns = Math.max(40, options.columns);
-  const rows = Math.max(12, options.rows);
   const items = currentItems(state);
-  const header = renderHeader(state, options.color);
-  const footer = renderFooter(state, items.length, options.color);
-  const availableRows = Math.max(4, rows - header.length - footer.length);
-  const start = visibleStart(state.cursor, items.length, availableRows);
-  const visibleItems = items.slice(start, start + availableRows);
-  const lines = [...header];
-
-  if (!items.length) {
-    lines.push(colorize("  No options available. Press Enter to return.", ANSI.dim, options.color));
-  } else {
-    for (let offset = 0; offset < visibleItems.length; offset += 1) {
-      const index = start + offset;
-      lines.push(renderMenuLine(visibleItems[offset] ?? "", index === state.cursor, columns, options.color));
-    }
-  }
-
-  lines.push(...footer);
-  return lines.join("\n");
-}
-
-function renderHeader(state: MenuState, useColor: boolean): string[] {
-  const title = colorize("RepoVista Settings", `${ANSI.bold}${ANSI.cyan}`, useColor);
-  const help = colorize("Arrow keys move | Space toggles/selects | Enter opens/returns | Esc returns | Ctrl+C exits", ANSI.dim, useColor);
-  return [
-    title,
-    help,
-    colorize(screenTitle(state.screen), ANSI.yellow, useColor),
-    ""
-  ];
-}
-
-function renderFooter(state: MenuState, itemCount: number, useColor: boolean): string[] {
-  const position = itemCount ? `${Math.min(state.cursor + 1, itemCount)}/${itemCount}` : "0/0";
   const action = state.screen === "main"
     ? "Enter opens or edits, Space toggles, Save and exit writes settings"
     : "Space selects or clears, Enter returns to the main menu";
-  return [
-    "",
-    colorize(`${position} | ${action}`, ANSI.dim, useColor)
-  ];
-}
-
-function renderMenuLine(rawItem: string, active: boolean, columns: number, useColor: boolean): string {
-  const marker = active ? ">" : " ";
-  const label = truncatePlain(rawItem, Math.max(8, columns - 4));
-  if (active) {
-    return `${colorize(marker, ANSI.cyan, useColor)} ${colorize(` ${label} `, `${ANSI.bgCyan}${ANSI.white}`, useColor)}`;
-  }
-  return `${colorize(marker, ANSI.gray, useColor)} ${styleMenuItem(label, useColor)}`;
-}
-
-function styleMenuItem(label: string, useColor: boolean): string {
-  if (!useColor) {
-    return label;
-  }
-  if (label.startsWith("[x]")) {
-    return `${colorize("[x]", ANSI.green, true)}${label.slice(3)}`;
-  }
-  if (label.startsWith("[ ]")) {
-    return `${colorize("[ ]", ANSI.gray, true)}${colorize(label.slice(3), ANSI.dim, true)}`;
-  }
-  if (label === "Save and exit") {
-    return colorize(label, ANSI.green, true);
-  }
-  if (label === "Exit without saving") {
-    return colorize(label, ANSI.yellow, true);
-  }
-
-  const separator = label.indexOf(":");
-  if (separator > 0) {
-    return `${colorize(label.slice(0, separator + 1), ANSI.cyan, true)}${label.slice(separator + 1)}`;
-  }
-  return label;
-}
-
-function visibleStart(cursor: number, itemCount: number, visibleRows: number): number {
-  if (itemCount <= visibleRows) {
-    return 0;
-  }
-  const preferred = cursor - Math.floor(visibleRows / 2);
-  return Math.min(Math.max(0, preferred), itemCount - visibleRows);
+  const position = items.length ? `${Math.min(state.cursor + 1, items.length)}/${items.length}` : "0/0";
+  return renderTuiListFrame({
+    title: "RepoVista Settings",
+    help: "Arrow keys move | Space toggles/selects | Enter opens/returns | Esc returns | Ctrl+C exits",
+    sectionTitle: screenTitle(state.screen),
+    items,
+    cursor: state.cursor,
+    columns: options.columns,
+    rows: options.rows,
+    color: options.color,
+    emptyMessage: "No options available. Press Enter to return.",
+    footer: `${position} | ${action}`
+  });
 }
 
 function screenTitle(screen: MenuScreen): string {
@@ -583,18 +506,6 @@ function screenTitle(screen: MenuScreen): string {
     case "phaseTimeout":
       return "Provider phase timeout";
   }
-}
-
-function truncatePlain(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
-}
-
-function colorize(value: string, code: string, useColor: boolean): string {
-  return useColor ? `${code}${value}${ANSI.reset}` : value;
-}
-
-function shouldUseColor(output: WriteStream): boolean {
-  return Boolean(output.isTTY && !process.env.NO_COLOR && process.env.TERM !== "dumb");
 }
 
 function currentItems(state: MenuState): string[] {
@@ -789,10 +700,6 @@ async function loadCheckCommandOptions(projectRoot: string): Promise<string[]> {
   } catch {
     return defaults;
   }
-}
-
-function checkbox(selected: boolean, label: string): string {
-  return `[${selected ? "x" : " "}] ${label}`;
 }
 
 function formatArray(values: string[] | undefined): string {

@@ -234,6 +234,7 @@ test("new operational commands and options are recognized", () => {
   assert.equal(openPr.options.patchTitle, "Fix");
 
   assert.equal(parseCliArgs(["findings-ui"]).action, "findings-ui");
+  assert.equal(parseCliArgs(["reports-ui"]).action, "reports-ui");
 });
 
 test("audit profiles, workspaces, issue metadata, and incremental mode parse", () => {
