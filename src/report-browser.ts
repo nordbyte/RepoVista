@@ -28,6 +28,7 @@ export interface ReportRunSummary {
   runDir: string;
   startedAt?: string;
   completedAt?: string;
+  durationMs?: number;
   provider?: string;
   model?: string;
   reasoning?: string;
@@ -41,6 +42,7 @@ export interface ReportSection {
   title: string;
   fileName?: string;
   content: string;
+  durationMs?: number;
 }
 
 export type ReportBrowserScreen = "runs" | "sections" | "viewer" | "confirm-delete";
@@ -301,11 +303,12 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
   if (!marker) {
     return undefined;
   }
-  const [meta, findings, sections] = await Promise.all([
+  const [meta, findings] = await Promise.all([
     readJson<AuditMeta>(path.join(runDir, "meta.json")),
-    readJson<StructuredFinding[]>(path.join(runDir, "findings.json")),
-    loadReportSections(runDir)
+    readJson<StructuredFinding[]>(path.join(runDir, "findings.json"))
   ]);
+  const durationMs = runDurationMs(meta);
+  const sections = await loadReportSections(runDir, meta, durationMs);
   if (!sections.length) {
     return undefined;
   }
@@ -322,6 +325,7 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
     runDir,
     startedAt: meta?.startedAt,
     completedAt: meta?.completedAt,
+    durationMs,
     provider: displayName ?? providerId,
     model: resolvedModel,
     reasoning: cleanReasoningLabel(meta?.ai?.reasoning ?? meta?.codex?.reasoning),
@@ -331,14 +335,16 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
   };
 }
 
-async function loadReportSections(runDir: string): Promise<ReportSection[]> {
+async function loadReportSections(runDir: string, meta: AuditMeta | undefined, runDuration: number | undefined): Promise<ReportSection[]> {
+  const durations = reportDurationByFile(meta);
   const loadedSections = await Promise.all(REPORT_SECTION_FILES.map(async (definition): Promise<ReportSection | undefined> => {
     const content = await readText(path.join(runDir, definition.fileName));
     return content === undefined ? undefined : {
       id: definition.id,
       title: definition.title,
       fileName: definition.fileName,
-      content
+      content,
+      durationMs: durations.get(definition.fileName)
     };
   }));
   const sections = loadedSections.filter((section): section is ReportSection => Boolean(section));
@@ -354,7 +360,8 @@ async function loadReportSections(runDir: string): Promise<ReportSection[]> {
         `# ${section.title}`,
         "",
         section.content.trimEnd()
-      ].join("\n")).join("\n\n---\n\n")
+      ].join("\n")).join("\n\n---\n\n"),
+      durationMs: runDuration
     },
     ...sections
   ];
@@ -395,7 +402,7 @@ function formatRunItem(run: ReportRunSummary, marked: boolean): string {
   const model = `model: ${run.model ?? "default"}`;
   const reasoning = `reasoning: ${run.reasoning ?? "default"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
-  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit}`;
+  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | ${formatDuration(run.durationMs)}`;
 }
 
 function formatDeleteItem(run: ReportRunSummary): string {
@@ -404,7 +411,7 @@ function formatDeleteItem(run: ReportRunSummary): string {
 
 function formatSectionItem(section: ReportSection): string {
   const lines = section.content.split(/\r?\n/).length;
-  return `${section.title}: ${section.fileName ?? "combined"} | ${lines} line(s)`;
+  return `${section.title}: ${section.fileName ?? "combined"} | ${lines} line(s) | ${formatDuration(section.durationMs)}`;
 }
 
 function cleanModelLabel(value: string | undefined, providerDisplayName: string | undefined): string | undefined {
@@ -432,6 +439,59 @@ function cleanReasoningLabel(value: string | undefined): string | undefined {
     return undefined;
   }
   return trimmed;
+}
+
+function reportDurationByFile(meta: AuditMeta | undefined): Map<string, number> {
+  const durations = new Map<string, number>();
+  for (const [fileName, durationMs] of Object.entries(meta?.reportDurations ?? {})) {
+    if (isUsableDuration(durationMs)) {
+      durations.set(fileName, durationMs);
+    }
+  }
+  for (const phase of meta?.phases ?? []) {
+    if (!durations.has(phase.reportFile) && isUsableDuration(phase.durationMs)) {
+      durations.set(phase.reportFile, phase.durationMs);
+    }
+  }
+  return durations;
+}
+
+function runDurationMs(meta: AuditMeta | undefined): number | undefined {
+  if (isUsableDuration(meta?.durationMs)) {
+    return meta.durationMs;
+  }
+  const elapsed = elapsedDurationMs(meta?.startedAt, meta?.completedAt);
+  if (isUsableDuration(elapsed)) {
+    return elapsed;
+  }
+  if (isUsableDuration(meta?.analytics?.totalDurationMs)) {
+    return meta.analytics.totalDurationMs;
+  }
+  const phaseTotal = (meta?.phases ?? []).reduce((sum, phase) => sum + (isUsableDuration(phase.durationMs) ? phase.durationMs : 0), 0);
+  return phaseTotal > 0 ? phaseTotal : undefined;
+}
+
+function elapsedDurationMs(startedAt: string | undefined, completedAt: string | undefined): number | undefined {
+  const started = parseRunTime(startedAt);
+  const completed = parseRunTime(completedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) {
+    return undefined;
+  }
+  return completed - started;
+}
+
+function isUsableDuration(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function formatDuration(durationMs: number | undefined): string {
+  if (!isUsableDuration(durationMs)) {
+    return "duration n/a";
+  }
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
 }
 
 function compactRunTime(value: string): string {

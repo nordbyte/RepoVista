@@ -38,7 +38,7 @@ Each audit writes a timestamped run directory under the selected output root:
 
 `index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, evidence checks, phase-quality diagnostics, suppressed findings, and artifact links.
 
-Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report or each generated section. The report list is sorted by run creation time with the newest run first. The report viewer highlights Markdown headings and bold spans in color-capable terminals, and Markdown tables are rendered with aligned columns. In the run list, Space marks or unmarks report runs for deletion, and `d` opens a confirmation screen before the marked run directories are removed.
+Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report or each generated section. The report list is sorted by run creation time with the newest run first and shows the total run duration after the exit code. Section lists show line count and generation duration where metadata is available. The report viewer highlights Markdown headings and bold spans in color-capable terminals, and Markdown tables are rendered with aligned columns. In the run list, Space marks or unmarks report runs for deletion, and `d` opens a confirmation screen before the marked run directories are removed.
 
 ## Main Files
 
@@ -50,7 +50,7 @@ Use `repovista reports` to browse completed runs in the terminal, select a run, 
 | `03-risk-and-bug-report.md` | Risk, bug, and security finding report. |
 | `04-feature-roadmap.md` | Feature and improvement roadmap. |
 | `index.md` | Summary entry point linking all phase outputs. |
-| `meta.json` | Run metadata, provider/model/reasoning/fast mode, phase status, quality, cache, workspace, and analytics. |
+| `meta.json` | Run metadata, provider/model/reasoning/fast mode, total and per-report durations, phase status, quality, cache, workspace, and analytics. |
 | `summary.json` | Machine-readable run summary. |
 | `report.json` | Complete machine-readable run artifact. |
 | `structured-reports.json` | Normalized structured phase reports. |

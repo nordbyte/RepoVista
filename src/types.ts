@@ -330,6 +330,8 @@ export interface AuditMeta {
   runId: string;
   startedAt: string;
   completedAt?: string;
+  durationMs?: number;
+  reportDurations?: Record<string, number>;
   options: {
     provider: AiProviderId;
     parallel: ParallelMode;

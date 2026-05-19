@@ -79,6 +79,7 @@ export interface AuditResult {
 }
 
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
+  const runStartedAtMs = Date.now();
   options = applyAuditProfile(options);
   const projectRoot = dependencies.cwd ?? process.cwd();
   const now = dependencies.now ?? new Date();
@@ -129,6 +130,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
 
     logger.step("Creating project inventory");
+    const inventoryStartedAtMs = Date.now();
     const inventory = await createProjectInventory(projectRoot, {
       outDir: options.outDir,
       includes: options.includes,
@@ -147,6 +149,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       now,
       scan: projectScan
     });
+    recordReportDuration(meta, "00-inventory.md", Date.now() - inventoryStartedAtMs);
     for (const warning of inventory.warnings) {
       logger.warn(warning);
     }
@@ -225,12 +228,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         await writeMarkdownReport(phaseReportPath, incrementalReports[phase.reportFile]);
         previousReports[phase.reportFile] = incrementalReports[phase.reportFile];
         await markSkippedOrPreserved(status, phase, paths, previousReports);
+        status.durationMs ??= 0;
+        recordReportDuration(meta, phase.reportFile, status.durationMs);
         logger.info(`Incremental cache reused ${phase.reportFile}.`);
         continue;
       }
       const shouldRun = await shouldRunPhase(phase, status, paths, options, selectedPhases, detailPhaseRan);
       if (!shouldRun) {
         await markSkippedOrPreserved(status, phase, paths, previousReports);
+        recordReportDuration(meta, phase.reportFile, status.durationMs);
         continue;
       }
 
@@ -324,6 +330,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       });
 
       await updatePhaseStatus(status, phase, result, options.strictReports);
+      recordReportDuration(meta, phase.reportFile, status.durationMs);
       previousReports[phase.reportFile] = await safeReadReport(phaseReportPath, phase.title);
       if (phase.id !== "summary" && result.success) {
         detailPhaseRan = true;
@@ -354,7 +361,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     meta.findings = findings;
     meta.suppressedFindings = suppressedFindings;
     meta.exitCode = determineExitCode(options, meta.phases, previousReports["03-risk-and-bug-report.md"], findings, evidence);
-    meta.completedAt = new Date().toISOString();
+    completeRunTiming(meta, runStartedAtMs);
     await updateFeatureRecordsFromFindings(projectRoot, options.outDir, findings, paths.runId, now);
     await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings);
     await appendGithubStepSummary(meta);
@@ -362,7 +369,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     meta.exitCode = 1;
     throw error;
   } finally {
-    meta.completedAt = new Date().toISOString();
+    completeRunTiming(meta, runStartedAtMs);
     await writeMeta(paths.runDir, meta);
   }
 
@@ -443,6 +450,19 @@ async function reusableReportForPreservation(
   } catch {
     return undefined;
   }
+}
+
+function recordReportDuration(meta: AuditMeta, reportFile: string, durationMs: number | undefined): void {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) {
+    return;
+  }
+  meta.reportDurations ??= {};
+  meta.reportDurations[reportFile] = durationMs;
+}
+
+function completeRunTiming(meta: AuditMeta, runStartedAtMs: number): void {
+  meta.completedAt = new Date().toISOString();
+  meta.durationMs = Math.max(0, Date.now() - runStartedAtMs);
 }
 
 async function preservePreviousReportIfRetryFailed(input: {
