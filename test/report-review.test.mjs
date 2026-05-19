@@ -51,7 +51,25 @@ test("review command reports weak evidence and PR comment body", async () => {
         high: 1,
         medium: 0,
         low: 0
-      }
+      },
+      phases: [
+        {
+          id: "risk-and-bug",
+          title: "Risk and Bug Analysis",
+          reportFile: "03-risk-and-bug-report.md",
+          status: "success",
+          durationMs: 2400,
+          repairAttempts: [
+            {
+              attempt: 1,
+              phaseId: "risk-and-bug-repair-1",
+              status: "success",
+              warnings: ["Finding High fixture has invalid evidence: quote does not match line range."],
+              durationMs: 1200
+            }
+          ]
+        }
+      ]
     }), "utf8");
     await writeFile(path.join(runDir, "findings.json"), JSON.stringify(findings), "utf8");
     await writeFile(path.join(runDir, "structured-reports.json"), JSON.stringify(structuredReports), "utf8");
@@ -77,6 +95,8 @@ test("review command reports weak evidence and PR comment body", async () => {
     const markdown = await runReviewCommand({ outDir: ".repovista", reportRunDir: ".repovista/run", json: false }, root);
     assert.match(markdown, /RepoVista Run Review/);
     assert.match(markdown, /Artifact Health/);
+    assert.match(markdown, /Repair attempts: 1/);
+    assert.match(markdown, /quote does not match line range/);
 
     const dryRun = await runPrCommentCommand({ outDir: ".repovista", reportRunDir: ".repovista/run", dryRun: true }, root);
     assert.match(dryRun, /RepoVista PR comment dry run/);

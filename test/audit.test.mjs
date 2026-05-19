@@ -771,6 +771,11 @@ test("risk phase auto-repairs missing findings schema before extraction", async 
     });
 
     assert.deepEqual(seen, ["risk-and-bug", "risk-and-bug-repair-1"]);
+    const riskPhase = result.meta.phases.find((phase) => phase.id === "risk-and-bug");
+    assert.equal(riskPhase?.repairAttempts?.length, 1);
+    assert.equal(riskPhase.repairAttempts[0].phaseId, "risk-and-bug-repair-1");
+    assert.equal(riskPhase.repairAttempts[0].status, "success");
+    assert.match(riskPhase.repairAttempts[0].warnings.join("\n"), /Risk findings schema is missing or invalid/);
     assert.ok(result.meta.findings.some((finding) => finding.title === "Repair-added finding"));
   } finally {
     await rm(root, { recursive: true, force: true });

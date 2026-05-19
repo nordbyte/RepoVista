@@ -124,6 +124,8 @@ export async function maybeRunDeepRiskReview(input: DeepRiskReviewInput): Promis
     reportPath: finalReportPath,
     durationMs: input.result.durationMs + Date.now() - startedAt,
     exitCode: input.result.exitCode,
+    diagnostics: input.result.diagnostics,
+    repairAttempts: input.result.repairAttempts,
     error: failed.length ? `${failed.length} deep review shard(s) failed; base risk report and successful shard findings were preserved.` : undefined
   };
 }

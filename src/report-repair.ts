@@ -4,7 +4,7 @@ import { extractFindingsWithSource } from "./findings.js";
 import { type PhaseDefinition } from "./prompts.js";
 import { validateReportQuality } from "./quality-gates.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
-import type { AuditOptions, ProviderRunResult, RunPaths } from "./types.js";
+import type { AuditOptions, PhaseRepairAttempt, ProviderRunResult, RunPaths } from "./types.js";
 
 type RunPhaseFunction = typeof runProviderPhase;
 
@@ -17,6 +17,12 @@ export interface RepairPhaseInput {
   options: AuditOptions;
   runPhase: RunPhaseFunction;
   spawnAdapter?: SpawnAdapter;
+  onRepairAttempt?: (attempt: {
+    attempt: number;
+    phaseId: string;
+    phaseTitle: string;
+    warnings: string[];
+  }) => void;
 }
 
 export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<ProviderRunResult> {
@@ -25,19 +31,29 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
   }
 
   let currentResult = input.result;
+  let repairAttempts = [...(input.result.repairAttempts ?? [])];
   const configuredAttempts = input.options.repairReports ? input.options.repairAttempts ?? 1 : 0;
   const attempts = Math.max(0, Math.min(3, Math.max(configuredAttempts, input.phase.id === "risk-and-bug" ? 1 : 0)));
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const currentReport = await safeRead(currentResult.reportPath);
     const warnings = await repairWarnings(input, currentReport);
     if (!warnings.length) {
-      return currentResult;
+      return repairAttempts.length ? { ...currentResult, repairAttempts } : currentResult;
     }
 
-    currentResult = await input.runPhase({
+    const repairPhaseId = `${input.phase.id}-repair-${attempt}`;
+    const repairPhaseTitle = `${input.phase.title} Repair ${attempt}`;
+    input.onRepairAttempt?.({
+      attempt,
+      phaseId: repairPhaseId,
+      phaseTitle: repairPhaseTitle,
+      warnings
+    });
+
+    const repairResult = await input.runPhase({
       provider: input.options.provider ?? "codex",
-      phaseId: `${input.phase.id}-repair-${attempt}`,
-      phaseTitle: `${input.phase.title} Repair ${attempt}`,
+      phaseId: repairPhaseId,
+      phaseTitle: repairPhaseTitle,
       prompt: buildRepairPrompt(input.phase, input.originalPrompt, currentReport, warnings),
       projectRoot: input.projectRoot,
       reportPath: currentResult.reportPath,
@@ -51,6 +67,20 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
       keepLogs: input.options.keepLogs,
       timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
     }, input.spawnAdapter);
+    const repairAttempt: PhaseRepairAttempt = {
+      attempt,
+      phaseId: repairResult.phaseId,
+      status: repairResult.success ? "success" : "failed",
+      warnings,
+      durationMs: repairResult.durationMs,
+      error: repairResult.error,
+      providerRun: repairResult.diagnostics
+    };
+    repairAttempts = [...repairAttempts, repairAttempt];
+    currentResult = {
+      ...repairResult,
+      repairAttempts
+    };
 
     if (!currentResult.success) {
       return currentResult;

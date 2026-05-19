@@ -85,6 +85,8 @@ RepoVista validates generated reports for structure and depth. Quality gates che
 
 With `--strict-reports`, quality warnings mark the phase failed. With `--repair-reports`, RepoVista asks the provider to repair missing or weak report content.
 
+Repair attempts are visible in progress output when they start. Each attempt is also recorded under the phase entry in `meta.json` as `repairAttempts[]`, including the triggering warnings, repair phase id, status, duration, error text when present, and provider diagnostics. `repovista review` surfaces the same repair history in the report checks section.
+
 ## Structured Findings
 
 Risk findings use stable ids and include:

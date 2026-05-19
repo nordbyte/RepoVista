@@ -38,6 +38,7 @@ export async function loadExistingReports(
       status.durationMs = previousStatus?.durationMs;
       status.shards = previousStatus?.shards;
       status.deepReviewShards = previousStatus?.deepReviewShards;
+      status.repairAttempts = previousStatus?.repairAttempts;
       status.providerRun = previousStatus?.providerRun;
       applyReportQuality(status, phase.id, content, false);
     } catch {
@@ -120,6 +121,7 @@ export async function updatePhaseStatus(
     error?: string;
     reportPath: string;
     diagnostics?: PhaseReportStatus["providerRun"];
+    repairAttempts?: PhaseReportStatus["repairAttempts"];
     preservedPreviousReport?: boolean;
     retryError?: string;
     retryDurationMs?: number;
@@ -129,6 +131,7 @@ export async function updatePhaseStatus(
   status.status = result.success ? "success" : "failed";
   status.durationMs = result.durationMs;
   status.providerRun = result.diagnostics;
+  status.repairAttempts = result.repairAttempts?.length ? result.repairAttempts : undefined;
   status.preservedPreviousReport = result.preservedPreviousReport;
   status.retryError = result.retryError;
   status.retryDurationMs = result.retryDurationMs;

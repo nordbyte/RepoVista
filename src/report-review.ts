@@ -433,6 +433,14 @@ function phaseReviewNotes(phase: PhaseReportStatus | undefined): string[] {
   if (phase.preservedPreviousReport) {
     notes.push(`Previous valid report preserved after failed retry${phase.retryError ? `: ${phase.retryError}` : "."}`);
   }
+  if (phase.repairAttempts?.length) {
+    notes.push(`Repair attempts: ${phase.repairAttempts.length}`);
+    for (const attempt of phase.repairAttempts) {
+      const reason = attempt.warnings.length ? `; reason=${attempt.warnings.join(" | ")}` : "";
+      const error = attempt.error ? `; error=${attempt.error}` : "";
+      notes.push(`Repair ${attempt.attempt} (${attempt.phaseId}) ${attempt.status} in ${attempt.durationMs}ms${reason}${error}`);
+    }
+  }
   if (phase.providerRun) {
     const run = phase.providerRun;
     const termination = run.termination

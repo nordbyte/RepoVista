@@ -143,10 +143,21 @@ export interface PhaseReportStatus {
   qualityScore?: number;
   shards?: PhaseShardStatus[];
   deepReviewShards?: PhaseShardStatus[];
+  repairAttempts?: PhaseRepairAttempt[];
   providerRun?: ProviderRunDiagnostics;
   preservedPreviousReport?: boolean;
   retryError?: string;
   retryDurationMs?: number;
+}
+
+export interface PhaseRepairAttempt {
+  attempt: number;
+  phaseId: string;
+  status: "success" | "failed";
+  warnings: string[];
+  durationMs: number;
+  error?: string;
+  providerRun?: ProviderRunDiagnostics;
 }
 
 export interface PhaseShardStatus {
@@ -655,6 +666,7 @@ export interface ProviderRunResult {
   stderrLogPath?: string;
   structuredOutputPath?: string;
   diagnostics?: ProviderRunDiagnostics;
+  repairAttempts?: PhaseRepairAttempt[];
   preservedPreviousReport?: boolean;
   retryError?: string;
   retryDurationMs?: number;

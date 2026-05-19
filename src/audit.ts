@@ -237,6 +237,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       logger.step(`${phase.title}`);
       status.status = "pending";
       status.error = undefined;
+      status.repairAttempts = undefined;
 
       const phaseReportPath = reportPath(paths.runDir, phase.reportFile);
       const preservedReport = await reusableReportForPreservation(phase.id, phaseReportPath, previousReports[phase.reportFile]);
@@ -296,7 +297,11 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         paths,
         options,
         runPhase,
-        spawnAdapter: dependencies.spawnAdapter
+        spawnAdapter: dependencies.spawnAdapter,
+        onRepairAttempt: ({ attempt, phaseTitle, warnings }) => {
+          logger.step(phaseTitle);
+          logger.warn(`Repair attempt ${attempt} triggered by: ${warnings.join("; ")}`);
+        }
       });
       result = await maybeRunDeepRiskReview({
         phase,

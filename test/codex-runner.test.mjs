@@ -13,6 +13,7 @@ import {
   revalidationJsonSchema,
   renderStructuredProviderOutput,
   riskReportJsonSchema,
+  structuredPromptForPhase,
   runCodexPhase,
   runProviderPhase
 } from "../dist/index.js";
@@ -292,6 +293,13 @@ test("risk report renderer separates findings with a blank line", () => {
   }));
 
   assert.match(report, /- Title: Missing guard[\s\S]*  Confidence: high\n\n- Title: Missing timeout/);
+});
+
+test("risk structured prompt requires exact evidence quotes", () => {
+  const prompt = structuredPromptForPhase("risk-and-bug", "Base prompt");
+  assert.match(prompt, /Every evidenceReferences item with a quote must use text copied exactly/);
+  assert.match(prompt, /if an exact substring is uncertain, omit quote/);
+  assert.match(prompt, /direct substring/);
 });
 
 test("codex runner creates an error report on failed process", async () => {
