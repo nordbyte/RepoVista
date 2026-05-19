@@ -11,14 +11,14 @@ repovista findings
 repovista findings --json
 repovista findings --export sarif,github
 repovista findings-ui
-repovista reports-ui
+repovista reports
 repovista next
 repovista show fnd_abc123def456
 repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista triage --all --status uncertain --note "needs review"
 ```
 
-`repovista reports-ui` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories, opens a selected run, and lets you navigate the full combined report or individual generated sections.
+`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories, opens a selected run, and lets you navigate the full combined report or individual generated sections.
 
 Supported statuses:
 

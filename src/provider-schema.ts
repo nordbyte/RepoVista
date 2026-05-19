@@ -411,7 +411,7 @@ function severitySection(findings: StructuredFinding[], severity: StructuredFind
     `  Suggested regression test: ${finding.suggestedRegressionTest ?? "n/a"}`,
     `  Minimum fix scope: ${finding.minimumFixScope ?? "n/a"}`,
     `  Confidence: ${finding.confidence ?? "n/a"}`
-  ].join("\n")).join("\n");
+  ].join("\n")).join("\n\n");
 }
 
 function normalizeStructuredFindings(value: unknown): StructuredFinding[] {

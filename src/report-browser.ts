@@ -70,8 +70,8 @@ export async function runReportsMenu(
   return runTuiSession({
     input,
     output,
-    notInteractiveMessage: "The reports-ui command requires an interactive terminal.",
-    notInteractiveCode: "REPORTS_UI_NOT_INTERACTIVE",
+    notInteractiveMessage: "The reports command requires an interactive terminal.",
+    notInteractiveCode: "REPORTS_NOT_INTERACTIVE",
     render: () => renderReportsMenuFrame(runs, state, {
       columns: output.columns ?? 100,
       rows: output.rows ?? 30,

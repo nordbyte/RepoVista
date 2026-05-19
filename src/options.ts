@@ -356,11 +356,11 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "findings-ui", options };
   }
 
-  if (command === "reports-ui") {
+  if (command === "reports") {
     if (positionals.length > 1) {
-      throw new CliUsageError("Command reports-ui does not take positional arguments.");
+      throw new CliUsageError("Command reports does not take positional arguments.");
     }
-    return { action: "reports-ui", options };
+    return { action: "reports", options };
   }
 
   if (command === "show" || command === "triage" || command === "revalidate") {
@@ -567,7 +567,7 @@ function isCommand(value: string): boolean {
     value === "settings" ||
     value === "findings" ||
     value === "findings-ui" ||
-    value === "reports-ui" ||
+    value === "reports" ||
     value === "compare" ||
     value === "next" ||
     value === "show" ||

@@ -30,7 +30,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista clean-locks [--force]", name: "clean-locks", help: "Remove stale RepoVista feature locks" },
   { usage: "repovista findings [--run <run-id|dir>] [--status <status>] [--all] [--json] [--export <formats>]", name: "findings", help: "List persisted or run-specific findings, emit JSON, or export them" },
   { usage: "repovista findings-ui", name: "findings-ui", help: "Open an interactive terminal UI for finding triage" },
-  { usage: "repovista reports-ui", name: "reports-ui", help: "Browse completed RepoVista report runs and sections in an interactive terminal UI" },
+  { usage: "repovista reports", name: "reports", help: "Browse completed RepoVista report runs and sections in an interactive terminal UI" },
   { usage: "repovista next [--status <status>]", name: "next", help: "Show the next prioritized finding from the persistent finding state" },
   { usage: "repovista show <finding-id>", name: "show", help: "Show one persisted finding with evidence and lifecycle history" },
   { usage: "repovista triage <finding-id|--all> --status <status> [--note <text>]", name: "triage", help: "Update the lifecycle status of one finding" },

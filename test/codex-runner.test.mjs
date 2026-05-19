@@ -11,6 +11,7 @@ import {
   fixPlanJsonSchema,
   phaseReportJsonSchema,
   revalidationJsonSchema,
+  renderStructuredProviderOutput,
   riskReportJsonSchema,
   runCodexPhase,
   runProviderPhase
@@ -271,6 +272,28 @@ test("codex provider-native schema output is rendered into markdown", async () =
   }
 });
 
+test("risk report renderer separates findings with a blank line", () => {
+  const report = renderStructuredProviderOutput("risk-report", JSON.stringify({
+    schemaVersion: 1,
+    phaseId: "risk-and-bug",
+    executiveSummary: "Two issues.",
+    severitySummary: {
+      critical: "No critical findings.",
+      high: "Two high findings.",
+      medium: "No medium findings.",
+      low: "No low findings."
+    },
+    findings: [
+      riskFindingFixture("Missing guard", "high|missing-guard"),
+      riskFindingFixture("Missing timeout", "high|missing-timeout")
+    ],
+    recommendations: ["Fix both risks."],
+    inspected: { files: ["src/index.ts"], symbols: [], notes: [] }
+  }));
+
+  assert.match(report, /- Title: Missing guard[\s\S]*  Confidence: high\n\n- Title: Missing timeout/);
+});
+
 test("codex runner creates an error report on failed process", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-codex-fail-"));
   try {
@@ -387,3 +410,27 @@ test("codex runner cancels a phase after timeout", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+function riskFindingFixture(title, signature) {
+  return {
+    title,
+    severity: "high",
+    category: "reliability",
+    status: "open",
+    signature,
+    affectedPaths: ["src/index.ts"],
+    evidence: `${title} evidence`,
+    evidenceReferences: [{ path: "src/index.ts", startLine: 1, endLine: 1, quote: "export", symbol: null }],
+    problemRationale: `${title} rationale`,
+    recommendedFix: `${title} fix`,
+    reproduction: `Inspect ${title}.`,
+    suggestedRegressionTest: `Test ${title}.`,
+    minimumFixScope: "src/index.ts",
+    estimatedEffort: "small",
+    confidence: "high",
+    findingType: "atomic",
+    parentId: null,
+    parentTitle: null,
+    childFindings: []
+  };
+}

@@ -136,7 +136,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runFindingsMenu(optionsWithSettings.options));
       return 0;
     }
-    if (optionsWithSettings.action === "reports-ui") {
+    if (optionsWithSettings.action === "reports") {
       process.stdout.write(await runReportsMenu(optionsWithSettings.options));
       return 0;
     }
