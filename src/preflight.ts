@@ -22,7 +22,7 @@ export interface PreflightResult {
 }
 
 export interface PreflightDependencies {
-  commandExists?: (command: string) => Promise<boolean>;
+  commandExists?: (command: string, args?: string[]) => Promise<boolean>;
 }
 
 const PROJECT_MARKERS = [
@@ -62,7 +62,7 @@ export async function runPreflight(
   await assertDirectoryAccess(runDir, "Report directory", true);
   await validateReportRoot(projectRoot, options.outDir);
 
-  const providerAvailable = await commandExists(provider.executable);
+  const providerAvailable = await commandExists(provider.executable, provider.versionArgs);
   if (!providerAvailable) {
     throw new PreflightError(
       `${provider.displayName} was not found. Install and authenticate ${provider.displayName} so the \`${provider.executable}\` command is available in PATH.`
@@ -142,11 +142,11 @@ async function assertDirectoryAccess(directory: string, label: string, requireWr
   }
 }
 
-async function defaultCommandExists(command: string): Promise<boolean> {
+async function defaultCommandExists(command: string, args: string[] = ["--version"]): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
-    const child = spawn(command, ["--version"], {
+    const child = spawn(command, args, {
       stdio: "ignore"
     });
     const timeoutTimer = setTimeout(() => {

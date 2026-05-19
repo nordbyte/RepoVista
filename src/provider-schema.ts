@@ -1,4 +1,4 @@
-import type { StructuredFinding } from "./types.js";
+import type { StructuredFinding, StructuredRoadmapProposal } from "./types.js";
 
 export const riskReportJsonSchema: Record<string, unknown> = {
   type: "object",
@@ -90,6 +90,56 @@ export const riskReportJsonSchema: Record<string, unknown> = {
   }
 };
 
+const PHASE_IDS = ["architecture", "code-quality", "feature-roadmap", "summary"] as const;
+
+export const phaseReportJsonSchema: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "phaseId", "title", "executiveSummary", "sections", "keyPoints", "evidenceReferences", "recommendations"],
+  properties: {
+    schemaVersion: { type: "number", enum: [1] },
+    phaseId: { type: "string", enum: [...PHASE_IDS] },
+    title: { type: "string" },
+    executiveSummary: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["heading", "body"],
+        properties: {
+          heading: { type: "string" },
+          body: { type: "string" },
+          bullets: { type: "array", items: { type: "string" } }
+        }
+      }
+    },
+    keyPoints: { type: "array", items: { type: "string" } },
+    evidenceReferences: { type: "array", items: { type: "string" } },
+    recommendations: { type: "array", items: { type: "string" } },
+    proposals: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "description", "evidence", "benefit", "effort", "risk", "affected", "steps", "priority", "confidence"],
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          evidence: { type: "array", items: { type: "string" } },
+          benefit: { type: "string" },
+          effort: { type: "string" },
+          risk: { type: "string" },
+          affected: { type: "array", items: { type: "string" } },
+          steps: { type: "array", items: { type: "string" } },
+          priority: { type: "string" },
+          confidence: { type: "string" }
+        }
+      }
+    }
+  }
+};
+
 export const fixPlanJsonSchema: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -116,14 +166,19 @@ export const revalidationJsonSchema: Record<string, unknown> = {
   }
 };
 
-export function schemaForPhase(phaseId: string): { kind: "risk-report"; schema: Record<string, unknown> } | undefined {
-  return phaseId === "risk-and-bug"
-    ? { kind: "risk-report", schema: riskReportJsonSchema }
-    : undefined;
+export function schemaForPhase(phaseId: string): { kind: "risk-report" | "phase-report"; schema: Record<string, unknown> } | undefined {
+  if (phaseId === "risk-and-bug") {
+    return { kind: "risk-report", schema: riskReportJsonSchema };
+  }
+  if ((PHASE_IDS as readonly string[]).includes(phaseId)) {
+    return { kind: "phase-report", schema: phaseReportJsonSchema };
+  }
+  return undefined;
 }
 
-export function structuredRiskPrompt(prompt: string): string {
-  return `${prompt}
+export function structuredPromptForPhase(phaseId: string, prompt: string): string {
+  if (phaseId === "risk-and-bug") {
+    return `${prompt}
 
 Additional structured-output rule:
 - Return strict JSON only. No Markdown, no code fences.
@@ -131,11 +186,28 @@ Additional structured-output rule:
 - Put all concrete risk findings in the "findings" array.
 - If no findings are supported by concrete evidence, return "findings": [] and explain the empty result in severitySummary and executiveSummary.
 `;
+  }
+
+  return `${prompt}
+
+Additional structured-output rule:
+- Return strict JSON only. No Markdown, no code fences.
+- The JSON must match RepoVista's provider-native phase-report schema.
+- Set "phaseId" to "${phaseId}".
+- Put the requested Markdown section content into "sections" as ordered heading/body pairs.
+- Put the most important evidence-backed points in "keyPoints".
+- Put concrete repository path references in "evidenceReferences".
+- Put actionable recommendations in "recommendations".
+- For feature-roadmap, include at least 6 complete "proposals" unless the repository genuinely cannot justify that many.
+`;
 }
 
 export function renderStructuredProviderOutput(kind: string, rawJson: string): string {
   if (kind === "risk-report") {
     return renderRiskReport(JSON.parse(rawJson) as Record<string, unknown>);
+  }
+  if (kind === "phase-report") {
+    return renderPhaseReport(JSON.parse(rawJson) as Record<string, unknown>);
   }
   if (kind === "fix-plan") {
     return renderFixPlan(JSON.parse(rawJson) as Record<string, unknown>);
@@ -144,6 +216,39 @@ export function renderStructuredProviderOutput(kind: string, rawJson: string): s
     return renderRevalidation(JSON.parse(rawJson) as Record<string, unknown>);
   }
   return rawJson;
+}
+
+function renderPhaseReport(parsed: Record<string, unknown>): string {
+  const phaseId = stringValue(parsed.phaseId);
+  const title = stringValue(parsed.title) || titleForPhase(phaseId);
+  const sections = readSections(parsed.sections);
+  const keyPoints = stringArray(parsed.keyPoints);
+  const evidenceReferences = stringArray(parsed.evidenceReferences);
+  const recommendations = stringArray(parsed.recommendations);
+  const proposals = readProposals(parsed.proposals);
+  const schemaBlock = {
+    schemaVersion: 1,
+    phaseId,
+    executiveSummary: stringValue(parsed.executiveSummary),
+    keyPoints,
+    evidenceReferences,
+    recommendations,
+    ...(phaseId === "feature-roadmap" ? { proposals } : {})
+  };
+
+  return `# ${title}
+
+## Executive Summary
+
+${stringValue(parsed.executiveSummary) || "No executive summary was provided."}
+
+${sections.map(renderSection).join("\n\n")}
+
+${recommendations.length ? `## Recommendations\n\n${renderList(recommendations)}\n` : ""}
+\`\`\`json
+${JSON.stringify(schemaBlock, null, 2)}
+\`\`\`
+`;
 }
 
 function renderRiskReport(parsed: Record<string, unknown>): string {
@@ -304,6 +409,61 @@ function evidenceRefs(value: unknown): StructuredFinding["evidenceReferences"] {
 
 function renderList(items: string[]): string {
   return items.length ? items.map((item) => `- ${item}`).join("\n") : "- n/a";
+}
+
+function readSections(value: unknown): Array<{ heading: string; body: string; bullets: string[] }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({
+      heading: stringValue(item.heading) || "Details",
+      body: stringValue(item.body),
+      bullets: stringArray(item.bullets)
+    }))
+    .filter((item) => item.body || item.bullets.length);
+}
+
+function renderSection(section: { heading: string; body: string; bullets: string[] }): string {
+  const bullets = section.bullets.length ? `\n\n${renderList(section.bullets)}` : "";
+  return `## ${section.heading}\n\n${section.body || "n/a"}${bullets}`;
+}
+
+function readProposals(value: unknown): StructuredRoadmapProposal[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({
+      title: stringValue(item.title) || "Untitled proposal",
+      description: stringValue(item.description),
+      evidence: stringArray(item.evidence),
+      benefit: stringValue(item.benefit),
+      effort: stringValue(item.effort),
+      risk: stringValue(item.risk),
+      affected: stringArray(item.affected),
+      steps: stringArray(item.steps),
+      priority: stringValue(item.priority),
+      confidence: stringValue(item.confidence)
+    }));
+}
+
+function titleForPhase(phaseId: string): string {
+  if (phaseId === "architecture") {
+    return "Architecture Analysis";
+  }
+  if (phaseId === "code-quality") {
+    return "Code Quality Analysis";
+  }
+  if (phaseId === "feature-roadmap") {
+    return "Feature and Improvement Roadmap";
+  }
+  if (phaseId === "summary") {
+    return "Executive Summary";
+  }
+  return "RepoVista Report";
 }
 
 function stringArray(value: unknown): string[] {

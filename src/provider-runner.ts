@@ -25,9 +25,10 @@ export async function runProviderPhase(
   const startedAt = Date.now();
   const provider = getReportProvider(request.provider);
   const structured = await prepareStructuredOutput(request, provider.capabilities.outputSchema);
+  const promptFile = await preparePromptFile(request, provider.capabilities.promptFile);
   const providerRequest = structured
-    ? { ...request, outputSchemaPath: structured.schemaPath, structuredOutputPath: structured.outputPath }
-    : request;
+    ? { ...request, outputSchemaPath: structured.schemaPath, structuredOutputPath: structured.outputPath, promptFilePath: promptFile?.promptPath }
+    : { ...request, promptFilePath: promptFile?.promptPath };
   const args = provider.buildArgs(providerRequest);
   const shouldStoreLogs = request.keepLogs || request.jsonEvents;
   const stdoutLogPath = shouldStoreLogs && request.logsDir
@@ -88,6 +89,9 @@ export async function runProviderPhase(
       });
       if (structured?.tempDir) {
         await rm(structured.tempDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+      if (promptFile?.tempDir) {
+        await rm(promptFile.tempDir, { recursive: true, force: true }).catch(() => undefined);
       }
     };
 
@@ -214,9 +218,24 @@ export async function runProviderPhase(
       });
     });
 
-    child.stdin.write(providerRequest.prompt);
+    if (!providerRequest.promptFilePath) {
+      child.stdin.write(providerRequest.prompt);
+    }
     child.stdin.end();
   });
+}
+
+async function preparePromptFile(
+  request: ProviderRunRequest,
+  providerSupportsPromptFile: boolean
+): Promise<{ tempDir: string; promptPath: string } | undefined> {
+  if (!providerSupportsPromptFile) {
+    return undefined;
+  }
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repovista-prompt-"));
+  const promptPath = path.join(tempDir, `${request.phaseId}.prompt.txt`);
+  await writeFile(promptPath, request.prompt, "utf8");
+  return { tempDir, promptPath };
 }
 
 async function prepareStructuredOutput(

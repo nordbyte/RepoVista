@@ -17,7 +17,10 @@ export type CliAction =
   | "settings-set"
   | "settings-reset"
   | "findings"
+  | "findings-ui"
   | "compare"
+  | "review"
+  | "pr-comment"
   | "doctor"
   | "providers"
   | "baseline"
@@ -80,8 +83,10 @@ export interface AuditOptions {
   incremental?: boolean;
   compareOldRun?: string;
   compareNewRun?: string;
+  reportRunDir?: string;
   compareFormat?: CompareFormat;
   compareFailOnRegression?: boolean;
+  refresh?: boolean;
   since?: string;
   prMode?: boolean;
   baseRef?: string;
@@ -384,7 +389,28 @@ export interface AuditMeta {
     githubAnnotationsJson?: string;
     structuredReportsJson?: string;
   };
+  analytics?: RunAnalytics;
   exitCode: number;
+}
+
+export interface RunAnalytics {
+  provider: AiProviderId;
+  model?: string;
+  reasoning?: string;
+  phaseCount: number;
+  totalDurationMs: number;
+  estimatedInputTokens: number;
+  estimatedOutputTokens?: number;
+  estimatedTotalTokens: number;
+  estimatedCostUsd?: number;
+  pricingKnown: boolean;
+  phases: Array<{
+    id: string;
+    status: string;
+    durationMs: number;
+    promptTokens: number;
+    reportFile: string;
+  }>;
 }
 
 export interface ProjectFileSummary {
@@ -584,9 +610,10 @@ export interface ProviderRunRequest {
   keepLogs: boolean;
   timeoutSeconds: number;
   outputSchema?: Record<string, unknown>;
-  outputSchemaKind?: "risk-report" | "fix-plan" | "revalidation";
+  outputSchemaKind?: "risk-report" | "phase-report" | "fix-plan" | "revalidation";
   outputSchemaPath?: string;
   structuredOutputPath?: string;
+  promptFilePath?: string;
 }
 
 export interface ProviderRunResult {

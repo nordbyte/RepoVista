@@ -58,6 +58,7 @@ Initialize the repository before using parallel planning:
 ```sh
 repovista init
 repovista plan
+repovista plan --refresh
 ```
 
 Examples:
@@ -65,6 +66,9 @@ Examples:
 ```sh
 repovista audit --language English --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
+repovista audit --provider gemini --model gemini-2.5-pro
+repovista audit --provider opencode --model anthropic/claude-sonnet-4-5
+repovista audit --provider aider --model sonnet
 repovista audit --audit-profile release-readiness
 repovista audit --workspace packages/api --incremental
 repovista audit --parallel auto
@@ -86,13 +90,18 @@ repovista providers test codex
 repovista profiles
 repovista ci init --dry-run
 repovista compare .repovista/old-run .repovista/new-run --format json --fail-on-regression
+repovista compare .repovista/old-run .repovista/new-run --format html
+repovista review .repovista/latest-run
+repovista pr-comment .repovista/latest-run --dry-run
 repovista findings --json
 repovista findings --export sarif
+repovista findings-ui
 repovista next
 repovista show fnd_abc123def456
 repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista triage --all --status uncertain --note "needs review"
 repovista revalidate fnd_abc123def456
+repovista revalidate --all --since origin/main
 repovista revalidate fnd_abc123def456 --provider-revalidate
 repovista baseline add fnd_abc123def456 --note "accepted risk"
 repovista suppress fnd_abc123def456 --note "accepted risk"
@@ -142,7 +151,7 @@ Each run creates its own timestamped folder:
     logs/
 ```
 
-`project-map.json` is written by `repovista init` and stores the repository areas, semantic features, recommended thread count, and default shard assignments. `.repovista/features/` stores durable feature records with status, ownership, linked findings, patch attempts, and analysis history. `.repovista/locks/` stores feature claim locks for parallel/deep-review work, and `repovista clean-locks` removes stale locks. `.repovista/findings/` stores the persistent finding lifecycle state across runs. `.repovista/patches/` stores optional fix/patch attempts. `baseline.json` stores accepted suppressions, and `cache/project-scan.json` stores the latest project scan fingerprint for incremental runs. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `features.json` stores the run-specific semantic feature map and optional diff scope. `findings.json` contains active structured risk findings. For providers with native structured output support, such as Codex, RepoVista requests a provider-native JSON schema first and renders Markdown from that structured output; the `repovista-findings` sentinel remains as a compatibility and provider-fallback source. `report.json` is the complete machine-readable run artifact with metadata, evidence, findings, suppressed findings, structured phase reports, prompt manifest, workspace metadata, and cache metadata. `structured-reports.json` stores normalized phase schemas for architecture, code quality, risk, roadmap, and summary phases. `prompt-manifest.json` records prompt sizes, approximate token counts, project file hashes where available, inclusion reasons, omitted files, truncation reasons, semantic features, prompt guidance files, and diff scope. `summary.json` contains machine-readable run, phase, finding, provider, parallel, evidence, and output summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, review mode, phase status, shard status, deep-review shard status, report quality score, report quality warnings, workspace scope, cache status, and preflight information. `findings.jsonl`, `findings.sarif`, `github-annotations.json`, and the full `report.html` are written when requested with `--export`. `shards/` is created when a shardable phase runs in parallel. `deep-review/` is created when risk deep review runs feature-sliced follow-up passes. `logs/` is created only with `--keep-logs` or `--json`.
+`project-map.json` is written by `repovista init` and stores the repository areas, semantic features, recommended thread count, and default shard assignments. `.repovista/features/` stores durable feature records with status, ownership, linked findings, patch attempts, and analysis history. `.repovista/locks/` stores feature claim locks for parallel/deep-review work, and `repovista clean-locks` removes stale locks. `.repovista/findings/` stores the persistent finding lifecycle state across runs. `.repovista/patches/` stores optional fix/patch attempts. `baseline.json` stores accepted suppressions, and `cache/project-scan.json` stores the latest project scan fingerprint for incremental runs. `index.md` is the entry point for each audit run. The detail reports cover architecture, code quality, risks/bugs/security, and the feature roadmap. `00-inventory.md` includes the project inventory and an evidence pack with runtime, package, Git, selected AI provider, and optional local check results. `features.json` stores the run-specific semantic feature map and optional diff scope. `findings.json` contains active structured risk findings. For providers with native structured output support, such as Codex, RepoVista requests provider-native JSON schemas and renders Markdown from that structured output; all detail phases have structured schemas, while the `repovista-findings` sentinel remains as a compatibility and provider-fallback source. `report.json` is the complete machine-readable run artifact with metadata, evidence, findings, suppressed findings, structured phase reports, prompt manifest, workspace metadata, cache metadata, and run analytics. `structured-reports.json` stores normalized phase schemas for architecture, code quality, risk, roadmap, and summary phases. `prompt-manifest.json` records prompt sizes, approximate token counts, project file hashes where available, inclusion reasons, omitted files, truncation reasons, semantic features, prompt guidance files, and diff scope. `summary.json` contains machine-readable run, phase, finding, provider, parallel, evidence, analytics, and output summaries. `meta.json` records provider and parallel execution settings, including provider, model, reasoning effort, fast mode, profile, sandbox, review mode, phase status, shard status, deep-review shard status, report quality score, report quality warnings, workspace scope, cache status, analytics, and preflight information. `findings.jsonl`, `findings.sarif`, `github-annotations.json`, and the interactive `report.html` are written when requested with `--export`. `shards/` is created when a shardable phase runs in parallel. `deep-review/` is created when risk deep review runs feature-sliced follow-up passes. `logs/` is created only with `--keep-logs` or `--json`.
 
 ## Comparing Reports
 
@@ -156,6 +165,8 @@ The comparison prints Markdown with provider/model/reasoning metadata, finding c
 
 Use `--format json` or `--format html` for machine-readable or browser output. `--fail-on-regression` exits with code `2` when the new run adds critical or high findings.
 
+`--format html` includes browser-side filters for finding status, severity, and change type. `repovista review <run-dir>` reviews one completed run for quality-gate warnings, weak evidence references, and stale-checkout signals. `repovista pr-comment <run-dir> --dry-run` renders the pull-request summary body; without `--dry-run`, RepoVista posts it with `gh pr comment`.
+
 ## Finding Workflow
 
 RepoVista assigns stable `fnd_<hash>` finding ids from severity, title, category, affected paths, and evidence references. New audits update `.repovista/findings/` so findings can be triaged and revalidated independently from a single report run.
@@ -168,9 +179,11 @@ repovista triage fnd_abc123def456 --status false-positive --note "not reachable 
 repovista triage --all --status uncertain --note "bulk review pass"
 repovista revalidate fnd_abc123def456
 repovista revalidate --all
+repovista revalidate --all --since origin/main
 repovista revalidate fnd_abc123def456 --provider-revalidate
 repovista findings --json
 repovista findings --export sarif,github
+repovista findings-ui
 repovista baseline list
 repovista baseline add fnd_abc123def456 --note "accepted risk"
 repovista baseline remove fnd_abc123def456
@@ -180,7 +193,7 @@ repovista fix fnd_abc123def456 --dry-run
 repovista patches
 ```
 
-Evidence validation checks that referenced paths stay inside the project root, exist, are present in the risk prompt context manifest when available, and optionally match line ranges or quotes from schema-based `evidenceReferences`. Local revalidation is read-only: valid evidence keeps a finding open, missing or changed evidence marks it fixed when all references disappeared, and weak evidence marks it uncertain. Provider revalidation asks the configured provider for a read-only status decision and stores the revalidation report under `.repovista/revalidations/`. `repovista issue` uses the GitHub CLI (`gh`) and supports `--dry-run` for previewing the issue body. `repovista fix` is a separate opt-in write workflow: `--dry-run` previews the plan, while a non-dry-run fix uses `workspace-write`, records a patch attempt under `.repovista/patches/`, and never commits or pushes by itself.
+Evidence validation checks that referenced paths stay inside the project root, exist, are present in the risk prompt context manifest when available, and optionally match line ranges or quotes from schema-based `evidenceReferences`. Local revalidation is read-only: valid evidence keeps a finding open, missing or changed evidence marks it fixed when all references disappeared, and weak evidence marks it uncertain. `--since <ref>` scopes `repovista revalidate --all` to findings whose paths intersect changed files. Provider revalidation asks the configured provider for a read-only status decision and stores the revalidation report under `.repovista/revalidations/`. `repovista findings-ui` opens an interactive terminal triage menu. `repovista issue` uses the GitHub CLI (`gh`) and supports `--dry-run` for previewing the issue body. `repovista fix` is a separate opt-in write workflow: `--dry-run` previews the plan, while a non-dry-run fix uses `workspace-write`, records a patch attempt under `.repovista/patches/`, and never commits or pushes by itself.
 
 Baseline suppressions remove accepted findings from active run outputs and record them as suppressed findings in `report.json`, `summary.json`, and `meta.json`. Issue creation deduplicates existing issues by finding id; use `--update-existing` to add a fresh comment and update labels or assignees instead of creating another issue.
 
@@ -202,8 +215,9 @@ Workspace detection reads npm/yarn package workspaces and `pnpm-workspace.yaml`.
 
 | Option | Purpose |
 |---|---|
-| `--provider <name>` | Report provider, `codex`, `claude`, or a loaded plugin, default `codex` |
+| `--provider <name>` | Report provider, `codex`, `claude`, `gemini`, `opencode`, `aider`, or a loaded plugin, default `codex` |
 | `--parallel <mode>` | Parallel audit mode, `off`, `auto`, or `1`-`5` threads, default `off` |
+| `--refresh` | Refresh cached project metadata for commands that support it, currently `plan` |
 | `--no-parallel` | Disable a saved parallel default |
 | `--out <dir>` | Report output directory, default `.repovista` |
 | `--resume <run-dir>` | Resume or complete an existing RepoVista run directory |
@@ -306,13 +320,13 @@ Claude Code can be selected with `--provider claude`. RepoVista uses non-interac
 - `--model <model>` when a model is set, for example `sonnet`, `opus`, or a full Claude model name
 - `--effort <effort>` when reasoning is set; Claude Code currently supports `low`, `medium`, `high`, `xhigh`, and `max`
 
-Provider adapters expose capabilities such as native JSON schema support, read-only sandbox support, workspace-write support, JSON event support, and prompt-file support. `repovista providers list --json` includes those capability flags for built-ins and loaded provider plugins.
+Provider adapters expose capabilities such as native JSON schema support, read-only sandbox support, workspace-write support, JSON event support, and prompt-file support. `repovista providers list --json` includes those capability flags for built-ins and loaded provider plugins. Built-in providers currently include Codex CLI, Claude Code CLI, Gemini CLI, OpenCode CLI, and Aider CLI.
 
 ## Project Initialization and Parallel Audits
 
 Run `repovista init` once from the project root before enabling parallel audits. It writes `.repovista/project-map.json` with a compact project map: detected areas, languages, frameworks, package managers, file counts, semantic feature records, validation commands, and recommended thread assignments. It also refreshes `.repovista/features/`, which lets RepoVista keep per-feature status, ownership, finding links, and patch history across runs.
 
-`repovista plan` reads that project map and prints the current recommendation. Use it after larger refactors or directory changes to decide whether `--parallel auto` is useful.
+`repovista plan` reads that project map and prints the current recommendation. It warns when the saved project map appears stale compared with the current scan. Use `repovista plan --refresh` after larger refactors or directory changes to refresh the map and decide whether `--parallel auto` is useful.
 
 Parallel execution is provider-neutral. Codex and Claude Code both run as independent provider sessions. RepoVista uses a map/reduce flow for shardable detail phases:
 
@@ -465,7 +479,8 @@ Very large repositories
 ```sh
 npm install
 npm run typecheck
+npm run golden:reports
 npm test
 ```
 
-The unit tests do not call provider CLIs for real. Codex and Claude provider paths are tested with mocked processes.
+The unit tests do not call provider CLIs for real. Provider paths are tested with mocked processes. `npm run golden:reports` validates the bundled full-run fixture under `test/fixtures/golden-report-run/` against the same quality gates used for generated reports.

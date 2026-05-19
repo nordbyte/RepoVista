@@ -31,6 +31,7 @@ export const DEFAULT_OPTIONS: AuditOptions = {
   keepLogs: false,
   providerRevalidate: false,
   dryRun: false,
+  refresh: false,
   issueLabels: [],
   issueAssignees: []
 };
@@ -159,6 +160,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
         options.parallel = "off";
         options.parallelExplicit = true;
         break;
+      case "refresh":
+        options.refresh = true;
+        break;
       case "keep-logs":
         options.keepLogs = true;
         break;
@@ -231,6 +235,14 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       options.compareFormat = "json";
     }
     return { action: "compare", options };
+  }
+
+  if (command === "review" || command === "pr-comment") {
+    if (positionals.length !== 2) {
+      throw new CliUsageError(`Command ${command} requires one run directory.`);
+    }
+    options.reportRunDir = requireNonEmpty("run", positionals[1]);
+    return { action: command, options };
   }
 
   if (command === "doctor") {
@@ -352,6 +364,13 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       throw new CliUsageError("Command findings does not take positional arguments.");
     }
     return { action: "findings", options };
+  }
+
+  if (command === "findings-ui") {
+    if (positionals.length > 1) {
+      throw new CliUsageError("Command findings-ui does not take positional arguments.");
+    }
+    return { action: "findings-ui", options };
   }
 
   if (command === "show" || command === "triage" || command === "revalidate") {
@@ -531,6 +550,8 @@ function isCommand(value: string): boolean {
   return value === "audit" ||
     value === "init" ||
     value === "plan" ||
+    value === "review" ||
+    value === "pr-comment" ||
     value === "doctor" ||
     value === "providers" ||
     value === "profiles" ||
@@ -540,6 +561,7 @@ function isCommand(value: string): boolean {
     value === "clean-locks" ||
     value === "settings" ||
     value === "findings" ||
+    value === "findings-ui" ||
     value === "compare" ||
     value === "next" ||
     value === "show" ||
@@ -558,6 +580,9 @@ function maxPositionalsFor(positionals: string[]): number {
   }
   if (command === "compare") {
     return 3;
+  }
+  if (command === "review" || command === "pr-comment") {
+    return 2;
   }
   if (command === "providers" && positionals[1] === "test") {
     return 3;

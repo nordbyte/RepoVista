@@ -14,6 +14,25 @@ test("golden roadmap fixture satisfies structured quality gates", async () => {
   assert.equal(quality.warnings.length, 0);
 });
 
+test("golden full report fixture satisfies phase quality gates", async () => {
+  const reports = [
+    ["architecture", "01-architecture-report.md"],
+    ["code-quality", "02-code-quality-report.md"],
+    ["risk-and-bug", "03-risk-and-bug-report.md"],
+    ["feature-roadmap", "04-feature-roadmap.md"],
+    ["summary", "index.md"]
+  ];
+
+  for (const [phaseId, fileName] of reports) {
+    const markdown = await readFile(new URL(`./fixtures/golden-report-run/${fileName}`, import.meta.url), "utf8");
+    const structured = extractStructuredPhaseReport(markdown, phaseId, fileName);
+    const quality = validateReportQuality(phaseId, markdown);
+
+    assert.equal(structured.phaseId, phaseId);
+    assert.equal(quality.passed, true, `${fileName}: ${quality.warnings.join("; ")}`);
+  }
+});
+
 test("new CLI flows parse noninteractive settings, exports, repair and PR mode", () => {
   const settingsSet = parseCliArgs(["settings", "set", "model", "gpt-5.5"]);
   assert.equal(settingsSet.action, "settings-set");

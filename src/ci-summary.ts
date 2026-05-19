@@ -27,6 +27,8 @@ Provider: ${meta.ai.displayName}
 Model: ${meta.ai.model}
 Reasoning: ${meta.ai.reasoning}
 Review mode: ${meta.options.reviewMode ?? "default"}
+Estimated input tokens: ${meta.analytics?.estimatedInputTokens ?? "not recorded"}
+Total phase time: ${meta.analytics ? `${Math.round(meta.analytics.totalDurationMs)}ms` : "not recorded"}
 
 | Severity | Findings |
 |---|---:|

@@ -5,7 +5,7 @@ import { reportPath } from "./reports.js";
 import { canReuseShardReport, safeReadReport } from "./resume-manager.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { getReportProvider } from "./providers/index.js";
-import { schemaForPhase, structuredRiskPrompt } from "./provider-schema.js";
+import { schemaForPhase, structuredPromptForPhase } from "./provider-schema.js";
 import type {
   AuditOptions,
   ParallelExecutionMeta,
@@ -255,14 +255,14 @@ function structuredRequest(
   options: AuditOptions,
   phaseId: string,
   prompt: string
-): { prompt: string; outputSchema?: Record<string, unknown>; outputSchemaKind?: "risk-report" } {
+): { prompt: string; outputSchema?: Record<string, unknown>; outputSchemaKind?: "risk-report" | "phase-report" } {
   const provider = getReportProvider(options.provider ?? "codex");
   const schema = schemaForPhase(phaseId);
   if (!schema || !provider.capabilities.outputSchema) {
     return { prompt };
   }
   return {
-    prompt: structuredRiskPrompt(prompt),
+    prompt: structuredPromptForPhase(phaseId, prompt),
     outputSchema: schema.schema,
     outputSchemaKind: schema.kind
   };

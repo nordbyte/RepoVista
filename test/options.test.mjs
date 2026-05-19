@@ -100,6 +100,7 @@ test("init and plan commands are recognized", () => {
   assert.equal(parseCliArgs(["init"]).action, "init");
   assert.equal(parseCliArgs(["plan", "--parallel", "auto"]).action, "plan");
   assert.equal(parseCliArgs(["plan", "--parallel", "auto"]).options.parallel, "auto");
+  assert.equal(parseCliArgs(["plan", "--refresh"]).options.refresh, true);
   assert.equal(parseCliArgs(["audit", "--no-parallel"]).options.parallel, "off");
   assert.throws(() => parseCliArgs(["--parallel", "9"]), /--parallel/);
 });
@@ -147,6 +148,18 @@ test("new operational commands and options are recognized", () => {
   assert.equal(providers.options.providerAction, "test");
   assert.equal(providers.options.provider, "codex");
 
+  assert.equal(parseCliArgs(["providers", "test", "gemini"]).options.provider, "gemini");
+
+  const review = parseCliArgs(["review", ".repovista/run", "--json"]);
+  assert.equal(review.action, "review");
+  assert.equal(review.options.reportRunDir, ".repovista/run");
+  assert.equal(review.options.json, true);
+
+  const prComment = parseCliArgs(["pr-comment", ".repovista/run", "--dry-run"]);
+  assert.equal(prComment.action, "pr-comment");
+  assert.equal(prComment.options.reportRunDir, ".repovista/run");
+  assert.equal(prComment.options.dryRun, true);
+
   const baseline = parseCliArgs(["baseline", "add", "fnd_123", "--note", "accepted"]);
   assert.equal(baseline.action, "baseline");
   assert.equal(baseline.options.baselineAction, "add");
@@ -183,6 +196,8 @@ test("new operational commands and options are recognized", () => {
   assert.equal(openPr.options.patchId, "pat_123");
   assert.equal(openPr.options.patchBranch, "repovista/fix");
   assert.equal(openPr.options.patchTitle, "Fix");
+
+  assert.equal(parseCliArgs(["findings-ui"]).action, "findings-ui");
 });
 
 test("audit profiles, workspaces, issue metadata, and incremental mode parse", () => {

@@ -16,11 +16,49 @@ const FALLBACK_CLAUDE_MODELS: ProviderModelInfo[] = [
   claudeModel("haiku", "Claude Haiku", "Latest Claude Haiku alias")
 ];
 
+const FALLBACK_GEMINI_MODELS: ProviderModelInfo[] = [
+  genericModel("gemini-2.5-pro", "Gemini 2.5 Pro"),
+  genericModel("gemini-2.5-flash", "Gemini 2.5 Flash")
+];
+
+const FALLBACK_OPENCODE_MODELS: ProviderModelInfo[] = [
+  genericModel("anthropic/claude-sonnet-4-5", "Claude Sonnet via OpenCode"),
+  genericModel("openai/gpt-5.5", "GPT-5.5 via OpenCode"),
+  genericModel("google/gemini-2.5-pro", "Gemini 2.5 Pro via OpenCode")
+];
+
+const FALLBACK_AIDER_MODELS: ProviderModelInfo[] = [
+  genericModel("sonnet", "Claude Sonnet"),
+  genericModel("gpt-5.5", "GPT-5.5"),
+  genericModel("gemini/gemini-2.5-pro", "Gemini 2.5 Pro")
+];
+
 export async function loadProviderModels(provider: AiProviderId): Promise<ProviderModelInfo[]> {
   if (provider === "codex") {
     return loadCodexModels();
   }
-  return FALLBACK_CLAUDE_MODELS;
+  if (provider === "claude") {
+    return FALLBACK_CLAUDE_MODELS;
+  }
+  if (provider === "gemini") {
+    return FALLBACK_GEMINI_MODELS;
+  }
+  if (provider === "opencode") {
+    return FALLBACK_OPENCODE_MODELS;
+  }
+  if (provider === "aider") {
+    return FALLBACK_AIDER_MODELS;
+  }
+  return [];
+}
+
+function genericModel(slug: string, displayName: string): ProviderModelInfo {
+  return {
+    slug,
+    displayName,
+    supportedReasoning: ["low", "medium", "high", "xhigh"].map((effort) => ({ effort })),
+    supportsFastMode: false
+  };
 }
 
 export function reasoningOptionsForProviderModel(

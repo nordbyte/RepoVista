@@ -173,7 +173,8 @@ function renderTemplate(template: string, request: ProviderRunRequest): string {
     reasoning: request.reasoning ?? "",
     sandbox: request.sandbox,
     jsonEvents: request.jsonEvents ? "true" : "false",
-    fastMode: request.fastMode ? "true" : "false"
+    fastMode: request.fastMode ? "true" : "false",
+    promptFilePath: request.promptFilePath ?? ""
   };
   return maskSensitiveText(template.replace(/\{([A-Za-z0-9_.-]+)\}/g, (_match, key: string) => values[key] ?? ""));
 }

@@ -20,10 +20,13 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista profiles [--json]", name: "profiles", help: "List built-in audit profiles" },
   { usage: "repovista ci init [--dry-run] [--force]", name: "ci init", help: "Create a GitHub Actions workflow for RepoVista" },
   { usage: "repovista compare <old-run-dir> <new-run-dir> [--format markdown|json|html] [--fail-on-regression]", name: "compare", help: "Compare two RepoVista run directories" },
+  { usage: "repovista review <run-dir> [--json]", name: "review", help: "Review one RepoVista run for report quality, evidence, and stale state risks" },
+  { usage: "repovista pr-comment <run-dir> [--dry-run]", name: "pr-comment", help: "Render or post a pull request summary comment for a RepoVista run" },
   { usage: "repovista baseline [list|add|remove|prune] [finding-id] [--note <text>]", name: "baseline", help: "Manage baseline suppressions for known findings" },
   { usage: "repovista suppress <finding-id> [--note <text>]", name: "suppress", help: "Shortcut for adding a finding to the baseline" },
   { usage: "repovista clean-locks [--force]", name: "clean-locks", help: "Remove stale RepoVista feature locks" },
   { usage: "repovista findings [--status <status>] [--all] [--json] [--export <formats>]", name: "findings", help: "List persisted findings, emit JSON, or export them" },
+  { usage: "repovista findings-ui", name: "findings-ui", help: "Open an interactive terminal UI for finding triage" },
   { usage: "repovista next [--status <status>]", name: "next", help: "Show the next prioritized finding from the persistent finding state" },
   { usage: "repovista show <finding-id>", name: "show", help: "Show one persisted finding with evidence and lifecycle history" },
   { usage: "repovista triage <finding-id|--all> --status <status> [--note <text>]", name: "triage", help: "Update the lifecycle status of one finding" },
@@ -38,8 +41,9 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
 ];
 
 export const CLI_OPTIONS: readonly CliOptionDefinition[] = [
-  { name: "provider", kind: "value", help: "Report provider: codex, claude, or a loaded plugin (default: codex)" },
+  { name: "provider", kind: "value", help: "Report provider: codex, claude, gemini, opencode, aider, or a loaded plugin (default: codex)" },
   { name: "parallel", kind: "value", help: "Parallel audit mode: off, auto, or 1-5 threads (default: off)" },
+  { name: "refresh", kind: "boolean", help: "Refresh cached project metadata for commands that support it" },
   { name: "no-parallel", kind: "boolean", help: "Disable saved parallel default" },
   { name: "out", kind: "value", help: "Report output directory (default: .repovista)" },
   { name: "resume", kind: "value", help: "Resume or complete an existing RepoVista run directory" },

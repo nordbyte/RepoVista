@@ -1,5 +1,5 @@
 import { PreflightError } from "./errors.js";
-import { initializeProjectMap, loadProjectMap, renderProjectPlan } from "./project-map.js";
+import { checkProjectMapFreshness, initializeProjectMap, loadProjectMap, renderProjectPlan } from "./project-map.js";
 import { isRecognizableProject } from "./preflight.js";
 import type { AuditOptions } from "./types.js";
 
@@ -14,9 +14,18 @@ export async function runInitCommand(options: AuditOptions, projectRoot = proces
 }
 
 export async function runPlanCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
+  if (options.refresh) {
+    const { map, mapPath } = await initializeProjectMap(projectRoot, options);
+    return `Refreshed RepoVista project map: ${mapPath}\n\n${renderProjectPlan(map, options.parallel === "off" ? "auto" : options.parallel)}`;
+  }
+
   const loaded = await loadProjectMap(projectRoot, options.outDir);
   if (!loaded) {
     throw new PreflightError("RepoVista project map was not found. Run `repovista init` first.");
   }
-  return renderProjectPlan(loaded.map, options.parallel === "off" ? "auto" : options.parallel);
+  const freshness = await checkProjectMapFreshness(projectRoot, options, loaded.map);
+  const warning = freshness.stale
+    ? `Warning: RepoVista project map appears stale (${freshness.warnings.join("; ")}). Run \`repovista plan --refresh\` or \`repovista init\` before parallel audits.\n\n`
+    : "";
+  return `${warning}${renderProjectPlan(loaded.map, options.parallel === "off" ? "auto" : options.parallel)}`;
 }

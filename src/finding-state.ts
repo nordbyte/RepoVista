@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { validateFindingEvidence } from "./evidence-validation.js";
+import { collectDiffScope } from "./git-diff.js";
 import { writeFindingExports } from "./exporters.js";
 import {
   findingStateDirectory,
@@ -167,10 +168,18 @@ export async function runTriageFindingCommand(options: AuditOptions, projectRoot
 
 export async function runRevalidateFindingCommand(options: AuditOptions, projectRoot = process.cwd(), now = new Date()): Promise<string> {
   const findings = await loadStoredFindings(projectRoot, options.outDir);
-  const selected = options.allFindings
+  const diffScope = options.since ? await collectDiffScope(projectRoot, options.since) : undefined;
+  const changedFiles = new Set(diffScope?.changedFiles ?? []);
+  const baseSelected = options.allFindings
     ? findings
     : [findings.find((finding) => finding.id === requireFindingId(options))].filter((finding): finding is StructuredFinding => Boolean(finding));
+  const selected = diffScope && options.allFindings
+    ? baseSelected.filter((finding) => findingTouchedByDiff(finding, changedFiles))
+    : baseSelected;
   if (!selected.length) {
+    if (diffScope && options.allFindings) {
+      return `No RepoVista findings intersect changed files since ${diffScope.ref}.\n`;
+    }
     throw new RepoVistaError(options.allFindings ? "No findings found." : `Finding not found: ${requireFindingId(options)}`);
   }
 
@@ -205,7 +214,10 @@ export async function runRevalidateFindingCommand(options: AuditOptions, project
     .filter((finding) => selectedIds.has(finding.id))
     .map((finding) => `- ${finding.id}: ${finding.status}${finding.evidenceValidation?.warnings.length ? ` (${finding.evidenceValidation.warnings.join("; ")})` : ""}`)
     .join("\n");
-  return `Revalidated RepoVista findings:\n${rows}\n`;
+  const scopeLine = diffScope
+    ? `Changed-file scope: ${diffScope.changedFiles.length} file(s) since ${diffScope.ref}.\n`
+    : "";
+  return `${scopeLine}Revalidated RepoVista findings:\n${rows}\n`;
 }
 
 export async function runProviderRevalidateFindingCommand(
@@ -527,6 +539,16 @@ function statusFromValidation(passed: boolean, warnings: string[], referenceCoun
     return "fixed";
   }
   return "uncertain";
+}
+
+function findingTouchedByDiff(finding: StructuredFinding, changedFiles: Set<string>): boolean {
+  if (!changedFiles.size) {
+    return false;
+  }
+  return finding.paths.some((findingPath) =>
+    changedFiles.has(findingPath) ||
+    Array.from(changedFiles).some((changedFile) => changedFile.startsWith(`${findingPath.replace(/\/+$/g, "")}/`))
+  );
 }
 
 function appendHistory(

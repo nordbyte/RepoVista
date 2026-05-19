@@ -10,7 +10,8 @@ import type {
   PromptManifest,
   RunPaths,
   StructuredPhaseReport,
-  StructuredFinding
+  StructuredFinding,
+  RunAnalytics
 } from "./types.js";
 
 export async function writeStructuredOutputs(
@@ -32,8 +33,10 @@ export async function writeStructuredOutputs(
   const featureStateDir = await featureStateDirectory(meta.projectRoot, meta.options.outDir);
   const findingCounts = findingCountsBySeverity(findings);
   const suppressedFindingCounts = findingCountsBySeverity(suppressedFindings);
+  const analytics = buildRunAnalytics(meta, promptManifest);
   meta.findingCounts = findingCounts;
   meta.suppressedFindingCounts = suppressedFindingCounts;
+  meta.analytics = analytics;
   await writeJsonFile(findingsPath, findings);
   await writeJsonFile(promptManifestPath, promptManifest);
   await writeJsonFile(structuredReportsPath, structuredReports);
@@ -61,7 +64,8 @@ export async function writeStructuredOutputs(
     findingCounts,
     suppressedFindingCounts,
     structuredReports,
-    promptManifest
+    promptManifest,
+    analytics
   });
   await writeJsonFile(summaryPath, {
     tool: meta.tool,
@@ -86,6 +90,7 @@ export async function writeStructuredOutputs(
     phases: meta.phases,
     findingCounts,
     suppressedFindingCounts,
+    analytics,
     outputs: {
       reportJson: reportJsonPath,
       promptManifestJson: promptManifestPath,
@@ -106,5 +111,28 @@ export async function writeStructuredOutputs(
     featuresJson: featuresPath,
     structuredReportsJson: structuredReportsPath,
     ...exportOutputs
+  };
+}
+
+function buildRunAnalytics(meta: AuditMeta, promptManifest: PromptManifest): RunAnalytics {
+  const promptTokensByPhase = new Map(promptManifest.phases.map((phase) => [phase.phaseId, phase.approximateTokens]));
+  const phases = meta.phases.map((phase) => ({
+    id: phase.id,
+    status: phase.status,
+    durationMs: phase.durationMs ?? 0,
+    promptTokens: promptTokensByPhase.get(phase.id) ?? 0,
+    reportFile: phase.reportFile
+  }));
+  const estimatedInputTokens = phases.reduce((sum, phase) => sum + phase.promptTokens, 0);
+  return {
+    provider: meta.ai.provider,
+    model: meta.ai.model,
+    reasoning: meta.ai.reasoning,
+    phaseCount: phases.length,
+    totalDurationMs: phases.reduce((sum, phase) => sum + phase.durationMs, 0),
+    estimatedInputTokens,
+    estimatedTotalTokens: estimatedInputTokens,
+    pricingKnown: false,
+    phases
   };
 }

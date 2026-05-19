@@ -6,7 +6,8 @@ export function extractStructuredPhaseReport(markdown: string, phaseId: string, 
   const candidates = extractJsonObjectCandidates(markdown)
     .map((block) => parseJsonObject(block))
     .filter((value): value is Record<string, unknown> => Boolean(value));
-  const schema = candidates.find((candidate) => candidate.phaseId === phaseId) ??
+  const schema = candidates.find((candidate) => candidate.phaseId === phaseId && isPhaseSchemaCandidate(candidate, phaseId) && !Array.isArray(candidate.findings)) ??
+    candidates.find((candidate) => candidate.phaseId === phaseId) ??
     candidates.find((candidate) => candidate.schemaVersion === 1 && isPhaseSchemaCandidate(candidate, phaseId));
 
   if (!schema) {

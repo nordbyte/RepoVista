@@ -17,9 +17,11 @@ import {
   runShowFindingCommand,
   runTriageFindingCommand
 } from "./finding-state.js";
+import { runFindingsMenu } from "./finding-menu.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
+import { runPrCommentCommand, runReviewCommand } from "./report-review.js";
 import { runProfilesCommand } from "./profiles.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
 import { runCleanLocksCommand } from "./feature-state.js";
@@ -100,6 +102,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       return 0;
     }
+    if (optionsWithSettings.action === "review") {
+      process.stdout.write(await runReviewCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "pr-comment") {
+      process.stdout.write(await runPrCommentCommand(optionsWithSettings.options));
+      return 0;
+    }
     if (optionsWithSettings.action === "baseline" || optionsWithSettings.action === "suppress") {
       process.stdout.write(await runBaselineCommand(optionsWithSettings.options));
       return 0;
@@ -114,6 +124,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "findings") {
       process.stdout.write(await runListFindingsCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "findings-ui") {
+      process.stdout.write(await runFindingsMenu(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "show") {

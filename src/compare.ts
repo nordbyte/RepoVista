@@ -189,6 +189,16 @@ export function renderRunComparisonHtml(comparison: RunComparison): string {
 <td>${comparison.findingCounts.new[severity] ?? 0}</td>
 <td>${formatDelta(comparison.findingCounts.deltas[severity] ?? 0)}</td>
 </tr>`).join("\n");
+  const findingRows = [
+    ...comparison.changes.added.map((finding) => ({ kind: "added", finding })),
+    ...comparison.changes.resolved.map((finding) => ({ kind: "resolved", finding })),
+    ...comparison.changes.persisting.map((finding) => ({ kind: "persisting", finding }))
+  ].map(({ kind, finding }) => `<tr class="finding-row" data-kind="${kind}" data-severity="${finding.severity}" data-search="${escapeHtml(`${finding.title} ${finding.paths.join(" ")} ${finding.recommendation ?? ""}`.toLowerCase())}">
+<td>${kind}</td>
+<td>${escapeHtml(finding.severity)}</td>
+<td>${escapeHtml(finding.title)}</td>
+<td>${escapeHtml(finding.paths.join(", ") || "n/a")}</td>
+</tr>`).join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -199,6 +209,9 @@ export function renderRunComparisonHtml(comparison: RunComparison): string {
     table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
     th, td { border: 1px solid #d4d4d4; padding: .5rem; text-align: left; vertical-align: top; }
     th { background: #f5f5f5; }
+    .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; margin: 1rem 0; }
+    input, select { font: inherit; padding: .45rem .55rem; border: 1px solid #bdbdbd; border-radius: 6px; }
+    .hidden { display: none; }
     pre { white-space: pre-wrap; background: #f7f7f7; padding: 1rem; border: 1px solid #d4d4d4; }
   </style>
 </head>
@@ -209,7 +222,34 @@ export function renderRunComparisonHtml(comparison: RunComparison): string {
     <thead><tr><th>Severity</th><th>Old</th><th>New</th><th>Delta</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
+  <h2>Finding Changes</h2>
+  <div class="filters">
+    <label>Search <input id="finding-search" type="search"></label>
+    <label>Change <select id="kind-filter"><option value="all">all</option><option value="added">added</option><option value="resolved">resolved</option><option value="persisting">persisting</option></select></label>
+    <label>Severity <select id="severity-filter"><option value="all">all</option><option value="critical">critical</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option><option value="unknown">unknown</option></select></label>
+  </div>
+  <table>
+    <thead><tr><th>Change</th><th>Severity</th><th>Title</th><th>Paths</th></tr></thead>
+    <tbody>${findingRows || "<tr><td colspan=\"4\">No finding changes</td></tr>"}</tbody>
+  </table>
+  <h2>Markdown Detail</h2>
   <pre>${escapeHtml(markdown)}</pre>
+  <script>
+    const rows = Array.from(document.querySelectorAll(".finding-row"));
+    const search = document.getElementById("finding-search");
+    const kind = document.getElementById("kind-filter");
+    const severity = document.getElementById("severity-filter");
+    function applyFilters() {
+      const text = String(search.value || "").toLowerCase();
+      for (const row of rows) {
+        const show = (!text || row.dataset.search.includes(text)) &&
+          (kind.value === "all" || row.dataset.kind === kind.value) &&
+          (severity.value === "all" || row.dataset.severity === severity.value);
+        row.classList.toggle("hidden", !show);
+      }
+    }
+    [search, kind, severity].forEach((control) => control.addEventListener("input", applyFilters));
+  </script>
 </body>
 </html>
 `;

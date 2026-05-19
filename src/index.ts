@@ -8,13 +8,14 @@ export { buildRunComparison, compareHasRegression, runCompareCommand, renderRunC
 export { loadCodexModels, parseCodexModelCatalog, reasoningOptionsForModel } from "./codex-models.js";
 export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
+export { renderPrComment, renderRunReview, reviewRunDirectory, runPrCommentCommand, runReviewCommand } from "./report-review.js";
 export { renderGithubStepSummary } from "./ci-summary.js";
 export { writeFindingExports } from "./exporters.js";
 export { runDoctorCommand } from "./doctor.js";
 export { extractStructuredPhaseReport, hasStructuredPhaseSchema } from "./phase-schema.js";
 export { runProvidersCommand } from "./provider-commands.js";
 export { AUDIT_PROFILES, applyAuditProfile, runProfilesCommand } from "./profiles.js";
-export { createProjectMap, createParallelExecutionMeta, initializeProjectMap, loadProjectMap, projectMapPath, renderProjectPlan } from "./project-map.js";
+export { checkProjectMapFreshness, createProjectMap, createParallelExecutionMeta, initializeProjectMap, loadProjectMap, projectMapPath, renderProjectPlan } from "./project-map.js";
 export { scanProject } from "./project-scan.js";
 export { runInitCommand, runPlanCommand } from "./project-commands.js";
 export { getReportProvider, isReportProviderId, REPORT_PROVIDER_IDS, REPORT_PROVIDERS } from "./providers/index.js";
@@ -43,8 +44,9 @@ export {
   runTriageFindingCommand,
   writeFindingState
 } from "./finding-state.js";
+export { runFindingsMenu } from "./finding-menu.js";
 export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
-export { riskReportJsonSchema, renderStructuredProviderOutput } from "./provider-schema.js";
+export { phaseReportJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity } from "./findings.js";
 export { collectDiffScope } from "./git-diff.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";

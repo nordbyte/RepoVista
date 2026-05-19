@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_OPTIONS, initializeProjectMap, loadFeatureRecords, loadProjectMap, renderProjectPlan } from "../dist/index.js";
+import { DEFAULT_OPTIONS, checkProjectMapFreshness, initializeProjectMap, loadFeatureRecords, loadProjectMap, renderProjectPlan, runPlanCommand } from "../dist/index.js";
 
 test("project initialization writes a map with thread recommendations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-project-map-"));
@@ -42,6 +42,13 @@ test("project initialization writes a map with thread recommendations", async ()
     assert.match(plan, /Thread assignments/);
     assert.match(plan, /Semantic features/);
     assert.ok(await readFile(mapPath, "utf8"));
+
+    const fresh = await checkProjectMapFreshness(root, DEFAULT_OPTIONS, map);
+    assert.equal(fresh.stale, false);
+    await writeFile(path.join(root, "src", "cli", "new-file.ts"), "export const newer = 1;\n", "utf8");
+    const stale = await checkProjectMapFreshness(root, DEFAULT_OPTIONS, map);
+    assert.equal(stale.stale, true);
+    assert.match((await runPlanCommand(DEFAULT_OPTIONS, root)), /project map appears stale/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

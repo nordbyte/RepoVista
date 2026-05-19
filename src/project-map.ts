@@ -98,6 +98,35 @@ export async function loadProjectMap(projectRoot: string, outDir: string): Promi
   }
 }
 
+export async function checkProjectMapFreshness(
+  projectRoot: string,
+  options: AuditOptions,
+  loaded: ProjectMap
+): Promise<{ stale: boolean; warnings: string[]; current: ProjectMap }> {
+  const current = await createProjectMap(projectRoot, options, new Date());
+  const warnings: string[] = [];
+  if (loaded.fileCount !== current.fileCount) {
+    warnings.push(`file count changed from ${loaded.fileCount} to ${current.fileCount}`);
+  }
+  if (loaded.totalBytes !== current.totalBytes) {
+    warnings.push(`scanned byte size changed from ${loaded.totalBytes} to ${current.totalBytes}`);
+  }
+  if (stableRecord(loaded.languages) !== stableRecord(current.languages)) {
+    warnings.push("detected language distribution changed");
+  }
+  if (areaSignature(loaded) !== areaSignature(current)) {
+    warnings.push("project areas changed");
+  }
+  if (featureSignatureForMap(loaded) !== featureSignatureForMap(current)) {
+    warnings.push("semantic feature map changed");
+  }
+  return {
+    stale: warnings.length > 0,
+    warnings,
+    current
+  };
+}
+
 export function createParallelExecutionMeta(
   map: ProjectMap,
   mapPath: string,
@@ -244,4 +273,26 @@ function readStringRecord(value: unknown): Record<string, string> {
     }
   }
   return result;
+}
+
+function stableRecord(value: Record<string, number>): string {
+  return JSON.stringify(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function areaSignature(map: ProjectMap): string {
+  return JSON.stringify(map.areas.map((area) => ({
+    id: area.id,
+    paths: area.paths,
+    fileCount: area.fileCount,
+    bytes: area.bytes
+  })).sort((left, right) => left.id.localeCompare(right.id)));
+}
+
+function featureSignatureForMap(map: ProjectMap): string {
+  return JSON.stringify((map.features ?? []).map((feature) => ({
+    title: feature.title,
+    kind: feature.kind,
+    paths: feature.paths,
+    ownedFiles: feature.ownedFiles
+  })).sort((left, right) => left.title.localeCompare(right.title)));
 }
