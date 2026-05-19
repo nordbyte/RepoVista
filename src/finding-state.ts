@@ -10,9 +10,9 @@ import {
   findingStateDirectory,
   loadStoredFindings,
   rewriteFindingStateAtomic,
-  safeFindingFileName,
-  writeFindingFileAtomic
+  safeFindingFileName
 } from "./finding-store.js";
+import { findingDedupeKey } from "./findings.js";
 import { revalidationJsonSchema } from "./provider-schema.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
@@ -34,22 +34,36 @@ export async function writeFindingState(
   await mkdir(stateDirectory, { recursive: true });
   const existing = await loadStoredFindings(projectRoot, outDir);
   const existingById = new Map(existing.map((finding) => [finding.id, finding]));
+  const existingByDedupe = new Map<string, StructuredFinding>();
+  for (const finding of existing) {
+    const key = findingDedupeKey(finding);
+    if (!existingByDedupe.has(key)) {
+      existingByDedupe.set(key, finding);
+    }
+  }
   const seenIds = new Set<string>();
+  const seenDedupeKeys = new Set<string>();
+  const updatedById = new Map<string, StructuredFinding>();
 
   for (const finding of findings) {
-    seenIds.add(finding.id);
-    const previous = existingById.get(finding.id);
+    const dedupeKey = findingDedupeKey(finding);
+    const previous = existingById.get(finding.id) ?? existingByDedupe.get(dedupeKey);
+    const findingId = previous?.id ?? finding.id;
+    seenIds.add(findingId);
+    seenDedupeKeys.add(dedupeKey);
+    const mergedPrevious = updatedById.get(findingId) ?? previous;
     const status = previous?.status === "fixed" ? "open" : previous?.status ?? finding.status ?? "open";
     const merged: StructuredFinding = {
-      ...previous,
+      ...mergedPrevious,
       ...finding,
+      id: findingId,
       status,
-      triage: previous?.triage ?? finding.triage,
-      firstSeenRunId: previous?.firstSeenRunId ?? runId,
+      triage: mergedPrevious?.triage ?? finding.triage,
+      firstSeenRunId: mergedPrevious?.firstSeenRunId ?? runId,
       lastSeenRunId: runId,
-      createdAt: previous?.createdAt ?? now.toISOString(),
+      createdAt: mergedPrevious?.createdAt ?? now.toISOString(),
       updatedAt: now.toISOString(),
-      history: appendHistory(previous?.history ?? finding.history, {
+      history: appendHistory(mergedPrevious?.history ?? finding.history, {
         runId,
         kind: "audit",
         status,
@@ -58,18 +72,19 @@ export async function writeFindingState(
         createdAt: now.toISOString()
       })
     };
-    await writeFindingFileAtomic(stateDirectory, merged);
+    updatedById.set(merged.id, merged);
   }
 
   for (const previous of existing) {
-    if (!seenIds.has(previous.id)) {
-      await writeFindingFileAtomic(stateDirectory, {
+    if (!seenIds.has(previous.id) && !seenDedupeKeys.has(findingDedupeKey(previous))) {
+      updatedById.set(previous.id, {
         ...previous,
         updatedAt: now.toISOString()
       });
     }
   }
 
+  await rewriteFindingStateAtomic(projectRoot, outDir, Array.from(updatedById.values()));
   return stateDirectory;
 }
 

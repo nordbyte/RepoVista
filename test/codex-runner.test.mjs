@@ -5,7 +5,16 @@ import { PassThrough } from "node:stream";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildClaudeExecArgs, buildCodexExecArgs, phaseReportJsonSchema, riskReportJsonSchema, runCodexPhase, runProviderPhase } from "../dist/index.js";
+import {
+  buildClaudeExecArgs,
+  buildCodexExecArgs,
+  fixPlanJsonSchema,
+  phaseReportJsonSchema,
+  revalidationJsonSchema,
+  riskReportJsonSchema,
+  runCodexPhase,
+  runProviderPhase
+} from "../dist/index.js";
 
 class FakeChild extends EventEmitter {
   stdin = new PassThrough();
@@ -18,6 +27,7 @@ function assertAllObjectPropertiesRequired(schema, label = "schema") {
     return;
   }
   if (schema.type === "object" && schema.properties) {
+    assert.equal(schema.additionalProperties, false, `${label} must reject additional properties`);
     const properties = Object.keys(schema.properties).sort();
     assert.deepEqual([...(schema.required ?? [])].sort(), properties, `${label} required keys must match properties`);
     for (const [key, value] of Object.entries(schema.properties)) {
@@ -27,11 +37,20 @@ function assertAllObjectPropertiesRequired(schema, label = "schema") {
   if (schema.type === "array" && schema.items) {
     assertAllObjectPropertiesRequired(schema.items, `${label}[]`);
   }
+  if (schema.type === "array") {
+    assert.ok(schema.items, `${label} arrays must declare items`);
+  }
 }
 
 test("codex provider-native schemas satisfy strict structured-output requirements", () => {
-  assertAllObjectPropertiesRequired(phaseReportJsonSchema, "phaseReportJsonSchema");
-  assertAllObjectPropertiesRequired(riskReportJsonSchema, "riskReportJsonSchema");
+  for (const [label, schema] of Object.entries({
+    phaseReportJsonSchema,
+    riskReportJsonSchema,
+    fixPlanJsonSchema,
+    revalidationJsonSchema
+  })) {
+    assertAllObjectPropertiesRequired(schema, label);
+  }
 });
 
 test("codex args use read-only sandbox, target cwd and output-last-message", () => {

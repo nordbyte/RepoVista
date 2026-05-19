@@ -19,8 +19,33 @@ const REGRESSION_TEST_PATTERN = /\b(?:suggested regression test|regression test)
 const MINIMUM_FIX_SCOPE_PATTERN = /\b(?:minimum fix scope|min(?:imum)? scope)\s*:\s*([^\n]+)/i;
 const ESTIMATED_EFFORT_PATTERN = /\bestimated effort\s*:\s*([^\n]+)/i;
 const PATH_FIELD_PATTERN = /\b(?:file|path|affected paths?|affected files?)\s*:\s*([^\n]+)/i;
-const PATH_TOKEN_PATTERN = /`([^`]+)`|(?:^|[\s([:,])((?:\.?\/)?(?:(?:src|test|tests|lib|app|scripts|docs|\.github)\/[\w./-]+|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)))(?=$|[\s)\],.;:])/g;
-const PATH_ROOTS = new Set(["src", "test", "tests", "lib", "app", "scripts", "docs", ".github"]);
+const PATH_TOKEN_PATTERN = /`([^`]+)`|(?:^|[\s([:,])((?:\.?\/)?(?:(?:src|test|tests|lib|app|scripts|docs|\.github|bin|cmd|config|configs|extension|extensions|packages|pkg|server|client|web|public|infra|tools|examples|src-tauri)\/[\w./-]+|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod)))(?=$|[\s)\],.;:])/g;
+const PATH_ROOTS = new Set([
+  "src",
+  "test",
+  "tests",
+  "lib",
+  "app",
+  "scripts",
+  "docs",
+  ".github",
+  "bin",
+  "cmd",
+  "config",
+  "configs",
+  "extension",
+  "extensions",
+  "packages",
+  "pkg",
+  "server",
+  "client",
+  "web",
+  "public",
+  "infra",
+  "tools",
+  "examples",
+  "src-tauri"
+]);
 const ROOT_FILE_PATTERN = /^(?:[\w.-]+\.(?:py|js|mjs|cjs|ts|tsx|jsx|go|rs|java|kt|kts|c|cc|cpp|h|hpp|cs|php|rb|sh|bash|zsh|fish|swift|scala|lua|r|pl|pm|sql|yml|yaml|toml|ini|cfg|conf|json|md)|Dockerfile|Makefile)$/;
 const EXPLICIT_RELATIVE_FILE_PATTERN = /^(?:[\w.-]+\/)+[\w.-]+$/;
 
@@ -326,8 +351,12 @@ function readFindingType(value: unknown): StructuredFinding["findingType"] | und
 
 function readEvidenceReference(value: unknown): FindingEvidenceReference | undefined {
   if (typeof value === "string") {
-    const pathValue = normalizePathCandidate(value, true);
-    return pathValue ? { path: pathValue } : undefined;
+    const reference = normalizePathReference(value, true);
+    return reference ? {
+      path: reference.path,
+      startLine: reference.startLine,
+      endLine: reference.endLine
+    } : undefined;
   }
 
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -335,15 +364,15 @@ function readEvidenceReference(value: unknown): FindingEvidenceReference | undef
   }
 
   const record = value as Record<string, unknown>;
-  const pathValue = normalizePathCandidate(readString(record.path ?? record.file ?? record.relativePath), true);
-  if (!pathValue) {
+  const reference = normalizePathReference(readString(record.path ?? record.file ?? record.relativePath), true);
+  if (!reference) {
     return undefined;
   }
 
-  const startLine = readPositiveInteger(record.startLine ?? record.line ?? record.lineStart);
-  const endLine = readPositiveInteger(record.endLine ?? record.lineEnd) ?? startLine;
+  const startLine = readPositiveInteger(record.startLine ?? record.line ?? record.lineStart) ?? reference.startLine;
+  const endLine = readPositiveInteger(record.endLine ?? record.lineEnd) ?? reference.endLine ?? startLine;
   return {
-    path: pathValue,
+    path: reference.path,
     startLine,
     endLine,
     quote: readString(record.quote ?? record.snippet),
@@ -393,17 +422,32 @@ function withStableFindingIdentity(finding: StructuredFinding): StructuredFindin
 }
 
 export function mergeFindings(findings: StructuredFinding[]): StructuredFinding[] {
-  const byKey = new Map<string, StructuredFinding>();
+  const merged: StructuredFinding[] = [];
+  const signatureToIndex = new Map<string, number>();
+  const dedupeToIndex = new Map<string, number>();
+
   for (const finding of findings) {
-    const key = finding.signature ?? findingKey(finding);
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, finding);
+    const signatureKey = finding.signature ?? findingKey(finding);
+    const dedupeKey = findingDedupeKey(finding);
+    const existingIndex = signatureToIndex.get(signatureKey) ?? dedupeToIndex.get(dedupeKey);
+    if (existingIndex === undefined) {
+      const index = merged.push(finding) - 1;
+      signatureToIndex.set(signatureKey, index);
+      dedupeToIndex.set(dedupeKey, index);
       continue;
     }
-    byKey.set(key, mergeFinding(existing, finding));
+
+    const next = mergeFinding(merged[existingIndex], finding);
+    merged[existingIndex] = next;
+    signatureToIndex.set(signatureKey, existingIndex);
+    if (next.signature) {
+      signatureToIndex.set(next.signature, existingIndex);
+    }
+    dedupeToIndex.set(dedupeKey, existingIndex);
+    dedupeToIndex.set(findingDedupeKey(next), existingIndex);
   }
-  return Array.from(byKey.values()).sort(compareFindings);
+
+  return merged.sort(compareFindings);
 }
 
 function mergeFinding(left: StructuredFinding, right: StructuredFinding): StructuredFinding {
@@ -481,6 +525,46 @@ function findingKey(finding: StructuredFinding): string {
     finding.category?.toLowerCase() ?? "",
     finding.paths.join(",")
   ].join("|");
+}
+
+export function findingDedupeKey(finding: Pick<StructuredFinding, "title" | "category" | "paths" | "evidenceReferences" | "evidenceDetails">): string {
+  return [
+    normalizeDedupeText(finding.title),
+    normalizeDedupeText(finding.category ?? ""),
+    evidencePathKeys(finding).join(",")
+  ].join("|");
+}
+
+function normalizeDedupeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._/-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function evidencePathKeys(finding: Pick<StructuredFinding, "paths" | "evidenceReferences" | "evidenceDetails">): string[] {
+  const paths = new Set<string>();
+  for (const item of finding.paths ?? []) {
+    const normalized = normalizePathCandidate(item, true);
+    if (normalized) {
+      paths.add(normalized);
+    }
+  }
+  for (const reference of finding.evidenceDetails ?? []) {
+    const normalized = normalizePathCandidate(reference.path, true);
+    if (normalized) {
+      paths.add(normalized);
+    }
+  }
+  for (const reference of finding.evidenceReferences ?? []) {
+    const rawPath = typeof reference === "string" ? reference : reference.path;
+    const normalized = normalizePathCandidate(rawPath, true);
+    if (normalized) {
+      paths.add(normalized);
+    }
+  }
+  return Array.from(paths).sort();
 }
 
 function calibrateSeverity(finding: StructuredFinding): StructuredFinding["severity"] {
@@ -677,10 +761,12 @@ function splitPathField(value: string): string[] {
 }
 
 function normalizePathCandidate(value: string | undefined, allowRootDirectory: boolean): string | undefined {
-  const stripped = stripPunctuation((value ?? "")
+  const candidate = stripPunctuation((value ?? "")
     .replace(/^['"`(]+|['"`)\]]+$/g, "")
     .replace(/^\.\//, "")
     .trim());
+  const lineReference = splitPathLineSuffix(candidate);
+  const stripped = lineReference.path;
   if (!stripped || /\s/.test(stripped) || stripped.includes("..")) {
     return undefined;
   }
@@ -707,4 +793,37 @@ function normalizePathCandidate(value: string | undefined, allowRootDirectory: b
   }
 
   return undefined;
+}
+
+function normalizePathReference(value: string | undefined, allowRootDirectory: boolean): FindingEvidenceReference | undefined {
+  const lineReference = splitPathLineSuffix(stripPunctuation((value ?? "")
+    .replace(/^['"`(]+|['"`)\]]+$/g, "")
+    .replace(/^\.\//, "")
+    .trim()));
+  const normalized = normalizePathCandidate(lineReference.path, allowRootDirectory);
+  if (!normalized) {
+    return undefined;
+  }
+  return {
+    path: normalized,
+    startLine: lineReference.startLine,
+    endLine: lineReference.endLine
+  };
+}
+
+function splitPathLineSuffix(value: string): { path: string; startLine?: number; endLine?: number } {
+  const match = /^(.*):(\d+)(?:-(\d+))?$/.exec(value);
+  if (!match) {
+    return { path: value };
+  }
+  const startLine = Number(match[2]);
+  const endLine = match[3] ? Number(match[3]) : startLine;
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine) {
+    return { path: value };
+  }
+  return {
+    path: match[1],
+    startLine,
+    endLine
+  };
 }

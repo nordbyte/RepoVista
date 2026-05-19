@@ -114,6 +114,45 @@ test("findings command can list one run without persistent state noise", async (
   }
 });
 
+test("finding state deduplicates old and new finding signatures", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-finding-dedupe-"));
+  try {
+    const oldFinding = {
+      id: "fnd_old_signature",
+      source: "03-risk-and-bug-report.md",
+      title: "Shared route misses validation",
+      severity: "medium",
+      category: "Reliability",
+      status: "fixed",
+      signature: "legacy|route",
+      paths: ["src/route.ts"]
+    };
+    await writeFindingState(root, ".repovista", [oldFinding], "run-1", new Date("2026-05-18T10:00:00.000Z"));
+
+    const newFinding = {
+      id: "fnd_new_signature",
+      source: "03-risk-and-bug-report.md",
+      title: "Shared route misses validation",
+      severity: "high",
+      category: "Reliability",
+      status: "open",
+      signature: "new|route|src/route.ts:1",
+      paths: ["src/route.ts"],
+      evidenceReferences: [{ path: "src/route.ts", startLine: 1, endLine: 3 }]
+    };
+    await writeFindingState(root, ".repovista", [newFinding], "run-2", new Date("2026-05-18T11:00:00.000Z"));
+
+    const findings = await loadStoredFindings(root, ".repovista");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].id, "fnd_old_signature");
+    assert.equal(findings[0].status, "open");
+    assert.equal(findings[0].lastSeenRunId, "run-2");
+    assert.equal(findings[0].signature, "new|route|src/route.ts:1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("finding state uses collision-resistant filenames and rejects corrupt files", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-finding-store-"));
   try {

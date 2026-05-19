@@ -8,6 +8,7 @@ export { buildRunComparison, compareHasRegression, runCompareCommand, renderRunC
 export { loadCodexModels, parseCodexModelCatalog, reasoningOptionsForModel } from "./codex-models.js";
 export { loadProviderModels, reasoningOptionsForProviderModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
+export { runRepairRunCommand } from "./repair-run.js";
 export { renderPrComment, renderRunReview, reviewRunDirectory, runPrCommentCommand, runReviewCommand } from "./report-review.js";
 export { renderGithubStepSummary } from "./ci-summary.js";
 export { writeFindingExports } from "./exporters.js";
@@ -46,8 +47,8 @@ export {
 } from "./finding-state.js";
 export { runFindingsMenu } from "./finding-menu.js";
 export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
-export { phaseReportJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
-export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity } from "./findings.js";
+export { fixPlanJsonSchema, phaseReportJsonSchema, revalidationJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
+export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity, findingDedupeKey } from "./findings.js";
 export { collectDiffScope } from "./git-diff.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";

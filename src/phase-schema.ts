@@ -163,7 +163,7 @@ function extractRecommendations(markdown: string): string[] {
 
 function pathEvidence(markdown: string): Set<string> {
   const matches = new Set<string>();
-  const pathPattern = /(?:^|[\s`])((?:\.?\/)?(?:src|test|tests|lib|app|scripts|docs|\.github)[/\w.-]*|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod))(?=$|[\s`)\],.;:])/gm;
+  const pathPattern = /(?:^|[\s`])((?:\.?\/)?(?:src|test|tests|lib|app|scripts|docs|\.github|bin|cmd|config|configs|extension|extensions|packages|pkg|server|client|web|public|infra|tools|examples|src-tauri)[/\w.-]*|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod))(?=$|[\s`)\],.;:])/gm;
   for (const match of markdown.matchAll(pathPattern)) {
     const normalized = match[1].replace(/^\.\//, "").replace(/\/+$/g, "");
     if (normalized) {

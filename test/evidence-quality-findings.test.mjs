@@ -353,6 +353,66 @@ One low finding.
   assert.deepEqual(extraction.findings[0].evidenceDetails.map((reference) => reference.path), [".claude/settings.local.json"]);
 });
 
+test("finding extractor preserves expanded evidence paths and line suffixes", () => {
+  const extraction = extractFindingsWithSource(`# Risk
+
+## Medium Findings
+
+One medium finding.
+
+\`\`\`json
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "title": "Workspace route loses config evidence",
+      "severity": "medium",
+      "category": "Reliability",
+      "status": "open",
+      "signature": "workspace|config|packages/api/src/server.ts",
+      "affectedPaths": ["packages/api/src/server.ts:12-14", "config/app.yaml:3"],
+      "evidence": "packages/api/src/server.ts and config/app.yaml define the route behavior.",
+      "evidenceReferences": ["packages/api/src/server.ts:12-14", {"path":"config/app.yaml:3","quote":"route"}],
+      "problemRationale": "Monorepos often keep evidence under package and config roots.",
+      "recommendedFix": "Normalize package and config paths with optional line suffixes.",
+      "reproduction": "Parse schema evidence with line suffix paths.",
+      "suggestedRegressionTest": "Assert path and line range extraction.",
+      "minimumFixScope": "Update finding path normalization only.",
+      "estimatedEffort": "small",
+      "confidence": "high"
+    }
+  ]
+}
+\`\`\`
+`);
+
+  assert.equal(extraction.source, "schema");
+  assert.equal(extraction.findings.length, 1);
+  assert.deepEqual(extraction.findings[0].paths, ["config/app.yaml", "packages/api/src/server.ts"]);
+  assert.deepEqual(extraction.findings[0].evidenceDetails.map((reference) => ({
+    path: reference.path,
+    startLine: reference.startLine,
+    endLine: reference.endLine
+  })), [
+    { path: "config/app.yaml", startLine: 3, endLine: 3 },
+    { path: "packages/api/src/server.ts", startLine: 12, endLine: 14 }
+  ]);
+
+  const markdown = extractFindings(`# Risk
+
+## High Findings
+
+- Title: Router config is incomplete
+- Severity: High
+- Category: Reliability
+- Affected paths: packages/api/src/server.ts:12-14, config/app.yaml:3
+- Evidence: packages/api/src/server.ts calls the route and config/app.yaml configures it.
+- Recommended fix: Align route config.
+- Confidence: High
+`);
+  assert.deepEqual(markdown[0].paths, ["config/app.yaml", "packages/api/src/server.ts"]);
+});
+
 test("schema extractor handles sentinel JSON, fenced quote text and parent child findings", () => {
   const schema = {
     schemaVersion: 1,

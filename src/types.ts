@@ -21,6 +21,7 @@ export type CliAction =
   | "compare"
   | "review"
   | "pr-comment"
+  | "repair-run"
   | "doctor"
   | "providers"
   | "baseline"

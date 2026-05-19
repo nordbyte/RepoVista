@@ -21,6 +21,7 @@ export interface ReviewedRun {
   meta?: AuditMeta;
   findings: StructuredFinding[];
   structuredReports: StructuredPhaseReport[];
+  artifactHealth: ArtifactHealthCheck[];
   reportReviews: Array<{
     phaseId: string;
     fileName: string;
@@ -37,6 +38,17 @@ export interface ReviewedRun {
     warnings: string[];
   }>;
   staleWarnings: string[];
+}
+
+export interface ArtifactHealthCheck {
+  name: string;
+  fileName: string;
+  required: boolean;
+  exists: boolean;
+  readable: boolean;
+  valid: boolean;
+  sizeBytes?: number;
+  warnings: string[];
 }
 
 export async function runReviewCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
@@ -75,6 +87,8 @@ export async function reviewRunDirectory(projectRoot: string, runDirectory: stri
     readJson<StructuredFinding[]>(path.join(runDir, "findings.json")),
     readJson<StructuredPhaseReport[]>(path.join(runDir, "structured-reports.json"))
   ]);
+  const normalizedFindings = Array.isArray(findings) ? findings : [];
+  const normalizedStructuredReports = Array.isArray(structuredReports) ? structuredReports : [];
   const reportReviews = await Promise.all(REPORT_FILES.map(async ([phaseId, fileName]) => {
     const filePath = path.join(runDir, fileName);
     const content = await readText(filePath);
@@ -104,16 +118,18 @@ export async function reviewRunDirectory(projectRoot: string, runDirectory: stri
   return {
     runDir,
     meta,
-    findings: Array.isArray(findings) ? findings : [],
-    structuredReports: Array.isArray(structuredReports) ? structuredReports : [],
+    findings: normalizedFindings,
+    structuredReports: normalizedStructuredReports,
+    artifactHealth: await inspectArtifactHealth(runDir, meta, normalizedFindings, normalizedStructuredReports),
     reportReviews,
-    weakEvidence: weakEvidenceFindings(Array.isArray(findings) ? findings : []),
+    weakEvidence: weakEvidenceFindings(normalizedFindings),
     staleWarnings: await staleWarnings(projectRoot, meta)
   };
 }
 
 export function renderRunReview(reviewed: ReviewedRun): string {
   const failedReports = reviewed.reportReviews.filter((report) => !report.qualityPassed);
+  const unhealthyArtifacts = reviewed.artifactHealth.filter((artifact) => artifact.warnings.length);
   return `# RepoVista Run Review
 
 Run: \`${reviewed.meta?.runId ?? path.basename(reviewed.runDir)}\`
@@ -129,6 +145,13 @@ Reasoning: ${reviewed.meta?.ai.reasoning ?? "not recorded"}
 - Findings checked: ${reviewed.findings.length}
 - Weak evidence findings: ${reviewed.weakEvidence.length}
 - Stale state warnings: ${reviewed.staleWarnings.length}
+- Artifact health warnings: ${unhealthyArtifacts.length}
+
+## Artifact Health
+
+${unhealthyArtifacts.length ? unhealthyArtifacts.map((artifact) => [
+    `- ${artifact.name} (${artifact.fileName}): ${artifact.warnings.join("; ")}`
+  ].join("\n")).join("\n") : "- All required and expected artifacts are present and readable."}
 
 ## Report Checks
 
@@ -149,6 +172,252 @@ ${reviewed.weakEvidence.length ? reviewed.weakEvidence.map((finding) => [
 
 ${reviewed.staleWarnings.length ? reviewed.staleWarnings.map((warning) => `- ${warning}`).join("\n") : "- No stale state signals detected."}
 `;
+}
+
+async function inspectArtifactHealth(
+  runDir: string,
+  meta: AuditMeta | undefined,
+  findings: StructuredFinding[],
+  structuredReports: StructuredPhaseReport[]
+): Promise<ArtifactHealthCheck[]> {
+  const exportFormats = new Set(meta?.options?.exportFormats ?? []);
+  const outputs = meta?.outputs ?? {};
+  const definitions: Array<{
+    name: string;
+    fileName: string;
+    required: boolean;
+    validate: (content: string) => string[];
+  }> = [
+    {
+      name: "Summary JSON",
+      fileName: "summary.json",
+      required: true,
+      validate: (content) => validateJsonObject(content, "summary.json")
+    },
+    {
+      name: "Report JSON",
+      fileName: "report.json",
+      required: true,
+      validate: (content) => [
+        ...validateJsonObject(content, "report.json"),
+        ...validateReportJsonConsistency(content, findings)
+      ]
+    },
+    {
+      name: "Findings JSON",
+      fileName: "findings.json",
+      required: true,
+      validate: (content) => validateFindingsJson(content, meta, findings)
+    },
+    {
+      name: "Structured Reports JSON",
+      fileName: "structured-reports.json",
+      required: true,
+      validate: (content) => validateStructuredReportsJson(content, structuredReports)
+    },
+    {
+      name: "Prompt Manifest",
+      fileName: "prompt-manifest.json",
+      required: true,
+      validate: validatePromptManifestJson
+    },
+    {
+      name: "SARIF Export",
+      fileName: "findings.sarif",
+      required: exportFormats.has("sarif") || Boolean(outputs.findingsSarif),
+      validate: validateSarifJson
+    },
+    {
+      name: "HTML Report",
+      fileName: "report.html",
+      required: exportFormats.has("html") || Boolean(outputs.htmlReport),
+      validate: validateHtmlReport
+    },
+    {
+      name: "JSONL Findings",
+      fileName: "findings.jsonl",
+      required: exportFormats.has("jsonl") || Boolean(outputs.findingsJsonl),
+      validate: validateJsonlFindings
+    }
+  ];
+
+  return Promise.all(definitions.map((definition) => inspectArtifact(runDir, definition)));
+}
+
+async function inspectArtifact(
+  runDir: string,
+  definition: {
+    name: string;
+    fileName: string;
+    required: boolean;
+    validate: (content: string) => string[];
+  }
+): Promise<ArtifactHealthCheck> {
+  const filePath = path.join(runDir, definition.fileName);
+  try {
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) {
+      return {
+        name: definition.name,
+        fileName: definition.fileName,
+        required: definition.required,
+        exists: true,
+        readable: false,
+        valid: false,
+        sizeBytes: fileStat.size,
+        warnings: [`Artifact path is not a file: ${definition.fileName}`]
+      };
+    }
+    const content = await readFile(filePath, "utf8");
+    const warnings = definition.validate(content);
+    return {
+      name: definition.name,
+      fileName: definition.fileName,
+      required: definition.required,
+      exists: true,
+      readable: true,
+      valid: warnings.length === 0,
+      sizeBytes: fileStat.size,
+      warnings
+    };
+  } catch (error) {
+    const missing = Boolean(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT");
+    return {
+      name: definition.name,
+      fileName: definition.fileName,
+      required: definition.required,
+      exists: false,
+      readable: false,
+      valid: !definition.required && missing,
+      warnings: definition.required ? [`Required artifact is missing: ${definition.fileName}`] : []
+    };
+  }
+}
+
+function validateJsonObject(content: string, label: string): string[] {
+  const parsed = parseJson(content);
+  if (!parsed.ok) {
+    return [`${label} is not valid JSON: ${parsed.error}`];
+  }
+  if (!parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
+    return [`${label} must contain a JSON object.`];
+  }
+  return [];
+}
+
+function validateReportJsonConsistency(content: string, findings: StructuredFinding[]): string[] {
+  const parsed = parseJson(content);
+  if (!parsed.ok || !parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
+    return [];
+  }
+  const report = parsed.value as { findings?: unknown };
+  if (Array.isArray(report.findings) && report.findings.length !== findings.length) {
+    return [`report.json contains ${report.findings.length} finding(s), but findings.json contains ${findings.length}.`];
+  }
+  return [];
+}
+
+function validateFindingsJson(content: string, meta: AuditMeta | undefined, findings: StructuredFinding[]): string[] {
+  const parsed = parseJson(content);
+  if (!parsed.ok) {
+    return [`findings.json is not valid JSON: ${parsed.error}`];
+  }
+  if (!Array.isArray(parsed.value)) {
+    return ["findings.json must contain a JSON array."];
+  }
+  const warnings: string[] = [];
+  if (parsed.value.length !== findings.length) {
+    warnings.push(`findings.json parsed count changed during review (${parsed.value.length} vs ${findings.length}).`);
+  }
+  const metaCount = meta?.findingCounts
+    ? Object.values(meta.findingCounts).reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0)
+    : undefined;
+  if (metaCount !== undefined && metaCount !== findings.length) {
+    warnings.push(`meta.json findingCounts totals ${metaCount}, but findings.json contains ${findings.length}.`);
+  }
+  return warnings;
+}
+
+function validateStructuredReportsJson(content: string, structuredReports: StructuredPhaseReport[]): string[] {
+  const parsed = parseJson(content);
+  if (!parsed.ok) {
+    return [`structured-reports.json is not valid JSON: ${parsed.error}`];
+  }
+  if (!Array.isArray(parsed.value)) {
+    return ["structured-reports.json must contain a JSON array."];
+  }
+  const warnings: string[] = [];
+  if (parsed.value.length !== structuredReports.length) {
+    warnings.push(`structured-reports.json parsed count changed during review (${parsed.value.length} vs ${structuredReports.length}).`);
+  }
+  if (structuredReports.length < REPORT_FILES.length) {
+    warnings.push(`structured-reports.json contains ${structuredReports.length} phase report(s); expected ${REPORT_FILES.length}.`);
+  }
+  return warnings;
+}
+
+function validatePromptManifestJson(content: string): string[] {
+  const parsed = parseJson(content);
+  if (!parsed.ok) {
+    return [`prompt-manifest.json is not valid JSON: ${parsed.error}`];
+  }
+  if (!parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
+    return ["prompt-manifest.json must contain a JSON object."];
+  }
+  const manifest = parsed.value as { phases?: unknown };
+  if (!Array.isArray(manifest.phases)) {
+    return ["prompt-manifest.json is missing a phases array."];
+  }
+  if (manifest.phases.length < REPORT_FILES.length) {
+    return [`prompt-manifest.json contains ${manifest.phases.length} phase manifest(s); expected ${REPORT_FILES.length}.`];
+  }
+  return [];
+}
+
+function validateSarifJson(content: string): string[] {
+  const parsed = parseJson(content);
+  if (!parsed.ok) {
+    return [`findings.sarif is not valid JSON: ${parsed.error}`];
+  }
+  if (!parsed.value || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
+    return ["findings.sarif must contain a JSON object."];
+  }
+  const sarif = parsed.value as { version?: unknown; runs?: unknown };
+  const warnings: string[] = [];
+  if (sarif.version !== "2.1.0") {
+    warnings.push("findings.sarif is missing SARIF version 2.1.0.");
+  }
+  if (!Array.isArray(sarif.runs)) {
+    warnings.push("findings.sarif is missing a runs array.");
+  }
+  return warnings;
+}
+
+function validateHtmlReport(content: string): string[] {
+  return /<html[\s>]/i.test(content) && /RepoVista/i.test(content)
+    ? []
+    : ["report.html does not look like a RepoVista HTML report."];
+}
+
+function validateJsonlFindings(content: string): string[] {
+  const warnings: string[] = [];
+  const lines = content.split(/\r?\n/).filter((line) => line.trim());
+  for (const [index, line] of lines.entries()) {
+    const parsed = parseJson(line);
+    if (!parsed.ok) {
+      warnings.push(`findings.jsonl line ${index + 1} is not valid JSON: ${parsed.error}`);
+      break;
+    }
+  }
+  return warnings;
+}
+
+function parseJson(content: string): { ok: true; value: unknown } | { ok: false; error: string } {
+  try {
+    return { ok: true, value: JSON.parse(content) as unknown };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function phaseReviewNotes(phase: PhaseReportStatus | undefined): string[] {

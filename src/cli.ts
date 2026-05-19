@@ -21,6 +21,7 @@ import { runFindingsMenu } from "./finding-menu.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
+import { runRepairRunCommand } from "./repair-run.js";
 import { runPrCommentCommand, runReviewCommand } from "./report-review.js";
 import { runProfilesCommand } from "./profiles.js";
 import { runInitCommand, runPlanCommand } from "./project-commands.js";
@@ -104,6 +105,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "review") {
       process.stdout.write(await runReviewCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "repair-run") {
+      process.stdout.write(await runRepairRunCommand(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "pr-comment") {

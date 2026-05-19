@@ -252,7 +252,7 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "compare", options };
   }
 
-  if (command === "review" || command === "pr-comment") {
+  if (command === "review" || command === "pr-comment" || command === "repair-run") {
     if (positionals.length !== 2) {
       throw new CliUsageError(`Command ${command} requires one run directory.`);
     }
@@ -580,6 +580,7 @@ function isCommand(value: string): boolean {
     value === "init" ||
     value === "plan" ||
     value === "review" ||
+    value === "repair-run" ||
     value === "pr-comment" ||
     value === "doctor" ||
     value === "providers" ||
@@ -610,7 +611,7 @@ function maxPositionalsFor(positionals: string[]): number {
   if (command === "compare") {
     return 3;
   }
-  if (command === "review" || command === "pr-comment") {
+  if (command === "review" || command === "pr-comment" || command === "repair-run") {
     return 2;
   }
   if (command === "providers" && positionals[1] === "test") {

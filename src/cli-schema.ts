@@ -21,6 +21,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista ci init [--template pr-light|security|release-readiness|scheduled-audit] [--dry-run] [--force]", name: "ci init", help: "Create a GitHub Actions workflow for RepoVista" },
   { usage: "repovista compare <old-run-dir> <new-run-dir> [--format markdown|json|html] [--fail-on-regression]", name: "compare", help: "Compare two RepoVista run directories" },
   { usage: "repovista review <run-dir> [--json]", name: "review", help: "Review one RepoVista run for report quality, evidence, and stale state risks" },
+  { usage: "repovista repair-run <run-dir> [--force] [--json]", name: "repair-run", help: "Rebuild run artifacts from provider-native .structured.json outputs" },
   { usage: "repovista pr-comment <run-dir> [--dry-run]", name: "pr-comment", help: "Render or post a pull request summary comment for a RepoVista run" },
   { usage: "repovista baseline [list|add|remove|prune] [finding-id] [--note <text>]", name: "baseline", help: "Manage baseline suppressions for known findings" },
   { usage: "repovista suppress <finding-id> [--note <text>]", name: "suppress", help: "Shortcut for adding a finding to the baseline" },
