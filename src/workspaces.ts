@@ -2,6 +2,9 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AuditOptions, WorkspaceDetectionResult, WorkspaceInfo } from "./types.js";
 
+const MAX_GLOBSTAR_DEPTH = 6;
+const SKIPPED_WORKSPACE_DIRS = new Set([".git", ".repovista", "node_modules", "dist", "build", "coverage"]);
+
 export async function detectWorkspaces(projectRoot: string): Promise<WorkspaceDetectionResult> {
   const warnings: string[] = [];
   const workspaces: WorkspaceInfo[] = [];
@@ -114,8 +117,24 @@ function parsePnpmWorkspacePatterns(content: string): string[] {
 
 async function expandWorkspacePatterns(projectRoot: string, patterns: string[], packageManager: string): Promise<WorkspaceInfo[]> {
   const workspaces: WorkspaceInfo[] = [];
-  for (const pattern of patterns) {
+  const includePatterns = patterns.map(normalizePath).filter((pattern) => pattern && !pattern.startsWith("!"));
+  const excludeMatchers = patterns
+    .map(normalizePath)
+    .filter((pattern) => pattern.startsWith("!") && pattern.length > 1)
+    .map((pattern) => globPatternToRegExp(pattern.slice(1)));
+  const isExcluded = (relativePath: string) => excludeMatchers.some((matcher) => matcher.test(relativePath));
+
+  for (const pattern of includePatterns) {
     if (pattern.includes("**")) {
+      for (const relativePath of await globstarWorkspaceCandidates(projectRoot, pattern)) {
+        if (isExcluded(relativePath)) {
+          continue;
+        }
+        const workspace = await workspaceFromPath(projectRoot, relativePath, packageManager, pattern);
+        if (workspace) {
+          workspaces.push(workspace);
+        }
+      }
       continue;
     }
     if (pattern.endsWith("/*")) {
@@ -132,6 +151,9 @@ async function expandWorkspacePatterns(projectRoot: string, patterns: string[], 
           continue;
         }
         const relativePath = normalizePath(path.join(parent, entry.name));
+        if (isExcluded(relativePath)) {
+          continue;
+        }
         const workspace = await workspaceFromPath(projectRoot, relativePath, packageManager, pattern);
         if (workspace) {
           workspaces.push(workspace);
@@ -140,7 +162,7 @@ async function expandWorkspacePatterns(projectRoot: string, patterns: string[], 
       continue;
     }
     const workspace = await workspaceFromPath(projectRoot, normalizePath(pattern), packageManager, pattern);
-    if (workspace) {
+    if (workspace && !isExcluded(workspace.path)) {
       workspaces.push(workspace);
     }
   }
@@ -159,17 +181,121 @@ async function workspaceFromPath(
     if (!fileStat.isFile()) {
       return undefined;
     }
-    const parsed = JSON.parse(await readFile(packageJsonPath, "utf8")) as { name?: string };
+    const parsed = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      name?: string;
+      scripts?: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    const scripts = readStringRecord(parsed.scripts);
+    const dependencies = dependencyNames(parsed);
     return {
       name: parsed.name ?? relativePath,
       path: relativePath,
       packageManager,
       packageJsonPath: normalizePath(path.relative(projectRoot, packageJsonPath)),
-      patterns: [pattern]
+      patterns: [pattern],
+      scripts,
+      dependencies,
+      validationCommands: validationCommandsForScripts(packageManager, scripts)
     };
   } catch {
     return undefined;
   }
+}
+
+async function globstarWorkspaceCandidates(projectRoot: string, pattern: string): Promise<string[]> {
+  const matcher = globPatternToRegExp(pattern);
+  const candidates: string[] = [];
+  await walk(projectRoot, "", 0, async (relativePath) => {
+    if (!matcher.test(relativePath)) {
+      return;
+    }
+    try {
+      const packageStat = await stat(path.join(projectRoot, relativePath, "package.json"));
+      if (packageStat.isFile()) {
+        candidates.push(relativePath);
+      }
+    } catch {
+      // Only package directories are workspace candidates.
+    }
+  });
+  return candidates.sort();
+}
+
+async function walk(projectRoot: string, relativePath: string, depth: number, visit: (relativePath: string) => Promise<void>): Promise<void> {
+  if (depth > MAX_GLOBSTAR_DEPTH) {
+    return;
+  }
+  if (relativePath) {
+    await visit(relativePath);
+  }
+  let entries;
+  try {
+    entries = await readdir(path.join(projectRoot, relativePath), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || SKIPPED_WORKSPACE_DIRS.has(entry.name)) {
+      continue;
+    }
+    await walk(projectRoot, normalizePath(path.join(relativePath, entry.name)), depth + 1, visit);
+  }
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+  const escaped = pattern
+    .split("/")
+    .map((segment) => {
+      if (segment === "**") {
+        return "(?:[^/]+/)*[^/]+";
+      }
+      return segment
+        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, "[^/]*");
+    })
+    .join("/");
+  return new RegExp(`^${escaped}$`);
+}
+
+function readStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") {
+      record[key] = item;
+    }
+  }
+  return Object.keys(record).length ? record : undefined;
+}
+
+function dependencyNames(parsed: {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+}): string[] {
+  return Array.from(new Set([
+    ...Object.keys(readStringRecord(parsed.dependencies) ?? {}),
+    ...Object.keys(readStringRecord(parsed.devDependencies) ?? {}),
+    ...Object.keys(readStringRecord(parsed.peerDependencies) ?? {}),
+    ...Object.keys(readStringRecord(parsed.optionalDependencies) ?? {})
+  ])).sort();
+}
+
+function validationCommandsForScripts(packageManager: string, scripts: Record<string, string> | undefined): string[] {
+  if (!scripts) {
+    return [];
+  }
+  const prefix = packageManager === "pnpm" ? "pnpm" : packageManager === "yarn" ? "yarn" : "npm run";
+  return ["typecheck", "lint", "test", "build"]
+    .filter((script) => scripts[script])
+    .map((script) => prefix === "npm run" ? `${prefix} ${script}` : `${prefix} ${script}`);
 }
 
 function dedupeWorkspaces(workspaces: WorkspaceInfo[]): WorkspaceInfo[] {
@@ -178,6 +304,14 @@ function dedupeWorkspaces(workspaces: WorkspaceInfo[]): WorkspaceInfo[] {
     const existing = byPath.get(workspace.path);
     if (existing) {
       existing.patterns = Array.from(new Set([...existing.patterns, ...workspace.patterns]));
+      existing.validationCommands = Array.from(new Set([
+        ...(existing.validationCommands ?? []),
+        ...(workspace.validationCommands ?? [])
+      ]));
+      existing.dependencies = Array.from(new Set([
+        ...(existing.dependencies ?? []),
+        ...(workspace.dependencies ?? [])
+      ])).sort();
       continue;
     }
     byPath.set(workspace.path, workspace);

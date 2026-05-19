@@ -141,3 +141,5 @@ REPOVISTA_TRUSTED_PROVIDER_PLUGIN_DIRS=/trusted/plugins repovista audit --provid
 ```
 
 Use `repovista doctor --json` or `repovista providers list --json` to inspect plugin diagnostics.
+
+Provider definitions are loaded through the active provider registry for the current project root. That keeps repository-local plugins scoped to the repository being audited or inspected, and lets programmatic callers refresh providers explicitly before running preflight, doctor, or provider tests.

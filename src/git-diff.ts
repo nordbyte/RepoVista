@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { runProcess } from "./process-runner.js";
 import type { DiffFileStatus, DiffScope } from "./types.js";
 
 const DEFAULT_TIMEOUT_SECONDS = 10;
@@ -64,45 +64,13 @@ function mapStatus(value: string): DiffFileStatus["status"] {
 }
 
 async function runGit(projectRoot: string, args: string[], timeoutSeconds: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
-      cwd: projectRoot,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const timer = setTimeout(() => {
-      settled = true;
-      child.kill("SIGTERM");
-      reject(new Error(`git ${args.join(" ")} timed out after ${timeoutSeconds} seconds.`));
-    }, timeoutSeconds * 1000);
-    timer.unref();
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.on("error", (error) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(error);
-      }
-    });
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(stderr.trim() || `git ${args.join(" ")} exited with ${code}.`));
-        return;
-      }
-      resolve(stdout);
-    });
+  const result = await runProcess("git", args, {
+    cwd: projectRoot,
+    timeoutMs: timeoutSeconds * 1000,
+    maskOutput: false
   });
+  if (result.exitCode !== 0) {
+    throw new Error(result.error ?? (result.stderr.trim() || `git ${args.join(" ")} exited with ${result.exitCode ?? "unknown"}.`));
+  }
+  return result.stdout;
 }

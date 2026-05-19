@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ParallelMode, ProjectArea, ProjectFileSummary, WorkShard } from "./types.js";
+import type { ParallelMode, ProjectArea, ProjectFileSummary, WorkspaceInfo, WorkShard } from "./types.js";
 
 const MAX_RECOMMENDED_PARALLELISM = 5;
 const ROOT_CONFIG_ID = "root-config";
@@ -50,14 +50,27 @@ export function recommendParallelism(fileCount: number, totalBytes: number, area
   return Math.max(1, Math.min(MAX_RECOMMENDED_PARALLELISM, usefulAreas || areas.length));
 }
 
-export function createWorkShards(areas: ProjectArea[], requestedParallelism: number): WorkShard[] {
+export interface WorkShardOptions {
+  workspaces?: WorkspaceInfo[];
+  changedFiles?: string[];
+}
+
+export function createWorkShards(areas: ProjectArea[], requestedParallelism: number, options: WorkShardOptions = {}): WorkShard[] {
   const parallelism = Math.max(1, Math.min(MAX_RECOMMENDED_PARALLELISM, Math.floor(requestedParallelism), Math.max(1, areas.length)));
+  const workspaceShards = createWorkspaceShards(areas, parallelism, options);
+  if (workspaceShards.length > 1) {
+    return workspaceShards;
+  }
   if (parallelism <= 1 || areas.length <= 1) {
     return [combineAreas("thread-1", "Whole repository", areas)];
   }
 
   const buckets: ProjectArea[][] = Array.from({ length: parallelism }, () => []);
-  const sorted = [...areas].sort((left, right) => right.fileCount - left.fileCount || right.bytes - left.bytes);
+  const sorted = [...areas].sort((left, right) =>
+    changedCount(right, options.changedFiles ?? []) - changedCount(left, options.changedFiles ?? []) ||
+    right.fileCount - left.fileCount ||
+    right.bytes - left.bytes
+  );
   for (const area of sorted) {
     const target = buckets
       .map((bucket, index) => ({ index, files: bucket.reduce((sum, item) => sum + item.fileCount, 0) }))
@@ -102,6 +115,62 @@ function combineAreas(id: string, title: string, areas: ProjectArea[]): WorkShar
     estimatedBytes: areas.reduce((sum, area) => sum + area.bytes, 0),
     focus
   };
+}
+
+function createWorkspaceShards(areas: ProjectArea[], parallelism: number, options: WorkShardOptions): WorkShard[] {
+  const workspaces = (options.workspaces ?? []).filter((workspace) =>
+    areas.some((area) => area.paths.some((areaPath) => areaMatchesWorkspace(areaPath, workspace.path)))
+  );
+  if (parallelism <= 1 || workspaces.length <= 1) {
+    return [];
+  }
+  const allWorkspaceAreaIds = new Set<string>();
+  for (const workspace of workspaces) {
+    for (const area of areas) {
+      if (area.paths.some((areaPath) => areaMatchesWorkspace(areaPath, workspace.path))) {
+        allWorkspaceAreaIds.add(area.id);
+      }
+    }
+  }
+  const hasSharedAreas = areas.some((area) => !allWorkspaceAreaIds.has(area.id));
+  const workspaceLimit = Math.max(1, hasSharedAreas ? parallelism - 1 : parallelism);
+  const selectedWorkspaces = [...workspaces]
+    .sort((left, right) =>
+      workspaceChangedCount(right, options.changedFiles ?? []) - workspaceChangedCount(left, options.changedFiles ?? []) ||
+      left.path.localeCompare(right.path)
+    )
+    .slice(0, workspaceLimit);
+  const usedAreaIds = new Set<string>();
+  const shards: WorkShard[] = selectedWorkspaces.map((workspace, index) => {
+    const workspaceAreas = areas.filter((area) => area.paths.some((areaPath) =>
+      areaMatchesWorkspace(areaPath, workspace.path)
+    ));
+    workspaceAreas.forEach((area) => usedAreaIds.add(area.id));
+    return {
+      ...combineAreas(`thread-${index + 1}`, workspace.name, workspaceAreas),
+      workspace: workspace.path,
+      validationCommands: workspace.validationCommands
+    };
+  });
+  const remaining = areas.filter((area) => !usedAreaIds.has(area.id));
+  if (remaining.length) {
+    shards.push(combineAreas(`thread-${shards.length + 1}`, "Shared repository files", remaining));
+  }
+  return shards;
+}
+
+function changedCount(area: ProjectArea, changedFiles: string[]): number {
+  return changedFiles.filter((file) => area.paths.some((areaPath) => file === areaPath || file.startsWith(`${areaPath}/`))).length;
+}
+
+function workspaceChangedCount(workspace: WorkspaceInfo, changedFiles: string[]): number {
+  return changedFiles.filter((file) => file === workspace.path || file.startsWith(`${workspace.path}/`)).length;
+}
+
+function areaMatchesWorkspace(areaPath: string, workspacePath: string): boolean {
+  return areaPath === workspacePath ||
+    areaPath.startsWith(`${workspacePath}/`) ||
+    workspacePath.startsWith(`${areaPath}/`);
 }
 
 function areaIdForPath(relativePath: string): string {

@@ -588,6 +588,7 @@ test("audit writes structured findings and summary json", async () => {
       checkTimeoutSeconds: 60,
       phaseTimeoutSeconds: 60,
       strictReports: false,
+      exportFormats: ["html", "jsonl"],
       ci: true,
       failOnCritical: true,
       progress: false,
@@ -708,6 +709,7 @@ None.
     const summary = JSON.parse(await readFile(path.join(result.paths.runDir, "summary.json"), "utf8"));
     const promptManifest = JSON.parse(await readFile(path.join(result.paths.runDir, "prompt-manifest.json"), "utf8"));
     const features = JSON.parse(await readFile(path.join(result.paths.runDir, "features.json"), "utf8"));
+    const html = await readFile(path.join(result.paths.runDir, "report.html"), "utf8");
     const storedFindings = await loadStoredFindings(root, ".repovista");
     assert.equal(findings[0].severity, "critical");
     assert.match(findings[0].id, /^fnd_/);
@@ -716,6 +718,10 @@ None.
     assert.equal(promptManifest.phases.length, 5);
     assert.equal(features.features.length > 0, true);
     assert.equal(storedFindings[0].id, findings[0].id);
+    assert.match(html, /RepoVista Dashboard/);
+    assert.match(html, /Evidence Pack/);
+    assert.match(html, /Phase Quality/);
+    assert.match(html, /Suppressed Findings/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -445,6 +445,9 @@ export interface WorkspaceInfo {
   packageManager: string;
   packageJsonPath?: string;
   patterns: string[];
+  scripts?: Record<string, string>;
+  dependencies?: string[];
+  validationCommands?: string[];
 }
 
 export interface WorkspaceDetectionResult {
@@ -493,6 +496,7 @@ export interface WorkShard {
   focus: string;
   featureIds?: string[];
   validationCommands?: string[];
+  workspace?: string;
 }
 
 export interface SemanticFeature {
@@ -597,6 +601,7 @@ export interface ProjectMap {
   languages: Record<string, number>;
   frameworks: string[];
   packageManagers: string[];
+  workspaces?: WorkspaceInfo[];
   areas: ProjectArea[];
   features: SemanticFeature[];
   recommendedParallelism: number;

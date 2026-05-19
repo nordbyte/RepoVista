@@ -1,3 +1,5 @@
+import { cliOptionDefinitions } from "./option-registry.js";
+
 export interface CliOptionDefinition {
   name: string;
   kind: "value" | "boolean";
@@ -41,76 +43,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista settings reset [key]", name: "settings", help: "Edit, read, set, or reset persisted default settings" }
 ];
 
-export const CLI_OPTIONS: readonly CliOptionDefinition[] = [
-  { name: "provider", kind: "value", help: "Report provider: codex, claude, gemini, opencode, aider, or a loaded plugin (default: codex)" },
-  { name: "allow-repo-provider-plugin", kind: "boolean", help: "Allow execution of provider plugins declared in this repository" },
-  { name: "parallel", kind: "value", help: "Parallel audit mode: off, auto, or 1-5 threads (default: auto)" },
-  { name: "refresh", kind: "boolean", help: "Refresh cached project metadata for commands that support it" },
-  { name: "no-parallel", kind: "boolean", help: "Disable saved parallel default" },
-  { name: "out", kind: "value", help: "Report output directory (default: .repovista)" },
-  { name: "resume", kind: "value", help: "Resume or complete an existing RepoVista run directory" },
-  { name: "since", kind: "value", help: "Focus the audit on files changed since the given Git ref" },
-  { name: "pr", kind: "boolean", help: "PR mode; default diff base is origin/main unless --base is set" },
-  { name: "no-pr", kind: "boolean", help: "Disable saved PR mode" },
-  { name: "base", kind: "value", help: "Base ref for --pr or diff-focused audits" },
-  { name: "audit-profile", kind: "value", help: "Built-in audit profile: quick, security, pr-review, release-readiness, architecture" },
-  { name: "review-mode", kind: "value", help: "Review mode: default, deslopify, security, or test-gaps" },
-  { name: "prompt-file", kind: "value", help: "Append extra read-only reviewer guidance from a file" },
-  { name: "workspace", kind: "value", help: "Limit the audit to a detected workspace by name or path" },
-  { name: "all-workspaces", kind: "boolean", help: "Record and include all detected workspaces" },
-  { name: "incremental", kind: "boolean", help: "Record scan-cache metadata and detect unchanged project scans (default: on)" },
-  { name: "model", kind: "value", help: "Override the provider model" },
-  { name: "profile", kind: "value", help: "Use a provider configuration profile, currently Codex profile for codex" },
-  { name: "reasoning", kind: "value", help: "Override provider reasoning effort (default: xhigh)" },
-  { name: "fast", kind: "boolean", help: "Use Codex fast service tier when supported" },
-  { name: "no-fast", kind: "boolean", help: "Disable Codex fast service tier" },
-  { name: "sandbox", kind: "value", help: "Provider sandbox: read-only or workspace-write (default: read-only)" },
-  { name: "language", kind: "value", help: "Report language (default: English)" },
-  { name: "json", kind: "boolean", help: "Store metadata, provider logs/events, or emit command JSON where supported" },
-  { name: "include", kind: "value", help: "Additional include patterns for inventory/context" },
-  { name: "ignore", kind: "value", help: "Additional ignore patterns" },
-  { name: "phase", kind: "value", help: "Run only selected phase(s); repeatable or comma-separated" },
-  { name: "run-checks", kind: "boolean", help: "Run detected or explicit local check commands before analysis (default: on)" },
-  { name: "no-run-checks", kind: "boolean", help: "Disable saved run-checks default" },
-  { name: "check", kind: "value", help: "Add an explicit local check command for --run-checks" },
-  { name: "check-timeout", kind: "value", help: "Timeout per local check command in minutes (default: 5)" },
-  { name: "timeout", kind: "value", help: "Timeout per provider phase in minutes (default: 30)" },
-  { name: "phase-timeout", kind: "value", help: "Alias for --timeout" },
-  { name: "strict-reports", kind: "boolean", help: "Fail phases when report quality gates warn (default: on)" },
-  { name: "no-strict-reports", kind: "boolean", help: "Disable saved strict report default" },
-  { name: "repair-reports", kind: "boolean", help: "Ask the provider to repair reports that miss quality gates (default: on)" },
-  { name: "no-repair-reports", kind: "boolean", help: "Disable saved report repair default" },
-  { name: "repair-attempts", kind: "value", help: "Maximum repair attempts per phase, 1-3 (default: 1)" },
-  { name: "deep-review", kind: "boolean", help: "Run additional feature-sliced risk review passes and merge their findings" },
-  { name: "no-deep-review", kind: "boolean", help: "Disable saved feature-sliced deep review default" },
-  { name: "export", kind: "value", help: "Export findings: sarif, html, jsonl, github (default: sarif,html,jsonl)" },
-  { name: "format", kind: "value", help: "Output format for compare: markdown, json, html" },
-  { name: "fail-on-regression", kind: "boolean", help: "Exit with code 2 when compare detects new critical/high findings" },
-  { name: "ci", kind: "boolean", help: "CI mode without progress output" },
-  { name: "fail-on-critical", kind: "boolean", help: "Exit with code 2 in CI when critical findings are detected" },
-  { name: "no-progress", kind: "boolean", help: "Reduce progress output" },
-  { name: "keep-logs", kind: "boolean", help: "Store technical provider logs" },
-  { name: "finding", kind: "value", help: "Finding id for show, triage, revalidate, issue, baseline, or suppress" },
-  { name: "run", kind: "value", help: "Run id or run directory for run-specific findings" },
-  { name: "status", kind: "value", help: "Finding status: open, fixed, false-positive, wont-fix, uncertain" },
-  { name: "note", kind: "value", help: "Triage, baseline, or issue note stored in command history" },
-  { name: "label", kind: "value", help: "GitHub issue label; repeatable" },
-  { name: "assignee", kind: "value", help: "GitHub issue assignee; repeatable" },
-  { name: "update-existing", kind: "boolean", help: "Update an existing matching GitHub issue instead of creating a duplicate" },
-  { name: "patch", kind: "value", help: "Patch attempt id for patches or open-pr" },
-  { name: "branch", kind: "value", help: "Branch name for open-pr" },
-  { name: "title", kind: "value", help: "Title for open-pr" },
-  { name: "all", kind: "boolean", help: "Include all finding statuses or revalidate all findings" },
-  { name: "provider-revalidate", kind: "boolean", help: "Ask the configured provider to revalidate finding status" },
-  { name: "dry-run", kind: "boolean", help: "Preview commands or issue/workflow content without writing remotely" },
-  { name: "isolate-branch", kind: "boolean", help: "Run repovista fix on a temporary branch" },
-  { name: "post-revalidate", kind: "boolean", help: "Revalidate the fixed finding after repovista fix" },
-  { name: "max-files", kind: "value", help: "Maximum changed files allowed for repovista fix scope gate" },
-  { name: "template", kind: "value", help: "CI template for ci init: pr-light, security, release-readiness, scheduled-audit" },
-  { name: "force", kind: "boolean", help: "Overwrite generated files where supported" },
-  { name: "version", kind: "boolean", help: "Show version" },
-  { name: "help", kind: "boolean", help: "Show help" }
-];
+export const CLI_OPTIONS: readonly CliOptionDefinition[] = cliOptionDefinitions();
 
 export const VALUE_OPTION_NAMES = new Set(CLI_OPTIONS.filter((option) => option.kind === "value").map((option) => option.name));
 export const BOOLEAN_OPTION_NAMES = new Set(CLI_OPTIONS.filter((option) => option.kind === "boolean").map((option) => option.name));

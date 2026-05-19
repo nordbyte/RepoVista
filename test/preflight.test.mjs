@@ -62,13 +62,13 @@ test("preflight checks the selected provider command", async () => {
     const seen = [];
 
     const result = await runPreflight(root, runDir, { ...baseOptions, provider: "claude" }, {
-      commandExists: async (command) => {
-        seen.push(command);
+      commandExists: async (command, args) => {
+        seen.push([command, args]);
         return true;
       }
     });
 
-    assert.deepEqual(seen, ["claude"]);
+    assert.deepEqual(seen, [["claude", ["--version"]]]);
     assert.equal(result.provider.id, "claude");
     assert.equal(result.providerAvailable, true);
     assert.equal(result.codexAvailable, false);

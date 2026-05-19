@@ -36,7 +36,7 @@ Each audit writes a timestamped run directory under the selected output root:
     logs/
 ```
 
-`index.md` is the human-readable entry point.
+`index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, evidence checks, phase-quality diagnostics, suppressed findings, and artifact links.
 
 ## Main Files
 
@@ -55,7 +55,7 @@ Each audit writes a timestamped run directory under the selected output root:
 | `prompt-manifest.json` | Prompt context manifest, file hashes, inclusion reasons, omissions, diff scope, and token estimates. |
 | `findings.json` | Active structured findings. |
 | `features.json` | Run-specific semantic feature map. |
-| `report.html` | Interactive HTML report when exported. |
+| `report.html` | Browser dashboard with finding filters, evidence quality, phase quality, suppressed findings, and artifact links when exported. |
 | `findings.jsonl` | Finding export for line-oriented processing. |
 | `findings.sarif` | SARIF export for security tooling. |
 | `github-annotations.json` | GitHub annotation export. |

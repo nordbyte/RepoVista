@@ -21,6 +21,15 @@ npm pack --dry-run
 
 `npm test` builds first and runs the test suite with mocked provider processes. It does not call Codex, Claude, or other provider CLIs for real.
 
+Optional live provider smoke tests are available for local pre-release checks:
+
+```sh
+REPOVISTA_LIVE_PROVIDER_TESTS=1 npm test
+REPOVISTA_LIVE_PROVIDER_TESTS=1 REPOVISTA_LIVE_PROVIDER_IDS=codex,claude npm test
+```
+
+These tests run `repovista providers test <provider>` for the selected providers and require the provider CLIs to be installed and authenticated.
+
 `npm run golden:reports` validates bundled full-report fixtures against the same quality gates used for generated reports.
 
 ## Local CLI Testing

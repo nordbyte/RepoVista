@@ -1,9 +1,9 @@
 import { access, readdir, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { spawn } from "node:child_process";
 import path from "node:path";
 import { PreflightError } from "./errors.js";
-import { getReportProvider } from "./providers/index.js";
+import { commandAvailable } from "./process-runner.js";
+import { getReportProvider, refreshReportProviders } from "./providers/index.js";
 import { providerPluginTrustStatus } from "./providers/plugin.js";
 import { validateReportRoot } from "./reports.js";
 import type { AiProviderId, AuditOptions } from "./types.js";
@@ -57,6 +57,7 @@ export async function runPreflight(
 ): Promise<PreflightResult> {
   const warnings: string[] = [];
   const commandExists = dependencies.commandExists ?? defaultCommandExists;
+  refreshReportProviders({ projectRoot });
   const provider = getReportProvider(options.provider ?? "codex");
   const pluginTrust = providerPluginTrustStatus(provider.id);
   if (pluginTrust.isPlugin && pluginTrust.trustRequired && !pluginTrust.trusted && !options.allowRepoProviderPlugin) {
@@ -153,40 +154,5 @@ async function assertDirectoryAccess(directory: string, label: string, requireWr
 }
 
 async function defaultCommandExists(command: string, args: string[] = ["--version"]): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let forceKillTimer: NodeJS.Timeout | undefined;
-    const child = spawn(command, args, {
-      stdio: "ignore"
-    });
-    const timeoutTimer = setTimeout(() => {
-      if (settled) {
-        return;
-      }
-      child.kill("SIGTERM");
-      forceKillTimer = setTimeout(() => {
-        if (!settled) {
-          child.kill("SIGKILL");
-        }
-      }, 5000);
-      forceKillTimer.unref();
-      settle(false);
-    }, COMMAND_EXISTS_TIMEOUT_MS);
-    timeoutTimer.unref();
-
-    const settle = (value: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeoutTimer);
-      if (forceKillTimer) {
-        clearTimeout(forceKillTimer);
-      }
-      resolve(value);
-    };
-
-    child.on("error", () => settle(false));
-    child.on("close", (code) => settle(code === 0));
-  });
+  return commandAvailable(command, args, COMMAND_EXISTS_TIMEOUT_MS);
 }

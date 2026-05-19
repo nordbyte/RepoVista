@@ -13,11 +13,12 @@ repovista profiles [--json]
 repovista ci init [--template pr-light|security|release-readiness|scheduled-audit] [--dry-run] [--force]
 repovista compare <old-run-dir> <new-run-dir> [--format markdown|json|html] [--fail-on-regression]
 repovista review <run-dir> [--json]
+repovista repair-run <run-dir> [--force] [--json]
 repovista pr-comment <run-dir> [--dry-run]
 repovista baseline [list|add|remove|prune] [finding-id] [--note <text>]
 repovista suppress <finding-id> [--note <text>]
 repovista clean-locks [--force]
-repovista findings [--status <status>] [--all] [--json] [--export <formats>]
+repovista findings [--run <run-id|dir>] [--status <status>] [--all] [--json] [--export <formats>]
 repovista findings-ui
 repovista next [--status <status>]
 repovista show <finding-id>
@@ -49,6 +50,7 @@ repovista version
 | `ci init` | Create a GitHub Actions workflow. |
 | `compare` | Compare two run directories. |
 | `review` | Review one run for quality, evidence, and stale checkout signals. |
+| `repair-run` | Rebuild run artifacts from provider-native `.structured.json` outputs. |
 | `pr-comment` | Render or post a pull request summary comment. |
 | `baseline` | Manage known accepted finding suppressions. |
 | `suppress` | Shortcut for `baseline add`. |
@@ -122,6 +124,7 @@ Phase ids are `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`,
 | Option | Purpose |
 |---|---|
 | `--finding <id>` | Finding id for commands that need one. |
+| `--run <run-id\|dir>` | Read findings from a specific run id or run directory. |
 | `--status <status>` | `open`, `fixed`, `false-positive`, `wont-fix`, or `uncertain`. |
 | `--note <text>` | Triage, baseline, or issue note. |
 | `--all` | Include all statuses or revalidate all findings. |

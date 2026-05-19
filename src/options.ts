@@ -1,42 +1,10 @@
 import { CliUsageError } from "./errors.js";
 import { BOOLEAN_OPTION_NAMES, renderCliHelp, VALUE_OPTION_NAMES } from "./cli-schema.js";
+import { createDefaultAuditOptions } from "./option-registry.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, FindingStatus, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
-export const DEFAULT_OPTIONS: AuditOptions = {
-  command: "audit",
-  provider: "codex",
-  parallel: "auto",
-  outDir: ".repovista",
-  sandbox: "read-only",
-  language: "English",
-  reasoning: "xhigh",
-  fastMode: false,
-  json: false,
-  includes: [],
-  ignores: [],
-  phases: [],
-  runChecks: true,
-  checkCommands: [],
-  checkTimeoutSeconds: 300,
-  phaseTimeoutSeconds: 1800,
-  strictReports: true,
-  repairReports: true,
-  repairAttempts: 1,
-  deepReview: false,
-  reviewMode: "default",
-  exportFormats: ["sarif", "html", "jsonl"],
-  ci: false,
-  failOnCritical: false,
-  progress: true,
-  keepLogs: false,
-  providerRevalidate: false,
-  dryRun: false,
-  refresh: false,
-  incremental: true,
-  issueLabels: [],
-  issueAssignees: []
-};
+export const DEFAULT_OPTIONS: AuditOptions = createDefaultAuditOptions();
 
 const PHASE_IDS = new Set([
   "architecture",

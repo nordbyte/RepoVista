@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
 import type { WriteStream } from "node:fs";
+import { signalProcess } from "./process-runner.js";
 import { getReportProvider } from "./providers/index.js";
 import { renderStructuredProviderOutput } from "./provider-schema.js";
 import { createSensitiveTextMasker, maskSensitiveText } from "./secrets.js";
@@ -137,7 +138,7 @@ export async function runProviderPhase(
       diagnostics.termination.reason = reason;
       diagnostics.termination.sigtermSent = true;
       diagnostics.termination.sigtermAt = new Date().toISOString();
-      signalChild(child, useProcessGroup, "SIGTERM", diagnostics);
+      diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGTERM"));
       forceKillTimer = setTimeout(() => {
         if (!settled) {
           diagnostics.termination = diagnostics.termination ?? {
@@ -150,7 +151,7 @@ export async function runProviderPhase(
           diagnostics.termination.sigkillSent = true;
           diagnostics.termination.sigkillAt = new Date().toISOString();
           if (child) {
-            signalChild(child, useProcessGroup, "SIGKILL", diagnostics);
+            diagnostics.termination.errors.push(...signalProcess(child, useProcessGroup, "SIGKILL"));
           }
           forcedSettleTimer = setTimeout(() => {
             if (settled) {
@@ -348,34 +349,6 @@ function closeLog(stream: WriteStream | undefined): Promise<void> {
     stream.once("error", done);
     stream.end();
   });
-}
-
-function signalChild(
-  child: ChildProcessWithoutNullStreams,
-  processGroup: boolean,
-  signal: NodeJS.Signals,
-  diagnostics: ProviderRunDiagnostics
-): void {
-  const errors: string[] = [];
-  if (processGroup && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch (error) {
-      errors.push(`process group ${signal}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  try {
-    child.kill(signal);
-    return;
-  } catch (error) {
-    errors.push(`child ${signal}: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    if (errors.length) {
-      diagnostics.termination?.errors.push(...errors);
-    }
-  }
 }
 
 async function hasUsableReport(reportPath: string): Promise<boolean> {

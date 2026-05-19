@@ -203,26 +203,56 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
 <td>${Math.round(phase.durationMs)}ms</td>
 <td>${phase.promptTokens}</td>
 </tr>`).join("\n") ?? "";
+  const severityCounts = countBy(findings, (finding) => finding.severity);
+  const statusCounts = countBy(findings, (finding) => finding.status ?? "open");
+  const checkRows = (context.evidence?.checks.results ?? []).map((result) => `<tr>
+<td><code>${escapeHtml(result.command)}</code></td>
+<td>${escapeHtml(String(result.exitCode ?? "n/a"))}</td>
+<td>${Math.round(result.durationMs)}ms</td>
+<td>${result.timedOut ? "yes" : "no"}</td>
+</tr>`).join("\n");
+  const phaseQualityRows = (meta?.phases ?? []).map((phase) => `<tr>
+<td>${escapeHtml(phase.id)}</td>
+<td>${escapeHtml(phase.status)}</td>
+<td>${escapeHtml(phase.qualityPassed === undefined ? "not recorded" : phase.qualityPassed ? "passed" : "warnings")}</td>
+<td>${escapeHtml(phase.qualityScore === undefined ? "n/a" : String(phase.qualityScore))}</td>
+<td>${escapeHtml((phase.qualityWarnings ?? []).join("; ") || phase.error || "")}</td>
+</tr>`).join("\n");
+  const suppressedRows = (context.suppressedFindings ?? []).map((finding) => `<tr>
+<td>${escapeHtml(finding.severity)}</td>
+<td>${escapeHtml(finding.title)}</td>
+<td>${escapeHtml(finding.paths.join(", ") || "n/a")}</td>
+<td>${escapeHtml(finding.recommendation ?? "")}</td>
+</tr>`).join("\n");
+  const outputLinks = Object.entries(meta?.outputs ?? {})
+    .filter(([, value]) => typeof value === "string")
+    .map(([label, value]) => `<li><strong>${escapeHtml(label)}</strong>: <code>${escapeHtml(String(value))}</code></li>`)
+    .join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>RepoVista Findings</title>
+  <title>RepoVista Dashboard</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; color: #171717; line-height: 1.45; }
-    header { border-bottom: 1px solid #d4d4d4; margin-bottom: 1.5rem; padding-bottom: 1rem; }
-    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin: 1rem 0; }
-    .meta div { border: 1px solid #d4d4d4; padding: .75rem; border-radius: 6px; background: #fafafa; }
+    body { font-family: system-ui, sans-serif; margin: 0; color: #171717; line-height: 1.45; background: #f7f8fb; }
+    main { max-width: 1500px; margin: 0 auto; padding: 1.5rem; }
+    header { background: #111827; color: #fff; margin: 0 0 1.5rem; padding: 1.5rem; }
+    header h1 { margin: 0 0 .35rem; }
+    .meta, .scoreboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin: 1rem 0; }
+    .meta div, .scoreboard div, section { border: 1px solid #d4d4d4; padding: .85rem; border-radius: 6px; background: #fff; }
+    header .meta div { background: #1f2937; border-color: #374151; }
     .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; margin: 1rem 0; align-items: end; }
     label { display: grid; gap: .25rem; font-size: .9rem; font-weight: 600; }
     input, select { font: inherit; padding: .45rem .55rem; border: 1px solid #bdbdbd; border-radius: 6px; background: #fff; }
     table { border-collapse: collapse; width: 100%; }
     th, td { border: 1px solid #d4d4d4; padding: .5rem; vertical-align: top; }
     th { background: #f5f5f5; text-align: left; }
-    section { margin-top: 2rem; }
+    section { margin-top: 1rem; overflow-x: auto; }
+    code { overflow-wrap: anywhere; }
     li { margin-bottom: .75rem; }
     .muted { color: #666; }
     .hidden { display: none; }
+    .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
   </style>
 </head>
 <body>
@@ -239,6 +269,15 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
       <div><strong>Total phase time</strong><br>${escapeHtml(analytics ? `${Math.round(analytics.totalDurationMs)}ms` : "not recorded")}</div>
     </div>
   </header>
+  <main>
+  <div class="scoreboard" aria-label="Finding summary">
+    <div><strong>Total findings</strong><br>${findings.length}</div>
+    <div><strong>Critical</strong><br>${severityCounts.critical ?? 0}</div>
+    <div><strong>High</strong><br>${severityCounts.high ?? 0}</div>
+    <div><strong>Medium</strong><br>${severityCounts.medium ?? 0}</div>
+    <div><strong>Open</strong><br>${statusCounts.open ?? 0}</div>
+    <div><strong>Suppressed</strong><br>${context.suppressedFindings?.length ?? 0}</div>
+  </div>
   <section>
   <h2>Findings</h2>
   <div class="filters">
@@ -253,6 +292,23 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
     <tbody>${rows || "<tr><td colspan=\"6\">No findings</td></tr>"}</tbody>
   </table>
   </section>
+  <div class="split">
+  <section>
+  <h2>Evidence Pack</h2>
+  <p class="muted">Checks: ${escapeHtml(context.evidence?.checks.enabled ? "enabled" : "disabled")} (${escapeHtml(String(context.evidence?.checks.commands.length ?? 0))} configured)</p>
+  <table>
+    <thead><tr><th>Command</th><th>Exit</th><th>Duration</th><th>Timeout</th></tr></thead>
+    <tbody>${checkRows || "<tr><td colspan=\"4\">No local check results recorded.</td></tr>"}</tbody>
+  </table>
+  </section>
+  <section>
+  <h2>Phase Quality</h2>
+  <table>
+    <thead><tr><th>Phase</th><th>Status</th><th>Quality</th><th>Score</th><th>Notes</th></tr></thead>
+    <tbody>${phaseQualityRows || "<tr><td colspan=\"5\">No phase quality recorded.</td></tr>"}</tbody>
+  </table>
+  </section>
+  </div>
   <section>
   <h2>Run Analytics</h2>
   <table>
@@ -271,6 +327,18 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
   <h2>Roadmap Proposals</h2>
   <ul>${proposals || "<li>No roadmap proposals recorded.</li>"}</ul>
   </section>
+  <section>
+  <h2>Suppressed Findings</h2>
+  <table>
+    <thead><tr><th>Severity</th><th>Title</th><th>Paths</th><th>Recommendation</th></tr></thead>
+    <tbody>${suppressedRows || "<tr><td colspan=\"4\">No suppressed findings recorded.</td></tr>"}</tbody>
+  </table>
+  </section>
+  <section>
+  <h2>Artifacts</h2>
+  <ul>${outputLinks || "<li>No artifact paths recorded.</li>"}</ul>
+  </section>
+  </main>
   <script>
     const rows = Array.from(document.querySelectorAll(".finding-row"));
     const search = document.getElementById("finding-search");
@@ -296,6 +364,14 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
 </body>
 </html>
 `;
+}
+
+function countBy<T>(values: T[], key: (value: T) => string): Record<string, number> {
+  return values.reduce<Record<string, number>>((counts, value) => {
+    const itemKey = key(value);
+    counts[itemKey] = (counts[itemKey] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 function renderEvidenceLinks(finding: StructuredFinding): string {

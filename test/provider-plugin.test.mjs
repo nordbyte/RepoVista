@@ -86,3 +86,37 @@ test("repo-local provider plugins require explicit trust before execution", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("provider registry refreshes per project root and validates versionArgs", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-provider-registry-"));
+  try {
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "repovista.providers.json"), JSON.stringify({
+      providers: [
+        {
+          id: "bad-version-provider",
+          executable: "node",
+          outputMode: "stdout",
+          versionArgs: "--version",
+          args: ["--version"]
+        }
+      ]
+    }), "utf8");
+
+    const script = `
+      import { runProvidersCommand } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "dist", "index.js")).href)};
+      const output = await runProvidersCommand({ outDir: '.repovista', json: true }, process.cwd());
+      console.log(output);
+    `;
+    const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "-e", script], { cwd: root });
+    const parsed = JSON.parse(stdout);
+    assert.ok(parsed.pluginDiagnostics.some((diagnostic) =>
+      diagnostic.id === "bad-version-provider" &&
+      diagnostic.loaded === false &&
+      /invalid/i.test(diagnostic.error)
+    ));
+    assert.equal(parsed.providers.some((provider) => provider.id === "bad-version-provider"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

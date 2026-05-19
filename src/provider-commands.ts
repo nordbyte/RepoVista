@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
-import { REPORT_PROVIDERS, getReportProvider } from "./providers/index.js";
+import { runProcess } from "./process-runner.js";
+import { REPORT_PROVIDERS, getReportProvider, refreshReportProviders } from "./providers/index.js";
 import { getPluginProviderDiagnostics, providerPluginTrustStatus } from "./providers/plugin.js";
-import { maskSensitiveText } from "./secrets.js";
 import type { AuditOptions } from "./types.js";
 
-const execFileAsync = promisify(execFile);
-
 export async function runProvidersCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
+  const providers = refreshReportProviders({ projectRoot });
   const action = options.providerAction ?? "list";
   if (action === "test") {
     const provider = getReportProvider(options.provider ?? "codex");
@@ -16,28 +13,28 @@ export async function runProvidersCommand(options: AuditOptions, projectRoot = p
     if (trust.isPlugin && trust.trustRequired && !trust.trusted && !options.allowRepoProviderPlugin) {
       throw new RepoVistaError(`Provider plugin ${provider.id} is declared by this repository. Re-run with --allow-repo-provider-plugin after reviewing it.`);
     }
-    try {
-      const { stdout, stderr } = await execFileAsync(provider.executable, provider.versionArgs, {
-        cwd: projectRoot,
-        timeout: 10_000,
-        maxBuffer: 1024 * 1024
-      });
-      const version = maskSensitiveText((stdout || stderr).trim());
+    const result = await runProcess(provider.executable, provider.versionArgs, {
+      cwd: projectRoot,
+      timeoutMs: 10_000,
+      stdoutLimit: 1024 * 1024,
+      stderrLimit: 1024 * 1024
+    });
+    if (result.exitCode === 0) {
+      const version = (result.stdout || result.stderr).trim();
       if (options.json) {
         return `${JSON.stringify({ provider: provider.id, available: true, version }, null, 2)}\n`;
       }
       return `${provider.displayName} (${provider.id}) is available${version ? `: ${version}` : "."}\n`;
-    } catch (error) {
-      const message = maskSensitiveText(error instanceof Error ? error.message : String(error));
-      if (options.json) {
-        return `${JSON.stringify({ provider: provider.id, available: false, error: message }, null, 2)}\n`;
-      }
-      throw new RepoVistaError(`${provider.displayName} (${provider.id}) is not available: ${message}`);
     }
+    const message = result.error ?? (result.stderr.trim() || `${provider.executable} exited with ${result.exitCode ?? "unknown"}.`);
+    if (options.json) {
+      return `${JSON.stringify({ provider: provider.id, available: false, error: message }, null, 2)}\n`;
+    }
+    throw new RepoVistaError(`${provider.displayName} (${provider.id}) is not available: ${message}`);
   }
 
   const payload = {
-    providers: REPORT_PROVIDERS.map((provider) => ({
+    providers: providers.map((provider) => ({
       id: provider.id,
       displayName: provider.displayName,
       executable: provider.executable,

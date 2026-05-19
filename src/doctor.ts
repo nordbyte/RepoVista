@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
+import { commandAvailable } from "./process-runner.js";
 import { getSettingsPath, loadSettings } from "./settings-config.js";
 import { detectWorkspaces } from "./workspaces.js";
 import { getPluginProviderDiagnostics } from "./providers/plugin.js";
-import { REPORT_PROVIDERS } from "./providers/index.js";
+import { refreshReportProviders } from "./providers/index.js";
 import { hasGitRepository, isRecognizableProject } from "./preflight.js";
 import { validateReportRoot } from "./reports.js";
 import { maskSensitiveText } from "./secrets.js";
@@ -24,11 +24,12 @@ export async function runDoctorCommand(options: AuditOptions, projectRoot = proc
   checks.push(await checkReportRoot(projectRoot, options));
   checks.push(await checkSettings());
 
-  const providers = await Promise.all(REPORT_PROVIDERS.map(async (provider) => ({
+  const registry = refreshReportProviders({ projectRoot });
+  const providers = await Promise.all(registry.map(async (provider) => ({
     id: provider.id,
     displayName: provider.displayName,
     executable: provider.executable,
-    available: await commandExists(provider.executable)
+    available: await commandAvailable(provider.executable, provider.versionArgs)
   })));
   for (const provider of providers) {
     checks.push({
@@ -143,43 +144,6 @@ async function checkSettings(): Promise<DoctorCheck> {
       message: maskSensitiveText(error instanceof Error ? error.message : String(error))
     };
   }
-}
-
-function commandExists(command: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let forceKillTimer: NodeJS.Timeout | undefined;
-    const child = spawn(command, ["--version"], { stdio: "ignore" });
-    const timeout = setTimeout(() => {
-      if (settled) {
-        return;
-      }
-      child.kill("SIGTERM");
-      forceKillTimer = setTimeout(() => {
-        if (!settled) {
-          child.kill("SIGKILL");
-        }
-      }, 5000);
-      forceKillTimer.unref();
-      settle(false);
-    }, 10_000);
-    timeout.unref();
-
-    const settle = (value: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      if (forceKillTimer) {
-        clearTimeout(forceKillTimer);
-      }
-      resolve(value);
-    };
-
-    child.on("error", () => settle(false));
-    child.on("close", (code) => settle(code === 0));
-  });
 }
 
 function statusIcon(status: DoctorCheck["status"]): string {

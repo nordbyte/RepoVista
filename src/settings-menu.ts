@@ -12,6 +12,7 @@ import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
 import { DEFAULT_OPTIONS } from "./options.js";
+import { menuItemIdsFromRegistry } from "./option-registry.js";
 import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
@@ -844,3 +845,12 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "save", type: "command", label: () => "Save and exit" },
   { id: "exit", type: "command", label: () => "Exit without saving" }
 ];
+
+export const SETTINGS_MENU_ITEM_IDS = MAIN_ITEMS.map((item) => item.id);
+
+export function assertSettingsMenuRegistryCoverage(): string[] {
+  const registryIds = menuItemIdsFromRegistry();
+  return MAIN_ITEMS
+    .map((item) => item.id)
+    .filter((id) => id !== "save" && id !== "exit" && !registryIds.has(id));
+}

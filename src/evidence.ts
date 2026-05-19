@@ -1,9 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { runProcess } from "./process-runner.js";
 import { getReportProvider } from "./providers/index.js";
-import { maskSensitiveText } from "./secrets.js";
 import type { AuditOptions, EvidenceCommandResult, EvidencePack } from "./types.js";
 
 export interface CommandRunOptions {
@@ -224,86 +223,21 @@ async function runCheckCommands(
 }
 
 function defaultRunCommand(command: string, args: string[], options: CommandRunOptions): Promise<EvidenceCommandResult> {
-  const startedAt = Date.now();
-  return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let settled = false;
-    const detached = Boolean(options.shell && process.platform !== "win32");
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      shell: options.shell ?? false,
-      env: process.env,
-      detached,
-      stdio: "pipe"
-    });
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killChildProcess(child.pid, detached, "SIGTERM");
-      setTimeout(() => {
-        if (!settled) {
-          killChildProcess(child.pid, detached, "SIGKILL");
-        }
-      }, 5000).unref();
-    }, options.timeoutSeconds * 1000);
-    timer.unref();
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout = appendBounded(stdout, chunk.toString("utf8"));
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = appendBounded(stderr, chunk.toString("utf8"));
-    });
-    child.on("error", (error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve({
-        command: renderCommand(command, args),
-        exitCode: null,
-        durationMs: Date.now() - startedAt,
-        timedOut,
-        stdout: cleanCaptured(stdout),
-        stderr: cleanCaptured(stderr),
-        error: error.message
-      });
-    });
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve({
-        command: renderCommand(command, args),
-        exitCode: code,
-        durationMs: Date.now() - startedAt,
-        timedOut,
-        stdout: cleanCaptured(stdout),
-        stderr: cleanCaptured(stderr),
-        error: timedOut ? `Command timed out after ${options.timeoutSeconds} seconds.` : undefined
-      });
-    });
-  });
-}
-
-function killChildProcess(pid: number | undefined, detached: boolean, signal: NodeJS.Signals): void {
-  if (!pid) {
-    return;
-  }
-  try {
-    if (detached) {
-      process.kill(-pid, signal);
-    } else {
-      process.kill(pid, signal);
-    }
-  } catch {
-    // The process may already have exited.
-  }
+  return runProcess(command, args, {
+    cwd: options.cwd,
+    shell: options.shell,
+    timeoutMs: options.timeoutSeconds * 1000,
+    stdoutLimit: MAX_CAPTURED_OUTPUT,
+    stderrLimit: MAX_CAPTURED_OUTPUT
+  }).then((result) => ({
+    command: result.renderedCommand,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    timedOut: result.timedOut,
+    stdout: result.stdout.trim() || undefined,
+    stderr: result.stderr.trim() || undefined,
+    error: result.error
+  }));
 }
 
 function renderChecks(evidence: EvidencePack): string {
@@ -378,22 +312,8 @@ function cleanOutput(value: string | undefined): string | undefined {
   return cleaned || undefined;
 }
 
-function cleanCaptured(value: string): string | undefined {
-  const cleaned = maskSensitiveText(value.trim());
-  return cleaned || undefined;
-}
-
-function appendBounded(current: string, addition: string): string {
-  const next = current + addition;
-  return next.length <= MAX_CAPTURED_OUTPUT ? next : next.slice(next.length - MAX_CAPTURED_OUTPUT);
-}
-
 function truncate(value: string): string {
   return value.length <= MAX_CAPTURED_OUTPUT ? value : `${value.slice(0, MAX_CAPTURED_OUTPUT)}\n... truncated ...`;
-}
-
-function renderCommand(command: string, args: string[]): string {
-  return [command, ...args].filter(Boolean).join(" ");
 }
 
 function escapeTableCell(value: string): string {

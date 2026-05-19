@@ -25,11 +25,16 @@ export interface ProviderPluginDiagnostic {
   error?: string;
 }
 
+export interface ProviderPluginLoadContext {
+  projectRoot?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
 const pluginDiagnostics: ProviderPluginDiagnostic[] = [];
 
-export function loadPluginProviders(): ReportProvider[] {
+export function loadPluginProviders(context: ProviderPluginLoadContext = {}): ReportProvider[] {
   pluginDiagnostics.length = 0;
-  const entries = pluginEntries();
+  const entries = pluginEntries(context);
   const providers: ReportProvider[] = [];
   for (const entry of entries) {
     const provider = entry.definition
@@ -48,20 +53,21 @@ export function getPluginProviderDiagnostics(): ProviderPluginDiagnostic[] {
   return [...pluginDiagnostics];
 }
 
-function pluginEntries(): Array<{ source: string; filePath?: string; definition?: ProviderPluginDefinition }> {
-  const single = process.env.REPOVISTA_PROVIDER_PLUGIN ? [process.env.REPOVISTA_PROVIDER_PLUGIN] : [];
-  const multiple = process.env.REPOVISTA_PROVIDER_PLUGINS
-    ? process.env.REPOVISTA_PROVIDER_PLUGINS.split(path.delimiter).filter(Boolean)
+function pluginEntries(context: ProviderPluginLoadContext): Array<{ source: string; filePath?: string; definition?: ProviderPluginDefinition }> {
+  const env = context.env ?? process.env;
+  const single = env.REPOVISTA_PROVIDER_PLUGIN ? [env.REPOVISTA_PROVIDER_PLUGIN] : [];
+  const multiple = env.REPOVISTA_PROVIDER_PLUGINS
+    ? env.REPOVISTA_PROVIDER_PLUGINS.split(path.delimiter).filter(Boolean)
     : [];
   const envEntries = [...single, ...multiple].map((file) => ({
     source: "environment",
     filePath: path.resolve(file)
   }));
-  return [...envEntries, ...repoPluginEntries()];
+  return [...envEntries, ...repoPluginEntries(context.projectRoot ?? process.cwd())];
 }
 
-function repoPluginEntries(): Array<{ source: string; filePath?: string; definition?: ProviderPluginDefinition }> {
-  const configPath = path.resolve(process.cwd(), "repovista.providers.json");
+function repoPluginEntries(projectRoot: string): Array<{ source: string; filePath?: string; definition?: ProviderPluginDefinition }> {
+  const configPath = path.resolve(projectRoot, "repovista.providers.json");
   try {
     const parsed = JSON.parse(readFileSync(configPath, "utf8")) as { providers?: Array<string | ProviderPluginDefinition> } | ProviderPluginDefinition[];
     const providers = Array.isArray(parsed) ? parsed : parsed.providers;
@@ -192,6 +198,7 @@ function isValidDefinition(value: ProviderPluginDefinition): boolean {
     typeof value.executable === "string" &&
     Array.isArray(value.args) &&
     value.args.every((item) => typeof item === "string") &&
+    (!value.versionArgs || (Array.isArray(value.versionArgs) && value.versionArgs.every((item) => typeof item === "string"))) &&
     (!value.outputMode || value.outputMode === "stdout" || value.outputMode === "report-file")
   );
 }

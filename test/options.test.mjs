@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyAuditProfile, DEFAULT_OPTIONS, parseCliArgs, validateSandbox } from "../dist/index.js";
+import {
+  applyAuditProfile,
+  assertSettingsMenuRegistryCoverage,
+  CLI_OPTIONS,
+  DEFAULT_OPTIONS,
+  OPTION_REGISTRY,
+  parseCliArgs,
+  SETTING_DEFINITIONS,
+  validateSandbox
+} from "../dist/index.js";
 
 test("default command runs audit with safe defaults", () => {
   const parsed = parseCliArgs([]);
@@ -264,4 +273,18 @@ test("explicit no-run-checks wins over audit profile defaults", () => {
 
   assert.equal(profiled.runChecks, false);
   assert.equal(profiled.parallel, "off");
+});
+
+test("option registry feeds CLI help, settings and menu metadata", () => {
+  const registryCliNames = new Set(OPTION_REGISTRY.map((entry) => entry.cli?.name).filter(Boolean));
+  const registrySettingKeys = new Set(OPTION_REGISTRY.map((entry) => entry.setting?.key).filter(Boolean));
+
+  for (const option of CLI_OPTIONS) {
+    assert.equal(registryCliNames.has(option.name), true, `missing CLI option registry entry: ${option.name}`);
+  }
+  for (const setting of SETTING_DEFINITIONS) {
+    assert.equal(registrySettingKeys.has(setting.key), true, `missing setting registry entry: ${setting.key}`);
+  }
+  assert.deepEqual(assertSettingsMenuRegistryCoverage(), []);
+  assert.deepEqual(DEFAULT_OPTIONS.exportFormats, ["sarif", "html", "jsonl"]);
 });

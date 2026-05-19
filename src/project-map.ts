@@ -4,6 +4,7 @@ import { syncFeatureRecords } from "./feature-state.js";
 import { scanProject, type ProjectScanResult } from "./project-scan.js";
 import { validateReportRoot } from "./reports.js";
 import { buildSemanticFeatures } from "./semantic-features.js";
+import { detectWorkspaces } from "./workspaces.js";
 import {
   buildProjectAreas,
   createWorkShards,
@@ -53,6 +54,7 @@ export async function createProjectMap(
   });
   const files = projectScan.files;
   const packageJson = await readPackageJson(projectRoot);
+  const workspaceDetection = await detectWorkspaces(projectRoot);
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const languages = countLanguages(files);
   const areas = buildProjectAreas(files);
@@ -68,6 +70,7 @@ export async function createProjectMap(
   if (recommendedParallelism > 1) {
     warnings.push(`RepoVista recommends ${recommendedParallelism} parallel threads for this repository shape.`);
   }
+  warnings.push(...workspaceDetection.warnings);
 
   return {
     version: PROJECT_MAP_VERSION,
@@ -80,10 +83,14 @@ export async function createProjectMap(
     languages,
     frameworks: detectFrameworks(packageJson),
     packageManagers: detectPackageManagers(files),
+    workspaces: workspaceDetection.workspaces,
     areas,
     features,
     recommendedParallelism,
-    recommendedShards: createWorkShards(areas, recommendedParallelism),
+    recommendedShards: createWorkShards(areas, recommendedParallelism, {
+      workspaces: workspaceDetection.workspaces,
+      changedFiles: since?.changedFiles ?? []
+    }),
     since,
     warnings
   };
@@ -129,6 +136,9 @@ export async function checkProjectMapFreshness(
   if (featureSignatureForMap(loaded) !== featureSignatureForMap(current)) {
     warnings.push("semantic feature map changed");
   }
+  if (workspaceSignatureForMap(loaded) !== workspaceSignatureForMap(current)) {
+    warnings.push("workspace map changed");
+  }
   return {
     stale: warnings.length > 0,
     warnings,
@@ -142,7 +152,10 @@ export function createParallelExecutionMeta(
   mode: ParallelMode
 ): ParallelExecutionMeta {
   const requested = resolveParallelism(mode, map.recommendedParallelism);
-  const shards = createWorkShards(map.areas, requested);
+  const shards = createWorkShards(map.areas, requested, {
+    workspaces: map.workspaces ?? [],
+    changedFiles: map.since?.changedFiles ?? []
+  });
   const effectiveParallelism = Math.max(1, Math.min(requested, shards.length));
   return {
     mode,
@@ -174,11 +187,16 @@ export function renderProjectPlan(map: ProjectMap, mode: ParallelMode = "auto"):
     .join("\n") || "- No semantic features detected";
   const shardLines = meta.shards
     .map((shard) => [
-      `- ${shard.id}: ${shard.title}`,
+      `- ${shard.id}: ${shard.title}${shard.workspace ? ` (${shard.workspace})` : ""}`,
       `  paths: ${shard.paths.join(", ") || "n/a"}`,
-      `  focus: ${shard.focus}`
-    ].join("\n"))
+      `  focus: ${shard.focus}`,
+      shard.validationCommands?.length ? `  validation: ${shard.validationCommands.join(", ")}` : undefined
+    ].filter(Boolean).join("\n"))
     .join("\n");
+  const workspaceLines = (map.workspaces ?? [])
+    .slice(0, 12)
+    .map((workspace) => `- ${workspace.name}: ${workspace.path}, scripts: ${Object.keys(workspace.scripts ?? {}).join(", ") || "none"}, deps: ${(workspace.dependencies ?? []).slice(0, 8).join(", ") || "none"}`)
+    .join("\n") || "- No package workspaces detected";
 
   return `RepoVista Project Plan
 
@@ -190,6 +208,9 @@ Planned threads: ${meta.effectiveParallelism}
 
 Languages:
 ${languageLines}
+
+Workspaces:
+${workspaceLines}
 
 Areas:
 ${areaLines}
@@ -218,7 +239,6 @@ async function readPackageJson(projectRoot: string): Promise<Record<string, unkn
     return undefined;
   }
 }
-
 function countLanguages(files: ProjectFileSummary[]): Record<string, number> {
   const result: Record<string, number> = {};
   for (const file of files) {
@@ -304,4 +324,15 @@ function featureSignatureForMap(map: ProjectMap): string {
     paths: feature.paths,
     ownedFiles: feature.ownedFiles
   })).sort((left, right) => left.title.localeCompare(right.title)));
+}
+
+function workspaceSignatureForMap(map: ProjectMap): string {
+  return JSON.stringify((map.workspaces ?? []).map((workspace) => ({
+    name: workspace.name,
+    path: workspace.path,
+    packageManager: workspace.packageManager,
+    scripts: Object.keys(workspace.scripts ?? {}).sort(),
+    dependencies: [...(workspace.dependencies ?? [])].sort(),
+    validationCommands: [...(workspace.validationCommands ?? [])].sort()
+  })).sort((left, right) => left.path.localeCompare(right.path)));
 }
