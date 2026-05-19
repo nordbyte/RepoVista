@@ -13,7 +13,7 @@ import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
 import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
-export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
+export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
@@ -28,8 +28,8 @@ interface MenuState {
 }
 
 type MainItem =
-  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
-  | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
@@ -40,6 +40,7 @@ const PHASE_TIMEOUT_OPTIONS = [900, 1800, 3600, 5400, 7200];
 const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
 const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "test-gaps"];
 const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
+const FAST_MODE_OPTIONS = ["on", "off"] as const;
 const RENDER_DEBOUNCE_MS = 16;
 
 const ANSI = {
@@ -258,6 +259,7 @@ function activateCurrentItem(state: MenuState): void {
     case "reviewMode":
     case "model":
     case "reasoning":
+    case "fastMode":
     case "sandbox":
     case "language":
     case "checkTimeout":
@@ -267,7 +269,6 @@ function activateCurrentItem(state: MenuState): void {
       state.screen = item.id;
       state.cursor = 0;
       break;
-    case "fastMode":
     case "runChecks":
     case "json":
     case "keepLogs":
@@ -357,6 +358,11 @@ function toggleCurrentSelection(state: MenuState): void {
     const provider = selectedProvider(state.settings);
     const selected = reasoningOptionsForProviderModel(provider, currentModels(state), state.settings.model)[state.cursor]?.effort;
     state.settings.reasoning = state.settings.reasoning === selected ? undefined : selected;
+    return;
+  }
+
+  if (state.screen === "fastMode") {
+    state.settings.fastMode = FAST_MODE_OPTIONS[state.cursor] === "on";
     return;
   }
 
@@ -564,6 +570,8 @@ function screenTitle(screen: MenuScreen): string {
       return "Model";
     case "reasoning":
       return "Reasoning";
+    case "fastMode":
+      return "Fast mode";
     case "sandbox":
       return "Sandbox";
     case "language":
@@ -608,6 +616,8 @@ function currentItems(state: MenuState): string[] {
       return currentModels(state).map((model) => checkbox(model.slug === state.settings.model, `${model.displayName} (${model.slug})${model.supportsFastMode ? " [fast]" : ""}`));
     case "reasoning":
       return reasoningOptionsForProviderModel(selectedProvider(state.settings), currentModels(state), state.settings.model).map((level) => checkbox(level.effort === state.settings.reasoning, `${level.effort}${level.description ? ` - ${level.description}` : ""}`));
+    case "fastMode":
+      return FAST_MODE_OPTIONS.map((mode) => checkbox((state.settings.fastMode ? "on" : "off") === mode, mode));
     case "sandbox":
       return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === state.settings.sandbox, sandbox));
     case "language":
@@ -772,8 +782,8 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${settings.reviewMode ?? "default"}` },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${settings.reasoning ?? "model default"}` },
+  { id: "fastMode", type: "submenu", label: (settings) => `Fast mode: ${settings.fastMode ? "on" : "off"}` },
   { id: "profile", type: "text", label: (settings) => `Codex profile: ${settings.profile ?? "none"}` },
-  { id: "fastMode", type: "toggle", label: (settings) => checkbox(Boolean(settings.fastMode), "Codex fast mode") },
   { id: "sandbox", type: "submenu", label: (settings) => `Sandbox: ${settings.sandbox ?? "read-only"}` },
   { id: "language", type: "submenu", label: (settings) => `Language: ${settings.language ?? "English"}` },
   { id: "outDir", type: "text", label: (settings) => `Output directory: ${settings.outDir ?? ".repovista"}` },

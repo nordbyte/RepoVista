@@ -154,6 +154,7 @@ test("settings menu frame renders only the menu with ANSI styling", () => {
     provider: "codex",
     model: "gpt-5.5",
     reasoning: "xhigh",
+    fastMode: true,
     runChecks: true
   }, { columns: 100, rows: 24, color: true });
   const plain = frame.replace(/\x1b\[[0-9;]*m/g, "");
@@ -161,8 +162,22 @@ test("settings menu frame renders only the menu with ANSI styling", () => {
   assert.match(frame, /(?:\x1b\[[0-9;]*m)+RepoVista Settings/);
   assert.match(plain, />  Provider: Codex CLI /);
   assert.match(plain, /Model: gpt-5\.5/);
+  assert.match(plain, /Fast mode: on/);
   assert.equal(plain.match(/Provider: Codex CLI/g)?.length, 1);
   assert.equal(plain.match(/Reasoning: xhigh/g)?.length, 1);
+  assert.ok(plain.indexOf("Reasoning: xhigh") < plain.indexOf("Fast mode: on"));
+  assert.ok(plain.indexOf("Fast mode: on") < plain.indexOf("Codex profile: none"));
+});
+
+test("settings fast mode renders as on off selection", () => {
+  const onFrame = renderSettingsMenuFrame({ fastMode: true }, { screen: "fastMode", columns: 80, rows: 12 });
+  assert.match(onFrame, /Fast mode/);
+  assert.match(onFrame, /\[x\] on/);
+  assert.match(onFrame, /\[ \] off/);
+
+  const offFrame = renderSettingsMenuFrame({ fastMode: false }, { screen: "fastMode", columns: 80, rows: 12 });
+  assert.match(offFrame, /\[ \] on/);
+  assert.match(offFrame, /\[x\] off/);
 });
 
 test("settings terminal frame clears every line ending", () => {
