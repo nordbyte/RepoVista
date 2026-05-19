@@ -1,9 +1,9 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { RepoVistaError } from "./errors.js";
 import { findingStateDirectory, loadStoredFindings } from "./finding-store.js";
 import { findingCountsBySeverity } from "./findings.js";
 import { validateReportRoot } from "./reports.js";
+import { readStateFile, writeJsonAtomic } from "./state-store.js";
 import type { AuditOptions, StructuredFinding } from "./types.js";
 
 export interface BaselineSuppression {
@@ -161,11 +161,16 @@ export function baselineSummary(suppressedFindings: StructuredFinding[]): { coun
 async function loadBaseline(projectRoot: string, outDir: string, now: Date): Promise<{ path: string; file: BaselineFile }> {
   const baselinePath = await baselineFilePath(projectRoot, outDir);
   try {
-    const parsed = JSON.parse(await readFile(baselinePath, "utf8")) as BaselineFile;
-    if (parsed.schemaVersion === 1 && Array.isArray(parsed.suppressions)) {
-      return { path: baselinePath, file: parsed };
-    }
-    throw new RepoVistaError(`Invalid RepoVista baseline file: ${baselinePath}`);
+    const file = await readStateFile<BaselineFile>(baselinePath, {
+      kind: "baseline",
+      currentVersion: 1,
+      label: "baseline file",
+      legacy: (value) => {
+        const parsed = value as BaselineFile;
+        return parsed?.schemaVersion === 1 && Array.isArray(parsed.suppressions) ? parsed : undefined;
+      }
+    });
+    return { path: baselinePath, file };
   } catch (error) {
     if (isMissingFile(error)) {
       return {
@@ -188,10 +193,7 @@ async function loadBaseline(projectRoot: string, outDir: string, now: Date): Pro
 
 async function saveBaseline(projectRoot: string, outDir: string, baseline: BaselineFile): Promise<string> {
   const baselinePath = await baselineFilePath(projectRoot, outDir);
-  await mkdir(path.dirname(baselinePath), { recursive: true });
-  const tempPath = path.join(path.dirname(baselinePath), `.baseline.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(tempPath, `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
-  await rename(tempPath, baselinePath);
+  await writeJsonAtomic(baselinePath, baseline);
   return baselinePath;
 }
 

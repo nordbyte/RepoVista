@@ -105,6 +105,11 @@ export interface AuditOptions {
   patchId?: string;
   patchBranch?: string;
   patchTitle?: string;
+  fixIsolateBranch?: boolean;
+  fixPostRevalidate?: boolean;
+  patchMaxFiles?: number;
+  allowRepoProviderPlugin?: boolean;
+  ciTemplate?: "pr-light" | "security" | "release-readiness" | "scheduled-audit";
   settingsKey?: string;
   settingsValue?: string;
 }
@@ -444,9 +449,16 @@ export interface AuditCacheMeta {
   enabled: boolean;
   cachePath: string;
   scanFingerprint: string;
+  reuseKey?: string;
+  promptManifestFingerprint?: string;
+  providerVersion?: string;
+  promptContextVersion?: number;
+  phaseSchemaVersion?: number;
+  qualityGateVersion?: number;
   hit: boolean;
   previousRunDir?: string;
   previousRunId?: string;
+  mismatchReasons?: string[];
   updatedAt: string;
 }
 
@@ -646,6 +658,18 @@ export interface PatchAttempt {
   status: PatchAttemptStatus;
   plan: string;
   filesChanged: string[];
+  preDiff?: string;
+  postDiff?: string;
+  scopeGate?: {
+    passed: boolean;
+    maxFiles: number;
+    allowedPaths: string[];
+    violations: string[];
+  };
+  revalidation?: {
+    status: "not-run" | "passed" | "failed";
+    output?: string;
+  };
   commandsRun: EvidenceCommandResult[];
   provider?: {
     id: AiProviderId;

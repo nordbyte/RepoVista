@@ -18,7 +18,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista doctor [options]", name: "doctor", help: "Check RepoVista, provider, plugin, workspace, and report-output readiness" },
   { usage: "repovista providers [list|test <provider>] [--json]", name: "providers", help: "List loaded providers or test one provider executable" },
   { usage: "repovista profiles [--json]", name: "profiles", help: "List built-in audit profiles" },
-  { usage: "repovista ci init [--dry-run] [--force]", name: "ci init", help: "Create a GitHub Actions workflow for RepoVista" },
+  { usage: "repovista ci init [--template pr-light|security|release-readiness|scheduled-audit] [--dry-run] [--force]", name: "ci init", help: "Create a GitHub Actions workflow for RepoVista" },
   { usage: "repovista compare <old-run-dir> <new-run-dir> [--format markdown|json|html] [--fail-on-regression]", name: "compare", help: "Compare two RepoVista run directories" },
   { usage: "repovista review <run-dir> [--json]", name: "review", help: "Review one RepoVista run for report quality, evidence, and stale state risks" },
   { usage: "repovista pr-comment <run-dir> [--dry-run]", name: "pr-comment", help: "Render or post a pull request summary comment for a RepoVista run" },
@@ -42,6 +42,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
 
 export const CLI_OPTIONS: readonly CliOptionDefinition[] = [
   { name: "provider", kind: "value", help: "Report provider: codex, claude, gemini, opencode, aider, or a loaded plugin (default: codex)" },
+  { name: "allow-repo-provider-plugin", kind: "boolean", help: "Allow execution of provider plugins declared in this repository" },
   { name: "parallel", kind: "value", help: "Parallel audit mode: off, auto, or 1-5 threads (default: off)" },
   { name: "refresh", kind: "boolean", help: "Refresh cached project metadata for commands that support it" },
   { name: "no-parallel", kind: "boolean", help: "Disable saved parallel default" },
@@ -100,6 +101,10 @@ export const CLI_OPTIONS: readonly CliOptionDefinition[] = [
   { name: "all", kind: "boolean", help: "Include all finding statuses or revalidate all findings" },
   { name: "provider-revalidate", kind: "boolean", help: "Ask the configured provider to revalidate finding status" },
   { name: "dry-run", kind: "boolean", help: "Preview commands or issue/workflow content without writing remotely" },
+  { name: "isolate-branch", kind: "boolean", help: "Run repovista fix on a temporary branch" },
+  { name: "post-revalidate", kind: "boolean", help: "Revalidate the fixed finding after repovista fix" },
+  { name: "max-files", kind: "value", help: "Maximum changed files allowed for repovista fix scope gate" },
+  { name: "template", kind: "value", help: "CI template for ci init: pr-light, security, release-readiness, scheduled-audit" },
   { name: "force", kind: "boolean", help: "Overwrite generated files where supported" },
   { name: "version", kind: "boolean", help: "Show version" },
   { name: "help", kind: "boolean", help: "Show help" }

@@ -11,6 +11,11 @@ test("project initialization writes a map with thread recommendations", async ()
     await mkdir(path.join(root, "src", "cli"), { recursive: true });
     await mkdir(path.join(root, "src", "providers"), { recursive: true });
     await mkdir(path.join(root, "test"), { recursive: true });
+    await writeFile(path.join(root, "src", "settings-menu.ts"), "export const settings = true;\n", "utf8");
+    await writeFile(path.join(root, "src", "report-review.ts"), "export const reports = true;\n", "utf8");
+    await writeFile(path.join(root, "src", "state-store.ts"), "export const state = true;\n", "utf8");
+    await writeFile(path.join(root, "src", "secrets.ts"), "export const security = true;\n", "utf8");
+    await writeFile(path.join(root, "src", "ci-init.ts"), "export const ci = true;\n", "utf8");
     await writeFile(path.join(root, "package.json"), JSON.stringify({
       dependencies: { typescript: "^5.0.0" },
       devDependencies: { vitest: "^1.0.0" }
@@ -34,6 +39,14 @@ test("project initialization writes a map with thread recommendations", async ()
     assert.ok(map.recommendedShards.length >= 2);
     assert.ok(map.features.length >= 2);
     assert.ok(map.features.some((feature) => feature.kind === "cli" || feature.kind === "integration" || feature.kind === "test-suite"));
+    assert.ok(map.features.some((feature) => feature.kind === "provider"));
+    assert.ok(map.features.some((feature) => feature.kind === "reporting"));
+    assert.ok(map.features.some((feature) => feature.kind === "state"));
+    assert.ok(map.features.some((feature) => feature.kind === "settings"));
+    assert.ok(map.features.some((feature) => feature.kind === "security"));
+    assert.ok(map.areas.some((area) => area.id === "src/providers"));
+    assert.ok(map.areas.some((area) => area.id === "src/reports"));
+    assert.ok(map.areas.some((area) => area.id === "src/state"));
     assert.ok(map.features.some((feature) => feature.source === "mapper"));
     assert.ok(map.features.some((feature) => feature.validationCommands?.length));
     const records = await loadFeatureRecords(root, ".repovista");

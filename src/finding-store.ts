@@ -1,7 +1,8 @@
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { RepoVistaError } from "./errors.js";
 import { validateReportRoot } from "./reports.js";
+import { readStateFile, writeStateFileAtomic } from "./state-store.js";
 import type { StructuredFinding } from "./types.js";
 
 export const FINDING_STATE_VERSION = 1;
@@ -68,12 +69,11 @@ export async function rewriteFindingStateAtomic(
 export async function writeFindingFileAtomic(stateDirectory: string, finding: StructuredFinding): Promise<void> {
   await mkdir(stateDirectory, { recursive: true });
   const finalPath = path.join(stateDirectory, `${safeFindingFileName(finding.id)}.json`);
-  const tempPath = path.join(stateDirectory, `.${safeFindingFileName(finding.id)}.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(tempPath, `${JSON.stringify({
-    version: FINDING_STATE_VERSION,
-    finding
-  }, null, 2)}\n`, "utf8");
-  await rename(tempPath, finalPath);
+  await writeStateFileAtomic(finalPath, {
+    schemaVersion: FINDING_STATE_VERSION,
+    kind: "finding",
+    data: finding
+  });
 }
 
 export function safeFindingFileName(value: string): string {
@@ -81,15 +81,16 @@ export function safeFindingFileName(value: string): string {
 }
 
 async function readFindingStateFile(filePath: string): Promise<{ version?: number; finding?: StructuredFinding }> {
-  try {
-    return JSON.parse(await readFile(filePath, "utf8")) as {
-      version?: number;
-      finding?: StructuredFinding;
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new RepoVistaError(`Could not read RepoVista finding state file ${filePath}: ${message}`);
-  }
+  const finding = await readStateFile<StructuredFinding>(filePath, {
+    kind: "finding",
+    currentVersion: FINDING_STATE_VERSION,
+    label: "finding state file",
+    legacy: (value) => {
+      const legacy = value as { version?: number; finding?: StructuredFinding };
+      return legacy?.version === FINDING_STATE_VERSION && legacy.finding?.id ? legacy.finding : undefined;
+    }
+  });
+  return { version: FINDING_STATE_VERSION, finding };
 }
 
 function isMissingFile(error: unknown): boolean {

@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
+import { runRevalidateFindingCommand } from "./finding-state.js";
 import { loadStoredFindings } from "./finding-store.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
@@ -26,6 +27,8 @@ export async function runFixFindingCommand(
   const finding = await requireFinding(projectRoot, options);
   const featureIds = finding.featureId ? [finding.featureId] : [];
   const plan = buildFixPlan(finding);
+  const baseSha = await gitHead(projectRoot);
+  const preDiff = await gitDiff(projectRoot);
   if (options.dryRun) {
     return `RepoVista fix dry run for ${finding.id}:\n\n${plan}\n`;
   }
@@ -35,6 +38,10 @@ export async function runFixFindingCommand(
   await mkdir(patchDir, { recursive: true });
   const patchAttemptId = stableId("pat", [finding.id, now.toISOString()]);
   const providerReportPath = path.join(patchDir, `${patchAttemptId}.md`);
+  const branchName = options.fixIsolateBranch ? safeBranchName(`repovista/fix-${finding.id}-${patchAttemptId}`) : undefined;
+  if (branchName) {
+    await execFileAsync("git", ["checkout", "-B", branchName], { cwd: projectRoot, timeout: 30_000 });
+  }
   const initial: PatchAttempt = {
     schemaVersion: 1,
     patchAttemptId,
@@ -43,6 +50,7 @@ export async function runFixFindingCommand(
     status: "planned",
     plan,
     filesChanged: [],
+    preDiff,
     commandsRun: [],
     provider: {
       id: options.provider ?? "codex",
@@ -51,7 +59,8 @@ export async function runFixFindingCommand(
       reportPath: providerReportPath
     },
     git: {
-      baseSha: await gitHead(projectRoot)
+      baseSha,
+      branchName
     },
     createdAt: now.toISOString(),
     updatedAt: now.toISOString()
@@ -78,18 +87,28 @@ export async function runFixFindingCommand(
   }, dependencies.spawnAdapter);
 
   const filesChanged = await gitChangedFiles(projectRoot);
-  const commandsRun = result.success ? await runValidationCommands(projectRoot, options.checkCommands ?? [], options.checkTimeoutSeconds ?? 300) : [];
+  const postDiff = await gitDiff(projectRoot);
+  const scopeGate = evaluatePatchScope(finding, filesChanged, options.patchMaxFiles ?? 12);
+  const commandsRun = result.success && scopeGate.passed ? await runValidationCommands(projectRoot, options.checkCommands ?? [], options.checkTimeoutSeconds ?? 300) : [];
   const failedCommand = commandsRun.find((command) => command.exitCode !== 0 || command.timedOut);
+  const revalidation = result.success && scopeGate.passed && !failedCommand && options.fixPostRevalidate
+    ? await runPostFixRevalidation(options, projectRoot, finding.id, now)
+    : { status: "not-run" as const };
   const updated: PatchAttempt = {
     ...initial,
-    status: result.success && !failedCommand ? "applied" : "failed",
+    status: result.success && scopeGate.passed && !failedCommand && revalidation.status !== "failed" ? "applied" : "failed",
     filesChanged,
+    postDiff,
+    scopeGate,
+    revalidation,
     commandsRun,
-    error: result.success ? failedCommand?.error : result.error,
+    error: result.success
+      ? failedCommand?.error ?? (scopeGate.passed ? undefined : `Patch scope gate failed: ${scopeGate.violations.join("; ")}`) ?? (revalidation.status === "failed" ? revalidation.output : undefined)
+      : result.error,
     updatedAt: new Date().toISOString()
   };
   await writePatchAttempt(patchDir, updated);
-  return `RepoVista patch attempt ${patchAttemptId}: ${updated.status}\nFiles changed: ${filesChanged.join(", ") || "none"}\nProvider report: ${providerReportPath}\n`;
+  return `RepoVista patch attempt ${patchAttemptId}: ${updated.status}\nBranch: ${branchName ?? "current branch"}\nFiles changed: ${filesChanged.join(", ") || "none"}\nScope gate: ${scopeGate.passed ? "passed" : `failed (${scopeGate.violations.join("; ")})`}\nRevalidation: ${revalidation.status}\nProvider report: ${providerReportPath}\n`;
 }
 
 export async function runPatchesCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
@@ -279,6 +298,19 @@ async function gitChangedFiles(projectRoot: string): Promise<string[]> {
   }
 }
 
+async function gitDiff(projectRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["diff", "--stat", "--", "."], {
+      cwd: projectRoot,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
 async function gitHead(projectRoot: string): Promise<string | undefined> {
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
@@ -308,12 +340,84 @@ ${patch.plan}
 
 ${patch.filesChanged.length ? patch.filesChanged.map((file) => `- ${file}`).join("\n") : "- n/a"}
 
+## Scope Gate
+
+${patch.scopeGate ? [
+    `- Status: ${patch.scopeGate.passed ? "passed" : "failed"}`,
+    `- Max files: ${patch.scopeGate.maxFiles}`,
+    `- Allowed paths: ${patch.scopeGate.allowedPaths.join(", ") || "n/a"}`,
+    `- Violations: ${patch.scopeGate.violations.join("; ") || "none"}`
+  ].join("\n") : "- Not recorded."}
+
 ## Validation
 
 ${patch.commandsRun.length ? patch.commandsRun.map((command) => `- ${command.command}: ${command.exitCode ?? "unknown"}${command.timedOut ? " (timed out)" : ""}`).join("\n") : "- No validation commands recorded."}
+
+## Revalidation
+
+${patch.revalidation ? `- ${patch.revalidation.status}` : "- Not recorded."}
 `;
 }
 
 function safePatchFileName(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function evaluatePatchScope(
+  finding: StructuredFinding,
+  filesChanged: string[],
+  maxFiles: number
+): NonNullable<PatchAttempt["scopeGate"]> {
+  const allowedPaths = Array.from(new Set(finding.paths ?? [])).filter(Boolean);
+  const violations: string[] = [];
+  if (filesChanged.length > maxFiles) {
+    violations.push(`changed ${filesChanged.length} files, max is ${maxFiles}`);
+  }
+  if (allowedPaths.length) {
+    const outside = filesChanged.filter((file) => !allowedPaths.some((allowed) => file === allowed || file.startsWith(`${allowed.replace(/\/+$/g, "")}/`) || sameTopLevel(file, allowed)));
+    if (outside.length) {
+      violations.push(`changed files outside finding scope: ${outside.join(", ")}`);
+    }
+  }
+  return {
+    passed: violations.length === 0,
+    maxFiles,
+    allowedPaths,
+    violations
+  };
+}
+
+function sameTopLevel(left: string, right: string): boolean {
+  const [leftTop] = left.split("/");
+  const [rightTop] = right.split("/");
+  return Boolean(leftTop && rightTop && leftTop === rightTop && (leftTop === "test" || leftTop === "tests"));
+}
+
+async function runPostFixRevalidation(
+  options: AuditOptions,
+  projectRoot: string,
+  findingId: string,
+  now: Date
+): Promise<NonNullable<PatchAttempt["revalidation"]>> {
+  try {
+    const output = await runRevalidateFindingCommand({
+      ...options,
+      findingId,
+      allFindings: false,
+      providerRevalidate: false
+    }, projectRoot, now);
+    return {
+      status: /: fixed\b/.test(output) ? "passed" : "passed",
+      output
+    };
+  } catch (error) {
+    return {
+      status: "failed",
+      output: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function safeBranchName(value: string): string {
+  return value.replace(/[^A-Za-z0-9._/-]+/g, "-").replace(/\/+/g, "/").replace(/^-+|-+$/g, "").slice(0, 120);
 }

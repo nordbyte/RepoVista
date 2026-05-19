@@ -1,11 +1,14 @@
 import { extractFindingsWithSource } from "./findings.js";
 import { extractStructuredPhaseReport } from "./phase-schema.js";
 
+export const QUALITY_GATES_VERSION = 2;
+
 export interface ReportQualityResult {
   passed: boolean;
   warnings: string[];
   failures: string[];
   score: number;
+  evidenceScore: number;
 }
 
 const REQUIRED_SECTIONS: Record<string, string[]> = {
@@ -77,7 +80,8 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
       passed: false,
       warnings: ["Report is empty."],
       failures: ["Report is empty."],
-      score: 0
+      score: 0,
+      evidenceScore: 0
     };
   }
 
@@ -113,19 +117,26 @@ export function validateReportQuality(phaseId: string, markdown: string): Report
     warnings.push("Report claims tests or checks were not run instead of distinguishing provider context from the RepoVista evidence pack.");
   }
 
+  const evidenceScore = scoreEvidenceQuality(phaseId, markdown);
+  if (phaseId !== "summary" && evidenceScore < 45) {
+    warnings.push(`Evidence quality score is low (${evidenceScore}/100); expected concrete paths, line ranges, quotes, tests or reproduction, and fix scope.`);
+  }
+
   return {
     passed: warnings.length === 0 && failures.length === 0,
     warnings: [...failures, ...warnings],
     failures,
-    score: qualityScore(markdown, warnings, failures)
+    score: qualityScore(markdown, warnings, failures, evidenceScore),
+    evidenceScore
   };
 }
 
-function qualityScore(markdown: string, warnings: string[], failures: string[]): number {
+function qualityScore(markdown: string, warnings: string[], failures: string[], evidenceScore: number): number {
   const evidenceBonus = Math.min(15, countPathEvidence(markdown));
   const lengthBonus = Math.min(10, Math.floor(markdown.trim().length / 2000));
+  const evidenceQualityBonus = Math.round((evidenceScore - 50) / 5);
   const penalty = warnings.length * 6 + failures.length * 14;
-  return Math.max(0, Math.min(100, 75 + evidenceBonus + lengthBonus - penalty));
+  return Math.max(0, Math.min(100, 75 + evidenceBonus + lengthBonus + evidenceQualityBonus - penalty));
 }
 
 function collectHeadingText(markdown: string): string[] {
@@ -282,4 +293,74 @@ function countPathEvidence(markdown: string): number {
     }
   }
   return matches.size;
+}
+
+function scoreEvidenceQuality(phaseId: string, markdown: string): number {
+  if (phaseId === "risk-and-bug") {
+    return scoreRiskEvidence(markdown);
+  }
+  if (phaseId === "feature-roadmap") {
+    return scoreRoadmapEvidence(markdown);
+  }
+  const structured = extractStructuredPhaseReport(markdown, phaseId, "quality-gate");
+  const pathCount = countPathEvidence(markdown);
+  let score = Math.min(35, pathCount * 6);
+  score += Math.min(25, structured.evidenceReferences.length * 5);
+  score += Math.min(20, structured.recommendations.length * 4);
+  score += hasTestEvidence(markdown) ? 10 : 0;
+  score += hasLineEvidence(markdown) ? 10 : 0;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreRiskEvidence(markdown: string): number {
+  const extraction = extractFindingsWithSource(markdown);
+  if (!extraction.findings.length) {
+    return countPathEvidence(markdown) >= 3 ? 70 : 45;
+  }
+  const findingScores = extraction.findings.map((finding) => {
+    const refs = finding.evidenceDetails?.length
+      ? finding.evidenceDetails
+      : (finding.evidenceReferences ?? []).map((reference) => typeof reference === "string" ? { path: reference } : reference);
+    let score = 0;
+    score += finding.paths.length ? 12 : 0;
+    score += refs.length ? 15 : 0;
+    score += refs.some((reference) => reference.startLine && reference.endLine) ? 18 : 0;
+    score += refs.some((reference) => reference.quote) ? 14 : 0;
+    score += finding.reproduction ? 10 : 0;
+    score += finding.suggestedRegressionTest ? 10 : 0;
+    score += finding.minimumFixScope ? 10 : 0;
+    score += finding.recommendation ? 6 : 0;
+    score += finding.evidenceValidation?.passed ? 5 : 0;
+    return Math.min(100, score);
+  });
+  return Math.round(findingScores.reduce((sum, score) => sum + score, 0) / findingScores.length);
+}
+
+function scoreRoadmapEvidence(markdown: string): number {
+  const structured = extractStructuredPhaseReport(markdown, "feature-roadmap", "quality-gate");
+  const proposals = structured.proposals ?? [];
+  if (!proposals.length) {
+    return Math.min(70, countPathEvidence(markdown) * 8 + (hasLineEvidence(markdown) ? 10 : 0));
+  }
+  const proposalScores = proposals.map((proposal) => {
+    let score = 0;
+    score += proposal.evidence.length ? 20 : 0;
+    score += proposal.affected.length ? 15 : 0;
+    score += proposal.steps.length ? 15 : 0;
+    score += proposal.benefit ? 10 : 0;
+    score += proposal.risk ? 10 : 0;
+    score += proposal.effort ? 10 : 0;
+    score += proposal.priority ? 10 : 0;
+    score += proposal.confidence ? 10 : 0;
+    return Math.min(100, score);
+  });
+  return Math.round(proposalScores.reduce((sum, score) => sum + score, 0) / proposalScores.length);
+}
+
+function hasTestEvidence(markdown: string): boolean {
+  return /\b(npm test|pytest|cargo test|go test|test\/|tests\/|\.test\.|\.spec\.|Suggested regression test)\b/i.test(markdown);
+}
+
+function hasLineEvidence(markdown: string): boolean {
+  return /\b(?:line|lines|startLine|endLine)\b|:\d+\b/i.test(markdown);
 }

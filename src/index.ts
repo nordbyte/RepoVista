@@ -12,14 +12,14 @@ export { renderPrComment, renderRunReview, reviewRunDirectory, runPrCommentComma
 export { renderGithubStepSummary } from "./ci-summary.js";
 export { writeFindingExports } from "./exporters.js";
 export { runDoctorCommand } from "./doctor.js";
-export { extractStructuredPhaseReport, hasStructuredPhaseSchema } from "./phase-schema.js";
+export { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport, hasStructuredPhaseSchema } from "./phase-schema.js";
 export { runProvidersCommand } from "./provider-commands.js";
 export { AUDIT_PROFILES, applyAuditProfile, runProfilesCommand } from "./profiles.js";
 export { checkProjectMapFreshness, createProjectMap, createParallelExecutionMeta, initializeProjectMap, loadProjectMap, projectMapPath, renderProjectPlan } from "./project-map.js";
 export { scanProject } from "./project-scan.js";
 export { runInitCommand, runPlanCommand } from "./project-commands.js";
 export { getReportProvider, isReportProviderId, REPORT_PROVIDER_IDS, REPORT_PROVIDERS } from "./providers/index.js";
-export { getPluginProviderDiagnostics } from "./providers/plugin.js";
+export { getPluginProviderDiagnostics, providerPluginTrustStatus } from "./providers/plugin.js";
 export { collectEvidence, hasFailedChecks, renderEvidenceMarkdown } from "./evidence.js";
 export { evidenceReferencesForFinding, validateFindingEvidence, validateFindingsEvidence } from "./evidence-validation.js";
 export {
@@ -55,9 +55,11 @@ export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateP
 export { runPreflight } from "./preflight.js";
 export { prepareRunDirectory, useExistingRunDirectory, validateReportRoot, writeMeta } from "./reports.js";
 export { allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
-export { validateReportQuality } from "./quality-gates.js";
+export { PROMPT_CONTEXT_VERSION } from "./prompts.js";
+export { QUALITY_GATES_VERSION, validateReportQuality } from "./quality-gates.js";
 export { createRunId } from "./run-id.js";
 export { createSensitiveTextMasker, isSensitiveKey, maskObject, maskSensitiveText, maskSensitiveValue } from "./secrets.js";
+export { readStateFile, writeJsonAtomic, writeStateFileAtomic } from "./state-store.js";
 export { applySettingsToDefaults, loadSettings, saveSettings, sanitizeSettings } from "./settings-config.js";
 export { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 export { SETTING_DEFINITIONS, SETTING_KEYS, normalizeSettingKey, parseSettingValue } from "./settings-schema.js";

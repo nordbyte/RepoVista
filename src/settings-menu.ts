@@ -1,4 +1,6 @@
 import readline from "node:readline";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { RepoVistaError } from "./errors.js";
 import {
@@ -9,25 +11,25 @@ import {
 import { getReportProvider, REPORT_PROVIDER_IDS } from "./providers/index.js";
 import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
-import { parseSettingValue } from "./settings-schema.js";
-import type { AiProviderId, ParallelMode, ReviewMode, SandboxMode } from "./types.js";
+import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
-type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout";
+type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
   cursor: number;
   settings: RepoVistaSettings;
   modelsByProvider: Record<AiProviderId, ProviderModelInfo[]>;
+  checkCommandOptions: string[];
   done: boolean;
   saved: boolean;
   settingsPath: string;
 }
 
 type MainItem =
-  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
   | { id: "fastMode" | "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
-  | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores" | "checkCommands" | "exportFormats"; type: "text"; label: (settings: RepoVistaSettings) => string }
+  | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
 const LANGUAGE_OPTIONS = ["English", "German", "Spanish", "French", "Italian", "Portuguese"];
@@ -36,6 +38,7 @@ const CHECK_TIMEOUT_OPTIONS = [60, 300, 600, 900, 1800, 3600];
 const PHASE_TIMEOUT_OPTIONS = [900, 1800, 3600, 5400, 7200];
 const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
 const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "test-gaps"];
+const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
 
 export async function runSettingsMenu(
   input = process.stdin as ReadStream,
@@ -51,11 +54,13 @@ export async function runSettingsMenu(
     providerId,
     await loadProviderModels(providerId)
   ])));
+  const checkCommandOptions = await loadCheckCommandOptions(process.cwd());
   const state: MenuState = {
     screen: "main",
     cursor: 0,
     settings,
     modelsByProvider,
+    checkCommandOptions,
     done: false,
     saved: false,
     settingsPath
@@ -208,6 +213,8 @@ function activateCurrentItem(state: MenuState): void {
     case "language":
     case "checkTimeout":
     case "phaseTimeout":
+    case "checkCommands":
+    case "exportFormats":
       state.screen = item.id;
       state.cursor = 0;
       break;
@@ -231,8 +238,6 @@ function activateCurrentItem(state: MenuState): void {
     case "promptFile":
     case "includes":
     case "ignores":
-    case "checkCommands":
-    case "exportFormats":
       break;
     case "save":
       state.done = true;
@@ -318,6 +323,22 @@ function toggleCurrentSelection(state: MenuState): void {
     return;
   }
 
+  if (state.screen === "checkCommands") {
+    const selected = state.checkCommandOptions[state.cursor];
+    if (selected) {
+      state.settings.checkCommands = toggleListValue(state.settings.checkCommands, selected);
+    }
+    return;
+  }
+
+  if (state.screen === "exportFormats") {
+    const selected = EXPORT_FORMAT_OPTIONS[state.cursor];
+    if (selected) {
+      state.settings.exportFormats = toggleListValue(state.settings.exportFormats, selected);
+    }
+    return;
+  }
+
   if (state.screen === "checkTimeout") {
     const selected = CHECK_TIMEOUT_OPTIONS[state.cursor];
     state.settings.checkTimeoutSeconds = state.settings.checkTimeoutSeconds === selected ? undefined : selected;
@@ -379,6 +400,10 @@ function currentItems(state: MenuState): string[] {
       return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === state.settings.sandbox, sandbox));
     case "language":
       return LANGUAGE_OPTIONS.map((language) => checkbox(language === state.settings.language, language));
+    case "checkCommands":
+      return state.checkCommandOptions.map((command) => checkbox(Boolean(state.settings.checkCommands?.includes(command)), command));
+    case "exportFormats":
+      return EXPORT_FORMAT_OPTIONS.map((format) => checkbox(Boolean(state.settings.exportFormats?.includes(format)), format));
     case "checkTimeout":
       return CHECK_TIMEOUT_OPTIONS.map((seconds) => checkbox(seconds === state.settings.checkTimeoutSeconds, formatSeconds(seconds)));
     case "phaseTimeout":
@@ -416,12 +441,9 @@ async function editTextSetting(
   const values = splitList(trimmed);
   if (id === "includes") {
     state.settings.includes = values.length ? values : undefined;
-  } else if (id === "ignores") {
+  }
+  if (id === "ignores") {
     state.settings.ignores = values.length ? values : undefined;
-  } else if (id === "exportFormats") {
-    state.settings.exportFormats = parseSettingValue("exportFormats", trimmed) as RepoVistaSettings["exportFormats"];
-  } else {
-    state.settings.checkCommands = values.length ? values : undefined;
   }
 }
 
@@ -452,10 +474,7 @@ function textValueForSetting(settings: RepoVistaSettings, id: Extract<MainItem, 
   if (id === "ignores") {
     return (settings.ignores ?? []).join(", ");
   }
-  if (id === "exportFormats") {
-    return (settings.exportFormats ?? []).join(", ");
-  }
-  return (settings.checkCommands ?? []).join(", ");
+  return "";
 }
 
 function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
@@ -472,10 +491,6 @@ function textLabel(id: Extract<MainItem, { type: "text" }>["id"]): string {
       return "Include patterns, comma-separated, empty clears";
     case "ignores":
       return "Ignore patterns, comma-separated, empty clears";
-    case "checkCommands":
-      return "Check commands, comma-separated, empty clears";
-    case "exportFormats":
-      return "Export formats sarif, html, jsonl, github; comma-separated, empty clears";
   }
 }
 
@@ -492,6 +507,30 @@ function splitList(value: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function toggleListValue<T extends string>(current: T[] | undefined, value: T): T[] | undefined {
+  const values = new Set(current ?? []);
+  if (values.has(value)) {
+    values.delete(value);
+  } else {
+    values.add(value);
+  }
+  return values.size ? Array.from(values) : undefined;
+}
+
+async function loadCheckCommandOptions(projectRoot: string): Promise<string[]> {
+  const defaults = ["npm test", "npm run typecheck", "npm run lint", "npm audit --audit-level=moderate"];
+  try {
+    const packageJson = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8")) as { scripts?: Record<string, unknown> };
+    const scripts = packageJson.scripts && typeof packageJson.scripts === "object" ? packageJson.scripts : {};
+    const scriptCommands = Object.keys(scripts)
+      .filter((name) => /^(test|lint|typecheck|check|build|security:audit|audit)$/.test(name))
+      .map((name) => `npm run ${name}`);
+    return Array.from(new Set([...scriptCommands, ...defaults]));
+  } catch {
+    return defaults;
+  }
 }
 
 function checkbox(selected: boolean, label: string): string {
@@ -533,13 +572,13 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "includes", type: "text", label: (settings) => `Include patterns: ${formatArray(settings.includes)}` },
   { id: "ignores", type: "text", label: (settings) => `Ignore patterns: ${formatArray(settings.ignores)}` },
   { id: "runChecks", type: "toggle", label: (settings) => checkbox(Boolean(settings.runChecks), "Run local checks before analysis") },
-  { id: "checkCommands", type: "text", label: (settings) => `Check commands: ${formatArray(settings.checkCommands)}` },
+  { id: "checkCommands", type: "submenu", label: (settings) => `Check commands: ${formatArray(settings.checkCommands)}` },
   { id: "checkTimeout", type: "submenu", label: (settings) => `Check timeout: ${formatSeconds(settings.checkTimeoutSeconds ?? 300)}` },
   { id: "phaseTimeout", type: "submenu", label: (settings) => `Provider phase timeout: ${formatSeconds(settings.phaseTimeoutSeconds ?? 1800)}` },
   { id: "strictReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.strictReports), "Strict report quality gates") },
   { id: "repairReports", type: "toggle", label: (settings) => checkbox(Boolean(settings.repairReports), "Repair reports that miss quality gates") },
   { id: "deepReview", type: "toggle", label: (settings) => checkbox(Boolean(settings.deepReview), "Feature-sliced deep review") },
-  { id: "exportFormats", type: "text", label: (settings) => `Export formats: ${formatArray(settings.exportFormats)}` },
+  { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(settings.exportFormats)}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(Boolean(settings.json), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(Boolean(settings.keepLogs), "Keep technical logs") },
   { id: "progress", type: "toggle", label: (settings) => checkbox(settings.progress !== false, "Progress output") },

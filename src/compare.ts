@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { RepoVistaError } from "./errors.js";
-import type { AuditMeta, CompareFormat, StructuredFinding } from "./types.js";
+import type { AuditMeta, CompareFormat, StructuredFinding, StructuredPhaseReport, StructuredRoadmapProposal } from "./types.js";
 
 export interface LoadedRun {
   runDir: string;
@@ -9,6 +9,7 @@ export interface LoadedRun {
   summary?: RunSummary;
   meta?: AuditMeta;
   findings: StructuredFinding[];
+  structuredReports: StructuredPhaseReport[];
   reportMetrics: ReportMetric[];
 }
 
@@ -61,6 +62,21 @@ export interface RunComparison {
     resolved: StructuredFinding[];
     persisting: StructuredFinding[];
   };
+  proposals: {
+    added: StructuredRoadmapProposal[];
+    removed: StructuredRoadmapProposal[];
+    persisting: StructuredRoadmapProposal[];
+  };
+  evidenceQuality: {
+    old: number;
+    new: number;
+    delta: number;
+  };
+  providerDelta: {
+    providerChanged: boolean;
+    modelChanged: boolean;
+    reasoningChanged: boolean;
+  };
   regressions: StructuredFinding[];
 }
 
@@ -107,8 +123,11 @@ export async function buildRunComparison(
   const oldRun = await loadRun(projectRoot, oldRunDirectory);
   const newRun = await loadRun(projectRoot, newRunDirectory);
   const changes = diffFindings(oldRun.findings, newRun.findings);
+  const proposalChanges = diffProposals(roadmapProposals(oldRun), roadmapProposals(newRun));
   const oldCounts = findingCounts(oldRun);
   const newCounts = findingCounts(newRun);
+  const oldEvidenceQuality = evidenceQualityScore(oldRun.findings);
+  const newEvidenceQuality = evidenceQualityScore(newRun.findings);
   const severities = ["critical", "high", "medium", "low", "unknown"];
   const deltas = Object.fromEntries(severities.map((severity) => [
     severity,
@@ -123,14 +142,28 @@ export async function buildRunComparison(
       deltas
     },
     changes,
+    proposals: proposalChanges,
+    evidenceQuality: {
+      old: oldEvidenceQuality,
+      new: newEvidenceQuality,
+      delta: newEvidenceQuality - oldEvidenceQuality
+    },
+    providerDelta: {
+      providerChanged: displayProvider(oldRun) !== displayProvider(newRun),
+      modelChanged: displayModel(oldRun) !== displayModel(newRun),
+      reasoningChanged: displayReasoning(oldRun) !== displayReasoning(newRun)
+    },
     regressions: changes.added.filter((finding) => finding.severity === "critical" || finding.severity === "high")
   };
 }
 
 export function renderRunComparison(oldRun: LoadedRun, newRun: LoadedRun): string {
   const diff = diffFindings(oldRun.findings, newRun.findings);
+  const proposalChanges = diffProposals(roadmapProposals(oldRun), roadmapProposals(newRun));
   const oldCounts = findingCounts(oldRun);
   const newCounts = findingCounts(newRun);
+  const oldEvidenceQuality = evidenceQualityScore(oldRun.findings);
+  const newEvidenceQuality = evidenceQualityScore(newRun.findings);
 
   return `# RepoVista Report Comparison
 
@@ -144,6 +177,8 @@ export function renderRunComparison(oldRun: LoadedRun, newRun: LoadedRun): strin
 | Model | ${cell(displayModel(oldRun))} | ${cell(displayModel(newRun))} |
 | Reasoning | ${cell(displayReasoning(oldRun))} | ${cell(displayReasoning(newRun))} |
 | Checks | ${cell(displayChecks(oldRun))} | ${cell(displayChecks(newRun))} |
+
+Provider changed: ${displayProvider(oldRun) !== displayProvider(newRun) ? "yes" : "no"}; model changed: ${displayModel(oldRun) !== displayModel(newRun) ? "yes" : "no"}; reasoning changed: ${displayReasoning(oldRun) !== displayReasoning(newRun) ? "yes" : "no"}.
 
 ## Finding Counts
 
@@ -166,6 +201,26 @@ ${renderFindingList("Added Findings", diff.added)}
 ${renderFindingList("Resolved Findings", diff.resolved)}
 
 ${renderFindingList("Persisting Findings", diff.persisting)}
+
+## Resolved Old Findings
+
+${diff.resolved.length ? diff.resolved.map((finding) => `- ${finding.severity.toUpperCase()}: ${finding.title} (${finding.paths.join(", ") || "no paths"})`).join("\n") : "None."}
+
+## Proposal Changes
+
+- Added proposals: ${proposalChanges.added.length}
+- Removed proposals: ${proposalChanges.removed.length}
+- Persisting proposals: ${proposalChanges.persisting.length}
+
+${renderProposalList("Added Proposals", proposalChanges.added)}
+
+${renderProposalList("Removed Proposals", proposalChanges.removed)}
+
+## Evidence Quality
+
+| Signal | Old | New | Delta |
+|---|---:|---:|---:|
+| Finding evidence quality | ${oldEvidenceQuality} | ${newEvidenceQuality} | ${formatDelta(newEvidenceQuality - oldEvidenceQuality)} |
 
 ## Report Depth
 
@@ -218,6 +273,7 @@ export function renderRunComparisonHtml(comparison: RunComparison): string {
 <body>
   <h1>RepoVista Comparison</h1>
   <p>Regressions: ${comparison.regressions.length}</p>
+  <p>Evidence quality: ${comparison.evidenceQuality.old} -> ${comparison.evidenceQuality.new} (${formatDelta(comparison.evidenceQuality.delta)}). Provider/model/reasoning changed: ${comparison.providerDelta.providerChanged ? "provider " : ""}${comparison.providerDelta.modelChanged ? "model " : ""}${comparison.providerDelta.reasoningChanged ? "reasoning" : ""}${!comparison.providerDelta.providerChanged && !comparison.providerDelta.modelChanged && !comparison.providerDelta.reasoningChanged ? "no" : ""}</p>
   <table>
     <thead><tr><th>Severity</th><th>Old</th><th>New</th><th>Delta</th></tr></thead>
     <tbody>${rows}</tbody>
@@ -258,10 +314,11 @@ export function renderRunComparisonHtml(comparison: RunComparison): string {
 async function loadRun(projectRoot: string, inputDirectory: string): Promise<LoadedRun> {
   const runDir = path.resolve(projectRoot, inputDirectory);
   await assertDirectory(runDir);
-  const [summary, meta, findingsJson, reportMetrics] = await Promise.all([
+  const [summary, meta, findingsJson, structuredReports, reportMetrics] = await Promise.all([
     readJsonFile<RunSummary>(path.join(runDir, "summary.json")),
     readJsonFile<AuditMeta>(path.join(runDir, "meta.json")),
     readJsonFile<StructuredFinding[]>(path.join(runDir, "findings.json")),
+    readJsonFile<StructuredPhaseReport[]>(path.join(runDir, "structured-reports.json")),
     loadReportMetrics(runDir)
   ]);
   if (!summary && !meta && !Array.isArray(findingsJson)) {
@@ -273,6 +330,7 @@ async function loadRun(projectRoot: string, inputDirectory: string): Promise<Loa
     summary,
     meta,
     findings: Array.isArray(findingsJson) ? findingsJson : [],
+    structuredReports: Array.isArray(structuredReports) ? structuredReports : [],
     reportMetrics
   };
 }
@@ -334,6 +392,32 @@ function diffFindings(oldFindings: StructuredFinding[], newFindings: StructuredF
   };
 }
 
+function diffProposals(oldProposals: StructuredRoadmapProposal[], newProposals: StructuredRoadmapProposal[]): {
+  added: StructuredRoadmapProposal[];
+  removed: StructuredRoadmapProposal[];
+  persisting: StructuredRoadmapProposal[];
+} {
+  const oldByKey = new Map(oldProposals.map((proposal) => [proposalKey(proposal), proposal]));
+  const newByKey = new Map(newProposals.map((proposal) => [proposalKey(proposal), proposal]));
+  return {
+    added: newProposals.filter((proposal) => !oldByKey.has(proposalKey(proposal))),
+    removed: oldProposals.filter((proposal) => !newByKey.has(proposalKey(proposal))),
+    persisting: newProposals.filter((proposal) => oldByKey.has(proposalKey(proposal)))
+  };
+}
+
+function roadmapProposals(run: LoadedRun): StructuredRoadmapProposal[] {
+  return run.structuredReports.flatMap((report) => report.phaseId === "feature-roadmap" ? report.proposals ?? [] : []);
+}
+
+function proposalKey(proposal: StructuredRoadmapProposal): string {
+  return [
+    normalizeText(proposal.title),
+    normalizeText(proposal.affected.join(",")),
+    normalizeText(proposal.priority)
+  ].join("|");
+}
+
 function findingKey(finding: StructuredFinding): string {
   if (finding.signature) {
     return finding.signature;
@@ -370,6 +454,20 @@ ${findings.map((finding) => [
     `- ${finding.severity.toUpperCase()}: ${finding.title}`,
     finding.paths.length ? `  Paths: ${finding.paths.map((item) => `\`${item}\``).join(", ")}` : undefined,
     finding.recommendation ? `  Recommendation: ${finding.recommendation}` : undefined
+  ].filter(Boolean).join("\n")).join("\n")}`;
+}
+
+function renderProposalList(title: string, proposals: StructuredRoadmapProposal[]): string {
+  if (!proposals.length) {
+    return `## ${title}\n\nNone.`;
+  }
+  return `## ${title}
+
+${proposals.map((proposal) => [
+    `- ${proposal.title}`,
+    proposal.priority ? `  Priority: ${proposal.priority}` : undefined,
+    proposal.affected.length ? `  Affected: ${proposal.affected.map((item) => `\`${item}\``).join(", ")}` : undefined,
+    proposal.benefit ? `  Benefit: ${proposal.benefit}` : undefined
   ].filter(Boolean).join("\n")).join("\n")}`;
 }
 
@@ -428,6 +526,28 @@ function displayChecks(run: LoadedRun): string {
   }
   const commandCount = checks.commands?.length ?? 0;
   return `${commandCount} command(s), ${checks.failed ? "failed" : "passed"}`;
+}
+
+function evidenceQualityScore(findings: StructuredFinding[]): number {
+  if (!findings.length) {
+    return 100;
+  }
+  const scores = findings.map((finding) => {
+    const refs = finding.evidenceDetails?.length
+      ? finding.evidenceDetails
+      : (finding.evidenceReferences ?? []).map((reference) => typeof reference === "string" ? { path: reference } : reference);
+    let score = 0;
+    score += finding.paths.length ? 15 : 0;
+    score += refs.length ? 15 : 0;
+    score += refs.some((reference) => reference.startLine && reference.endLine) ? 20 : 0;
+    score += refs.some((reference) => reference.quote) ? 15 : 0;
+    score += finding.reproduction ? 10 : 0;
+    score += finding.suggestedRegressionTest ? 10 : 0;
+    score += finding.minimumFixScope ? 10 : 0;
+    score += finding.evidenceValidation?.passed ? 5 : 0;
+    return Math.min(100, score);
+  });
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
 }
 
 function countPathEvidence(markdown: string): number {

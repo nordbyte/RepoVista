@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { PreflightError } from "./errors.js";
 import { getReportProvider } from "./providers/index.js";
+import { providerPluginTrustStatus } from "./providers/plugin.js";
 import { validateReportRoot } from "./reports.js";
 import type { AiProviderId, AuditOptions } from "./types.js";
 
@@ -57,6 +58,12 @@ export async function runPreflight(
   const warnings: string[] = [];
   const commandExists = dependencies.commandExists ?? defaultCommandExists;
   const provider = getReportProvider(options.provider ?? "codex");
+  const pluginTrust = providerPluginTrustStatus(provider.id);
+  if (pluginTrust.isPlugin && pluginTrust.trustRequired && !pluginTrust.trusted && !options.allowRepoProviderPlugin) {
+    throw new PreflightError(
+      `Provider plugin ${provider.id} is declared by this repository and is not trusted by default. Re-run with --allow-repo-provider-plugin after reviewing ${pluginTrust.filePath ?? "repovista.providers.json"}, or add its directory to REPOVISTA_TRUSTED_PROVIDER_PLUGIN_DIRS.`
+    );
+  }
 
   await assertDirectoryAccess(projectRoot, "Project directory", false);
   await assertDirectoryAccess(runDir, "Report directory", true);
@@ -87,6 +94,9 @@ export async function runPreflight(
     warnings.push(
       `Sandbox mode ${options.sandbox} was selected explicitly. The safe default is read-only.`
     );
+  }
+  if (pluginTrust.isPlugin && pluginTrust.trustRequired && (pluginTrust.trusted || options.allowRepoProviderPlugin)) {
+    warnings.push(`Repository provider plugin ${provider.id} is enabled for this run.`);
   }
 
   return {

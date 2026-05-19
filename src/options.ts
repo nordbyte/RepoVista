@@ -178,6 +178,15 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "provider-revalidate":
         options.providerRevalidate = true;
         break;
+      case "allow-repo-provider-plugin":
+        options.allowRepoProviderPlugin = true;
+        break;
+      case "isolate-branch":
+        options.fixIsolateBranch = true;
+        break;
+      case "post-revalidate":
+        options.fixPostRevalidate = true;
+        break;
       case "dry-run":
         options.dryRun = true;
         break;
@@ -510,6 +519,12 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "repair-attempts":
       options.repairAttempts = parsePositiveInteger(name, value, 3);
       break;
+    case "max-files":
+      options.patchMaxFiles = parsePositiveInteger(name, value, 100);
+      break;
+    case "template":
+      options.ciTemplate = validateCiTemplate(value);
+      break;
     case "since":
       options.since = requireNonEmpty(name, value);
       break;
@@ -677,6 +692,13 @@ function validateCompareFormat(value: string): CompareFormat {
     return value;
   }
   throw new CliUsageError("Option --format must be markdown, json, or html.");
+}
+
+function validateCiTemplate(value: string): NonNullable<AuditOptions["ciTemplate"]> {
+  if (value === "pr-light" || value === "security" || value === "release-readiness" || value === "scheduled-audit") {
+    return value;
+  }
+  throw new CliUsageError("Option --template must be pr-light, security, release-readiness, or scheduled-audit.");
 }
 
 function validateAuditProfile(value: string): AuditProfileId {

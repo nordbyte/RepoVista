@@ -63,4 +63,13 @@ test("ci init template uses read-only permissions and artifact exports by defaul
   assert.match(workflow, /repovista providers test codex/);
   assert.match(workflow, /--no-run-checks/);
   assert.match(workflow, /--export jsonl,html/);
+
+  const security = await runCiInitCommand({ outDir: ".repovista", dryRun: true, force: true, ciTemplate: "security" });
+  assert.match(security, /RepoVista Security/);
+  assert.match(security, /security-events: write/);
+  assert.match(security, /--audit-profile security/);
+
+  const scheduled = await runCiInitCommand({ outDir: ".repovista", dryRun: true, force: true, ciTemplate: "scheduled-audit" });
+  assert.match(scheduled, /schedule:/);
+  assert.match(scheduled, /--incremental/);
 });

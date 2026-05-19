@@ -110,8 +110,11 @@ function areaIdForPath(relativePath: string): string {
   if (parts.length === 1) {
     return ROOT_CONFIG_ID;
   }
-  if (first === "src" && parts.length > 2) {
-    return `${first}/${parts[1]}`;
+  if (first === ".github") {
+    return githubAreaId(relativePath);
+  }
+  if (first === "src") {
+    return sourceAreaId(relativePath);
   }
   if ((first === "packages" || first === "apps" || first === "services") && parts.length > 2) {
     return `${first}/${parts[1]}`;
@@ -137,6 +140,39 @@ function titleForArea(id: string): string {
   if (id === ".github") {
     return "GitHub automation";
   }
+  if (id === ".github/security") {
+    return "Security automation";
+  }
+  if (id === ".github/release") {
+    return "Release automation";
+  }
+  if (id === ".github/ci") {
+    return "CI automation";
+  }
+  if (id === "src/cli") {
+    return "CLI and commands";
+  }
+  if (id === "src/providers") {
+    return "AI provider adapters";
+  }
+  if (id === "src/reports") {
+    return "Reports and findings";
+  }
+  if (id === "src/state") {
+    return "Persistent state";
+  }
+  if (id === "src/settings") {
+    return "Settings";
+  }
+  if (id === "src/security") {
+    return "Security and validation";
+  }
+  if (id === "src/ci") {
+    return "CI integration";
+  }
+  if (id === "src/app") {
+    return "Application core";
+  }
   if (id === "test" || id === "tests") {
     return "Tests";
   }
@@ -153,6 +189,15 @@ function descriptionForArea(id: string): string {
   if (id === ".github") {
     return "CI, security, release, and publish automation.";
   }
+  if (id === ".github/security") {
+    return "Secret scanning, dependency auditing, and security workflow automation.";
+  }
+  if (id === ".github/release") {
+    return "Release, package publication, and tag automation.";
+  }
+  if (id === ".github/ci") {
+    return "Pull request and push validation workflows.";
+  }
   if (id === "test" || id === "tests") {
     return "Automated tests and validation fixtures.";
   }
@@ -160,9 +205,69 @@ function descriptionForArea(id: string): string {
     return "Documentation, images, and user-facing reference material.";
   }
   if (id.startsWith("src/")) {
-    return `Application source area ${id}.`;
+    return descriptionForSourceArea(id);
   }
   return `Files below ${id}.`;
+}
+
+function githubAreaId(relativePath: string): string {
+  const lower = relativePath.toLowerCase();
+  if (/security|gitleaks|trufflehog|audit|secret|dependabot/.test(lower)) {
+    return ".github/security";
+  }
+  if (/release|publish|npm|package|tag/.test(lower)) {
+    return ".github/release";
+  }
+  return ".github/ci";
+}
+
+function sourceAreaId(relativePath: string): string {
+  const lower = relativePath.toLowerCase();
+  if (/\/providers?\//.test(lower) || /(^|\/)(provider|providers|codex-runner|provider-runner|provider-models|provider-schema)\./.test(lower)) {
+    return "src/providers";
+  }
+  if (/(^|\/)(cli|cli-schema|options|.*-commands?)\./.test(lower)) {
+    return "src/cli";
+  }
+  if (/settings/.test(lower)) {
+    return "src/settings";
+  }
+  if (/(report|audit|finding|evidence|compare|export|quality|phase|prompt|inventory|roadmap)/.test(lower)) {
+    return "src/reports";
+  }
+  if (/(state|store|cache|baseline|feature-state|finding-store|resume|migration)/.test(lower)) {
+    return "src/state";
+  }
+  if (/(secret|security|validate|validation|preflight|sandbox|trust)/.test(lower)) {
+    return "src/security";
+  }
+  if (/(ci-|github|workflow|release)/.test(lower)) {
+    return "src/ci";
+  }
+  return "src/app";
+}
+
+function descriptionForSourceArea(id: string): string {
+  switch (id) {
+    case "src/cli":
+      return "Command parsing, command dispatch, and user-facing CLI flows.";
+    case "src/providers":
+      return "Built-in and plugin AI provider adapters, provider execution, models, and schemas.";
+    case "src/reports":
+      return "Audit prompts, evidence, findings, report extraction, quality gates, exports, and comparison.";
+    case "src/state":
+      return "Persistent findings, features, baselines, cache, resume, and migration state.";
+    case "src/settings":
+      return "Interactive and non-interactive persisted settings.";
+    case "src/security":
+      return "Secret masking, trust checks, preflight validation, and safety boundaries.";
+    case "src/ci":
+      return "GitHub Actions templates and CI summary integration.";
+    case "src/app":
+      return "Application orchestration and shared runtime helpers.";
+    default:
+      return `Application source area ${id}.`;
+  }
 }
 
 function titleForShard(areas: ProjectArea[]): string {

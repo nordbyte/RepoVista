@@ -43,3 +43,46 @@ test("provider plugins are loaded from JSON definitions", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("repo-local provider plugins require explicit trust before execution", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-provider-trust-"));
+  try {
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "repovista.providers.json"), JSON.stringify({
+      providers: [
+        {
+          id: "repo-fixture-provider",
+          displayName: "Repo Fixture Provider",
+          executable: "node",
+          outputMode: "stdout",
+          args: ["--version"]
+        }
+      ]
+    }), "utf8");
+
+    const script = `
+      import { mkdir } from 'node:fs/promises';
+      import path from 'node:path';
+      import { runPreflight } from ${JSON.stringify(path.join(repoRoot, "dist", "index.js"))};
+      const root = process.cwd();
+      const runDir = path.join(root, '.repovista', 'run');
+      await mkdir(runDir, { recursive: true });
+      const base = { command: 'audit', outDir: '.repovista', provider: 'repo-fixture-provider', sandbox: 'read-only', language: 'English', json: false, includes: [], ignores: [], ci: false, failOnCritical: false, progress: false, keepLogs: false };
+      let rejected = false;
+      try {
+        await runPreflight(root, runDir, base, { commandExists: async () => true });
+      } catch (error) {
+        rejected = /allow-repo-provider-plugin/.test(String(error.message));
+      }
+      const accepted = await runPreflight(root, runDir, { ...base, allowRepoProviderPlugin: true }, { commandExists: async () => true });
+      console.log(JSON.stringify({ rejected, provider: accepted.provider.id, warnings: accepted.warnings }));
+    `;
+    const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "-e", script], { cwd: root });
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.rejected, true);
+    assert.equal(parsed.provider, "repo-fixture-provider");
+    assert.ok(parsed.warnings.some((warning) => /plugin/.test(warning)));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

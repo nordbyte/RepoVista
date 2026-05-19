@@ -169,10 +169,11 @@ test("new operational commands and options are recognized", () => {
   assert.equal(suppress.action, "suppress");
   assert.equal(suppress.options.baselineAction, "add");
 
-  const ci = parseCliArgs(["ci", "init", "--dry-run", "--force"]);
+  const ci = parseCliArgs(["ci", "init", "--dry-run", "--force", "--template", "security"]);
   assert.equal(ci.action, "ci-init");
   assert.equal(ci.options.dryRun, true);
   assert.equal(ci.options.force, true);
+  assert.equal(ci.options.ciTemplate, "security");
 
   const compare = parseCliArgs(["compare", "old", "new", "--format", "json", "--fail-on-regression"]);
   assert.equal(compare.options.compareFormat, "json");
@@ -182,10 +183,16 @@ test("new operational commands and options are recognized", () => {
   assert.equal(cleanLocks.action, "clean-locks");
   assert.equal(cleanLocks.options.force, true);
 
-  const fix = parseCliArgs(["fix", "fnd_123", "--dry-run"]);
+  const fix = parseCliArgs(["fix", "fnd_123", "--dry-run", "--isolate-branch", "--post-revalidate", "--max-files", "4"]);
   assert.equal(fix.action, "fix");
   assert.equal(fix.options.findingId, "fnd_123");
   assert.equal(fix.options.dryRun, true);
+  assert.equal(fix.options.fixIsolateBranch, true);
+  assert.equal(fix.options.fixPostRevalidate, true);
+  assert.equal(fix.options.patchMaxFiles, 4);
+
+  const plugin = parseCliArgs(["audit", "--allow-repo-provider-plugin"]);
+  assert.equal(plugin.options.allowRepoProviderPlugin, true);
 
   const patches = parseCliArgs(["patches", "pat_123"]);
   assert.equal(patches.action, "patches");

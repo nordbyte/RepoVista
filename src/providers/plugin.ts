@@ -20,6 +20,8 @@ export interface ProviderPluginDiagnostic {
   filePath?: string;
   id?: string;
   loaded: boolean;
+  trustRequired?: boolean;
+  trusted?: boolean;
   error?: string;
 }
 
@@ -123,7 +125,9 @@ function loadPluginDefinition(
     source,
     filePath,
     id: definition.id,
-    loaded: true
+    loaded: true,
+    trustRequired: source.startsWith("repo-config"),
+    trusted: !source.startsWith("repo-config") || isTrustedPluginPath(filePath)
   });
   return {
     id: definition.id,
@@ -142,6 +146,42 @@ function loadPluginDefinition(
     classifyError: (_stderrText, code) => `${definition.displayName ?? definition.id} run exited with code ${code ?? "unknown"}.`,
     stdoutLogExtension: () => definition.stdoutLogExtension ?? ".log"
   };
+}
+
+export function providerPluginTrustStatus(providerId: string): {
+  isPlugin: boolean;
+  trustRequired: boolean;
+  trusted: boolean;
+  filePath?: string;
+  source?: string;
+} {
+  const diagnostic = pluginDiagnostics.find((item) => item.id === providerId && item.loaded);
+  if (!diagnostic) {
+    return {
+      isPlugin: false,
+      trustRequired: false,
+      trusted: true
+    };
+  }
+  const trustRequired = Boolean(diagnostic.trustRequired);
+  return {
+    isPlugin: true,
+    trustRequired,
+    trusted: !trustRequired || Boolean(diagnostic.trusted),
+    filePath: diagnostic.filePath,
+    source: diagnostic.source
+  };
+}
+
+function isTrustedPluginPath(filePath: string | undefined): boolean {
+  if (!filePath) {
+    return false;
+  }
+  const allowlist = process.env.REPOVISTA_TRUSTED_PROVIDER_PLUGIN_DIRS
+    ? process.env.REPOVISTA_TRUSTED_PROVIDER_PLUGIN_DIRS.split(path.delimiter).map((item) => path.resolve(item)).filter(Boolean)
+    : [];
+  const resolved = path.resolve(filePath);
+  return allowlist.some((directory) => resolved === directory || resolved.startsWith(`${directory}${path.sep}`));
 }
 
 function isValidDefinition(value: ProviderPluginDefinition): boolean {

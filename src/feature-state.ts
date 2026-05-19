@@ -3,6 +3,7 @@ import path from "node:path";
 import { RepoVistaError } from "./errors.js";
 import { validateReportRoot } from "./reports.js";
 import { stableId } from "./stable-id.js";
+import { readStateFile, writeStateFileAtomic } from "./state-store.js";
 import type { FeatureLock, FeatureRecord, FeatureStatus, SemanticFeature, StructuredFinding } from "./types.js";
 
 const FEATURE_STATE_VERSION = 1;
@@ -26,11 +27,17 @@ export async function loadFeatureRecords(projectRoot: string, outDir: string): P
       if (!entry.isFile() || !entry.name.endsWith(".json")) {
         continue;
       }
-      const parsed = JSON.parse(await readFile(path.join(dir, entry.name), "utf8")) as { version?: number; feature?: FeatureRecord };
-      if (parsed.version !== FEATURE_STATE_VERSION || !parsed.feature?.featureId) {
-        throw new RepoVistaError(`Invalid RepoVista feature state file: ${path.join(dir, entry.name)}`);
-      }
-      records.push(parsed.feature);
+      const filePath = path.join(dir, entry.name);
+      const feature = await readStateFile<FeatureRecord>(filePath, {
+        kind: "feature",
+        currentVersion: FEATURE_STATE_VERSION,
+        label: "feature state file",
+        legacy: (value) => {
+          const legacy = value as { version?: number; feature?: FeatureRecord };
+          return legacy?.version === FEATURE_STATE_VERSION && legacy.feature?.featureId ? legacy.feature : undefined;
+        }
+      });
+      records.push(feature);
     }
     return records.sort((left, right) => left.title.localeCompare(right.title));
   } catch (error) {
@@ -262,8 +269,15 @@ export async function runCleanLocksCommand(options: { outDir: string; force?: bo
 async function readFeatureRecord(projectRoot: string, outDir: string, featureId: string): Promise<FeatureRecord | undefined> {
   const dir = await featureStateDirectory(projectRoot, outDir);
   try {
-    const parsed = JSON.parse(await readFile(path.join(dir, featureFileName(featureId)), "utf8")) as { feature?: FeatureRecord };
-    return parsed.feature;
+    return await readStateFile<FeatureRecord>(path.join(dir, featureFileName(featureId)), {
+      kind: "feature",
+      currentVersion: FEATURE_STATE_VERSION,
+      label: "feature state file",
+      legacy: (value) => {
+        const legacy = value as { version?: number; feature?: FeatureRecord };
+        return legacy?.version === FEATURE_STATE_VERSION && legacy.feature?.featureId ? legacy.feature : undefined;
+      }
+    });
   } catch (error) {
     if (isMissingFile(error)) {
       return undefined;
@@ -274,10 +288,11 @@ async function readFeatureRecord(projectRoot: string, outDir: string, featureId:
 
 async function writeFeatureRecord(dir: string, feature: FeatureRecord): Promise<void> {
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, featureFileName(feature.featureId)), `${JSON.stringify({
-    version: FEATURE_STATE_VERSION,
-    feature
-  }, null, 2)}\n`, "utf8");
+  await writeStateFileAtomic(path.join(dir, featureFileName(feature.featureId)), {
+    schemaVersion: FEATURE_STATE_VERSION,
+    kind: "feature",
+    data: feature
+  });
 }
 
 function bestFeatureForFinding(features: SemanticFeature[], finding: StructuredFinding): SemanticFeature | undefined {

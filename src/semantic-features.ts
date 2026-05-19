@@ -15,6 +15,7 @@ export function buildSemanticFeatures(
   const baseFeatures = dedupeFeatures([
     ...packageScriptFeatures(files, packageJson),
     ...rootConfigFeatures(files),
+    ...functionalGroupFeatures(files),
     ...sourceDomainFeatures(files),
     ...testDomainFeatures(files),
     ...ciFeatures(files),
@@ -126,6 +127,65 @@ function rootConfigFeatures(files: ProjectFileSummary[]): SemanticFeature[] {
     source: "mapper",
     confidence: "high"
   }];
+}
+
+function functionalGroupFeatures(files: ProjectFileSummary[]): SemanticFeature[] {
+  const groups = [
+    functionalGroup("cli", "CLI and command surface", ["cli", "options", "command"], "cli"),
+    functionalGroup("providers", "AI provider adapters", ["provider", "providers", "codex-runner", "provider-runner", "model"], "provider"),
+    functionalGroup("reports", "Reports, findings, and evidence", ["report", "audit", "finding", "evidence", "compare", "export", "quality", "phase", "prompt", "inventory"], "reporting"),
+    functionalGroup("state", "Persistent state", ["state", "store", "cache", "baseline", "feature-state", "finding-store", "resume"], "state"),
+    functionalGroup("ci", "CI and release automation", ["ci-", "github", "workflow", "release"], "ci"),
+    functionalGroup("settings", "Settings", ["settings", "config", "profile"], "settings"),
+    functionalGroup("security", "Security and trust boundaries", ["security", "secret", "token", "credential", "preflight", "validation", "sandbox", "trust"], "security")
+  ];
+
+  return groups
+    .map((group) => featureForFunctionalGroup(files, group))
+    .filter((feature): feature is SemanticFeature => Boolean(feature));
+}
+
+function functionalGroup(
+  id: string,
+  title: string,
+  matchers: string[],
+  kind: string
+): { id: string; title: string; matchers: string[]; kind: string } {
+  return { id, title, matchers, kind };
+}
+
+function featureForFunctionalGroup(
+  files: ProjectFileSummary[],
+  group: { id: string; title: string; matchers: string[]; kind: string }
+): SemanticFeature | undefined {
+  const matched = files.filter((file) => {
+    const lower = file.relativePath.toLowerCase();
+    return group.matchers.some((matcher) => lower.includes(matcher));
+  });
+  if (!matched.length) {
+    return undefined;
+  }
+  const owned = matched
+    .filter((file) => !isTestPath(file.relativePath))
+    .map((file) => file.relativePath)
+    .sort()
+    .slice(0, MAX_FILES_PER_FEATURE);
+  const tests = nearbyTests(files, owned);
+  return {
+    id: stableId("feat", ["functional-group", group.id, owned]),
+    title: group.title,
+    kind: group.kind,
+    paths: compactPaths(matched),
+    ownedFiles: owned,
+    contextFiles: contextFilesFor(files, owned),
+    tests,
+    entrypoints: entrypointsForDomain(group.id, owned),
+    validationCommands: validationCommandsForFeature(files, tests),
+    tags: [group.kind, group.id].sort(),
+    trustBoundaries: trustBoundariesFor(matched),
+    source: "mapper",
+    confidence: matched.length >= 2 ? "high" : "medium"
+  };
 }
 
 function sourceDomainFeatures(files: ProjectFileSummary[]): SemanticFeature[] {
@@ -313,6 +373,10 @@ function sourceDomain(filePath: string): string {
   if (parts[0] !== "src") {
     return parts[0] ?? filePath;
   }
+  const functional = functionalSourceDomain(filePath);
+  if (functional) {
+    return functional;
+  }
   if (parts.length > 2) {
     return `src/${parts[1]}`;
   }
@@ -344,7 +408,7 @@ function kindForDomain(domain: string, files: string[]): string {
     return "provider";
   }
   if (/config|setting|profile/.test(joined)) {
-    return "configuration";
+    return "settings";
   }
   if (/finding|report|audit|evidence|compare|export/.test(joined)) {
     return "reporting";
@@ -352,7 +416,39 @@ function kindForDomain(domain: string, files: string[]): string {
   if (/state|store|cache|resume/.test(joined)) {
     return "state";
   }
+  if (/ci|github|workflow|release/.test(joined)) {
+    return "ci";
+  }
+  if (/security|secret|token|credential|preflight|validation|sandbox|trust/.test(joined)) {
+    return "security";
+  }
   return "application";
+}
+
+function functionalSourceDomain(filePath: string): string | undefined {
+  const lower = filePath.toLowerCase();
+  if (/\/providers?\//.test(lower) || /(^|\/)(provider|providers|codex-runner|provider-runner|provider-models|provider-schema)\./.test(lower)) {
+    return "src/:providers";
+  }
+  if (/(^|\/)(cli|cli-schema|options|.*-commands?)\./.test(lower)) {
+    return "src/:cli";
+  }
+  if (/settings/.test(lower)) {
+    return "src/:settings";
+  }
+  if (/(report|audit|finding|evidence|compare|export|quality|phase|prompt|inventory|roadmap)/.test(lower)) {
+    return "src/:reports";
+  }
+  if (/(state|store|cache|baseline|feature-state|finding-store|resume)/.test(lower)) {
+    return "src/:state";
+  }
+  if (/(secret|security|token|credential|preflight|validation|sandbox|trust)/.test(lower)) {
+    return "src/:security";
+  }
+  if (/(ci-|github|workflow|release)/.test(lower)) {
+    return "src/:ci";
+  }
+  return undefined;
 }
 
 function entrypointsForDomain(domain: string, files: string[]): string[] {

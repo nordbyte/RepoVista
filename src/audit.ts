@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { allowedEvidencePaths, collectAuditDiffScope, createInitialMeta, reportFolderName } from "./audit-context.js";
@@ -12,9 +13,9 @@ import { assignFindingsToFeatures, syncFeatureRecords, updateFeatureRecordsFromF
 import { extractFindings } from "./findings.js";
 import { createProjectInventory } from "./inventory.js";
 import { Logger } from "./logger.js";
-import { extractStructuredPhaseReport } from "./phase-schema.js";
+import { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport } from "./phase-schema.js";
 import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
-import { ANALYSIS_PHASES, type PromptContext } from "./prompts.js";
+import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PromptContext } from "./prompts.js";
 import { canParallelizePhase, runParallelPhase, runSinglePhase } from "./phase-runner.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
 import { createParallelExecutionMeta, createProjectMap, loadProjectMap } from "./project-map.js";
@@ -22,6 +23,7 @@ import { scanProject } from "./project-scan.js";
 import { getReportProvider } from "./providers/index.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { applyAuditProfile } from "./profiles.js";
+import { QUALITY_GATES_VERSION, validateReportQuality } from "./quality-gates.js";
 import { maybeRepairPhaseReport } from "./report-repair.js";
 import {
   expandSelectedPhases,
@@ -119,23 +121,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       includes: options.includes,
       ignores: options.ignores
     });
-    const scanFingerprint = projectScanFingerprint(projectScan.files, auditCacheContext(options, diffScope));
-    meta.cache = await updateAuditCache({
-      projectRoot,
-      outDir: options.outDir,
-      runDir: paths.runDir,
-      runId: paths.runId,
-      scanFingerprint,
-      fileCount: projectScan.files.length,
-      enabled: Boolean(options.incremental),
-      now
-    });
-    if (meta.cache.enabled && meta.cache.hit) {
-      logger.info(`Incremental scan cache hit. Previous matching run: ${meta.cache.previousRunId ?? "unknown"}.`);
-    }
-    const incrementalReports = meta.cache.enabled && meta.cache.hit && meta.cache.previousRunDir
-      ? await loadReusableReportsFromRun(meta.cache.previousRunDir)
-      : {};
+    const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
 
     logger.step("Creating project inventory");
     const provider = getReportProvider(options.provider ?? "codex");
@@ -160,7 +146,6 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     for (const warning of inventory.warnings) {
       logger.warn(warning);
     }
-    const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
 
     const inventoryPath = reportPath(paths.runDir, "00-inventory.md");
     await writeMarkdownReport(inventoryPath, inventory.markdown);
@@ -177,6 +162,49 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       featureStateDir
     });
     const promptManifest = createPromptManifest(paths.runId, now, featureMap.features, diffScope);
+    const promptManifestFingerprint = promptManifestInputFingerprint({
+      options,
+      projectFiles: projectScan.files,
+      features: featureMap.features,
+      diffScope,
+      promptGuidance: promptGuidance.content
+    });
+    const reuseKey = stableCacheFingerprint(auditCacheContext(options, diffScope, {
+      providerVersion: evidence.aiProvider.version,
+      promptManifestFingerprint
+    }));
+    const scanFingerprint = projectScanFingerprint(projectScan.files, {
+      reuseKey,
+      providerVersion: evidence.aiProvider.version,
+      promptManifestFingerprint,
+      promptContextVersion: PROMPT_CONTEXT_VERSION,
+      phaseSchemaVersion: PHASE_SCHEMA_VERSION,
+      qualityGateVersion: QUALITY_GATES_VERSION
+    });
+    meta.cache = await updateAuditCache({
+      projectRoot,
+      outDir: options.outDir,
+      runDir: paths.runDir,
+      runId: paths.runId,
+      scanFingerprint,
+      reuseKey,
+      promptManifestFingerprint,
+      providerVersion: evidence.aiProvider.version,
+      promptContextVersion: PROMPT_CONTEXT_VERSION,
+      phaseSchemaVersion: PHASE_SCHEMA_VERSION,
+      qualityGateVersion: QUALITY_GATES_VERSION,
+      fileCount: projectScan.files.length,
+      enabled: Boolean(options.incremental),
+      now
+    });
+    if (meta.cache.enabled && meta.cache.hit) {
+      logger.info(`Incremental scan cache hit. Previous matching run: ${meta.cache.previousRunId ?? "unknown"}.`);
+    } else if (meta.cache.enabled && meta.cache.mismatchReasons?.length) {
+      logger.info(`Incremental cache not reused: ${meta.cache.mismatchReasons.join("; ")}.`);
+    }
+    const incrementalReports = meta.cache.enabled && meta.cache.hit && meta.cache.previousRunDir
+      ? await loadReusableReportsFromRun(meta.cache.previousRunDir)
+      : {};
 
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
@@ -380,11 +408,24 @@ async function createRunPaths(projectRoot: string, options: AuditOptions, now: D
 
 async function loadReusableReportsFromRun(runDir: string): Promise<Record<string, string>> {
   const reports: Record<string, string> = {};
+  const [previousMeta, previousPromptManifest] = await Promise.all([
+    readPreviousMeta(runDir),
+    readPreviousPromptManifest(runDir)
+  ]);
   for (const phase of ANALYSIS_PHASES) {
     const filePath = reportPath(runDir, phase.reportFile);
     try {
       const content = await readReport(filePath);
-      if (isReusablePhaseReport(phase.id, content)) {
+      const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
+      const manifestPhase = previousPromptManifest?.phases?.find((item) => item.phaseId === phase.id && item.reportFile === phase.reportFile);
+      const quality = validateReportQuality(phase.id, content);
+      if (
+        previousStatus?.status === "success" &&
+        previousStatus.qualityPassed !== false &&
+        manifestPhase &&
+        isReusablePhaseReport(phase.id, content) &&
+        quality.passed
+      ) {
         reports[phase.reportFile] = content;
       }
     } catch {
@@ -392,6 +433,14 @@ async function loadReusableReportsFromRun(runDir: string): Promise<Record<string
     }
   }
   return reports;
+}
+
+async function readPreviousPromptManifest(runDir: string): Promise<{ phases?: Array<{ phaseId?: string; reportFile?: string }> } | undefined> {
+  try {
+    return JSON.parse(await readFile(reportPath(runDir, "prompt-manifest.json"), "utf8")) as { phases?: Array<{ phaseId?: string; reportFile?: string }> };
+  } catch {
+    return undefined;
+  }
 }
 
 async function loadPromptGuidance(
@@ -450,9 +499,22 @@ function determineExitCode(
   return 0;
 }
 
-function auditCacheContext(options: AuditOptions, diffScope: DiffScope | undefined): Record<string, unknown> {
+function auditCacheContext(
+  options: AuditOptions,
+  diffScope: DiffScope | undefined,
+  compatibility: {
+    providerVersion?: string;
+    promptManifestFingerprint: string;
+  }
+): Record<string, unknown> {
   return {
+    cacheSchema: 2,
+    promptContextVersion: PROMPT_CONTEXT_VERSION,
+    phaseSchemaVersion: PHASE_SCHEMA_VERSION,
+    qualityGateVersion: QUALITY_GATES_VERSION,
     provider: options.provider ?? "codex",
+    providerVersion: compatibility.providerVersion ?? null,
+    promptManifestFingerprint: compatibility.promptManifestFingerprint,
     model: options.model ?? null,
     profile: options.profile ?? null,
     reasoning: options.reasoning ?? null,
@@ -476,6 +538,49 @@ function auditCacheContext(options: AuditOptions, diffScope: DiffScope | undefin
     diffRef: diffScope?.ref ?? null,
     diffFiles: diffScope?.fileStatuses?.map(cacheDiffFile) ?? diffScope?.changedFiles.map((path) => ({ path, status: "unknown" }))
   };
+}
+
+function promptManifestInputFingerprint(input: {
+  options: AuditOptions;
+  projectFiles: Array<{ relativePath: string; size: number; sha256?: string; mtimeMs?: number; scopeReason?: string }>;
+  features: Array<{ id: string; title: string; kind: string; paths: string[]; ownedFiles: string[]; tests: string[]; validationCommands?: string[] }>;
+  diffScope?: DiffScope;
+  promptGuidance?: string;
+}): string {
+  return stableCacheFingerprint({
+    promptContextVersion: PROMPT_CONTEXT_VERSION,
+    phaseSchemaVersion: PHASE_SCHEMA_VERSION,
+    qualityGateVersion: QUALITY_GATES_VERSION,
+    language: input.options.language,
+    phases: input.options.phases,
+    reviewMode: input.options.reviewMode ?? "default",
+    auditProfile: input.options.auditProfile ?? null,
+    promptFileHash: input.promptGuidance ? stableCacheFingerprint(input.promptGuidance) : null,
+    diffScope: input.diffScope ? {
+      ref: input.diffScope.ref,
+      files: input.diffScope.fileStatuses?.map(cacheDiffFile) ?? input.diffScope.changedFiles.map((path) => ({ path, status: "unknown" }))
+    } : null,
+    features: input.features.map((feature) => ({
+      id: feature.id,
+      title: feature.title,
+      kind: feature.kind,
+      paths: feature.paths,
+      ownedFiles: feature.ownedFiles,
+      tests: feature.tests,
+      validationCommands: feature.validationCommands
+    })),
+    files: input.projectFiles.map((file) => ({
+      path: file.relativePath,
+      size: file.size,
+      sha256: file.sha256 ?? null,
+      mtimeMs: file.sha256 ? undefined : file.mtimeMs,
+      reason: file.scopeReason
+    }))
+  });
+}
+
+function stableCacheFingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function cacheDiffFile(file: NonNullable<DiffScope["fileStatuses"]>[number]): Pick<NonNullable<DiffScope["fileStatuses"]>[number], "path" | "status" | "previousPath"> {

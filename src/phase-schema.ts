@@ -1,6 +1,8 @@
 import { extractFindings, extractJsonObjectCandidates } from "./findings.js";
 import type { StructuredPhaseReport, StructuredRoadmapProposal } from "./types.js";
 
+export const PHASE_SCHEMA_VERSION = 1;
+
 export function extractStructuredPhaseReport(markdown: string, phaseId: string, source: string): StructuredPhaseReport {
   const warnings: string[] = [];
   const candidates = extractJsonObjectCandidates(markdown)

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { REPORT_PROVIDERS, getReportProvider } from "./providers/index.js";
-import { getPluginProviderDiagnostics } from "./providers/plugin.js";
+import { getPluginProviderDiagnostics, providerPluginTrustStatus } from "./providers/plugin.js";
 import { maskSensitiveText } from "./secrets.js";
 import type { AuditOptions } from "./types.js";
 
@@ -12,6 +12,10 @@ export async function runProvidersCommand(options: AuditOptions, projectRoot = p
   const action = options.providerAction ?? "list";
   if (action === "test") {
     const provider = getReportProvider(options.provider ?? "codex");
+    const trust = providerPluginTrustStatus(provider.id);
+    if (trust.isPlugin && trust.trustRequired && !trust.trusted && !options.allowRepoProviderPlugin) {
+      throw new RepoVistaError(`Provider plugin ${provider.id} is declared by this repository. Re-run with --allow-repo-provider-plugin after reviewing it.`);
+    }
     try {
       const { stdout, stderr } = await execFileAsync(provider.executable, provider.versionArgs, {
         cwd: projectRoot,

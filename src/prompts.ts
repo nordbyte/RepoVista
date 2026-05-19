@@ -33,7 +33,10 @@ export interface PhaseDefinition {
   buildPrompt(context: PromptContext): string;
 }
 
+export const PROMPT_CONTEXT_VERSION = 2;
+
 const CONTEXT_LIMIT = 18000;
+const PREVIOUS_REPORT_CONTEXT_LIMIT = 14000;
 
 export const ANALYSIS_PHASES: PhaseDefinition[] = [
   {
@@ -141,7 +144,7 @@ function buildCodeQualityPrompt(context: PromptContext): string {
 
 Previous architecture findings:
 
-${renderPrevious(context, ["01-architecture-report.md"])}
+${renderPrevious(context, ["01-architecture-report.md"], "code-quality")}
 
 Task: Evaluate code quality, strengths, weaknesses, and maintainability from a senior review perspective.
 
@@ -176,7 +179,7 @@ function buildRiskPrompt(context: PromptContext): string {
 
 Previous findings:
 
-${renderPrevious(context, ["01-architecture-report.md", "02-code-quality-report.md"])}
+${renderPrevious(context, ["01-architecture-report.md", "02-code-quality-report.md"], "risk-and-bug")}
 
 Task: Identify potential bugs, security risks, and robust failure modes. Stay defensive; do not provide exploit instructions against real external targets.
 
@@ -277,7 +280,7 @@ ${renderPrevious(context, [
     "01-architecture-report.md",
     "02-code-quality-report.md",
     "03-risk-and-bug-report.md"
-  ])}
+  ], "feature-roadmap")}
 
 Task: Derive a concrete feature and improvement roadmap from the code, architecture, and previous reports.
 
@@ -314,7 +317,7 @@ ${renderPrevious(context, [
     "02-code-quality-report.md",
     "03-risk-and-bug-report.md",
     "04-feature-roadmap.md"
-  ])}
+  ], "summary")}
 
 Task: Create the final overview as the entry-point \`index.md\`.
 
@@ -399,15 +402,142 @@ function structuredSchemaInstructions(phaseId: string): string {
 \`\`\``;
 }
 
-function renderPrevious(context: PromptContext, reportFiles: string[]): string {
+function renderPrevious(context: PromptContext, reportFiles: string[], targetPhase: string): string {
   const sections = reportFiles.map((fileName) => {
     const content = context.previousReports[fileName];
     if (!content) {
       return `## ${fileName}\n\nNot yet available or failed.`;
     }
-    return `## ${fileName}\n\n${clip(content)}`;
+    return `## ${fileName}\n\n${summarizePreviousReport(fileName, content, targetPhase)}`;
   });
   return sections.join("\n\n");
+}
+
+function summarizePreviousReport(fileName: string, content: string, targetPhase: string): string {
+  const excerpts = [
+    ...selectedSections(content, targetPhase),
+    ...structuredBlocks(content),
+    evidenceLines(content, targetPhase)
+  ].filter(Boolean);
+  const summary = excerpts.length
+    ? excerpts.join("\n\n")
+    : fallbackEvidenceSummary(content);
+  return clipPreviousSummary(`RepoVista selected evidence-oriented excerpts from ${fileName} for ${targetPhase}:\n\n${summary}`);
+}
+
+function selectedSections(content: string, targetPhase: string): string[] {
+  const sections = markdownSections(content);
+  const wanted = sectionKeywords(targetPhase);
+  return sections
+    .map((section) => ({
+      section,
+      score: wanted.reduce((sum, keyword) => sum + (section.heading.toLowerCase().includes(keyword) ? 3 : section.body.toLowerCase().includes(keyword) ? 1 : 0), 0)
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.section.index - right.section.index)
+    .slice(0, 5)
+    .map((item) => `${item.section.heading}\n\n${clipSection(item.section.body, 2600)}`);
+}
+
+function markdownSections(content: string): Array<{ index: number; heading: string; body: string }> {
+  const lines = content.split(/\r?\n/);
+  const headingIndexes = lines
+    .map((line, index) => ({ line, index, match: /^(#{1,6}\s+.+?)\s*$/.exec(line) }))
+    .filter((item): item is { line: string; index: number; match: RegExpExecArray } => Boolean(item.match));
+  if (!headingIndexes.length) {
+    return [{ index: 0, heading: "### Report excerpt", body: content }];
+  }
+  return headingIndexes.map((heading, index) => {
+    const next = headingIndexes[index + 1]?.index ?? lines.length;
+    return {
+      index: heading.index,
+      heading: heading.match[1],
+      body: lines.slice(heading.index + 1, next).join("\n").trim()
+    };
+  });
+}
+
+function sectionKeywords(targetPhase: string): string[] {
+  if (targetPhase === "code-quality") {
+    return ["executive summary", "weakness", "maintainability", "recommendation", "test", "technical debt", "important files"];
+  }
+  if (targetPhase === "risk-and-bug") {
+    return ["finding", "risk", "security", "bug", "missing test", "weakness", "evidence", "recommendation"];
+  }
+  if (targetPhase === "feature-roadmap") {
+    return ["recommendation", "quick win", "roadmap", "weakness", "risk", "missing", "improvement", "feature"];
+  }
+  if (targetPhase === "summary") {
+    return ["executive summary", "strength", "weakness", "risk", "recommendation", "roadmap", "conclusion"];
+  }
+  return ["executive summary", "recommendation", "evidence"];
+}
+
+function structuredBlocks(content: string): string[] {
+  const blocks: string[] = [];
+  for (const pattern of [
+    /<!--\s*repovista-findings:start\s*-->([\s\S]*?)<!--\s*repovista-findings:end\s*-->/i,
+    /<!--\s*repovista-phase:start\s*-->([\s\S]*?)<!--\s*repovista-phase:end\s*-->/i
+  ]) {
+    const match = pattern.exec(content);
+    if (match?.[1]?.trim()) {
+      blocks.push(`### Structured RepoVista schema excerpt\n\n${clipSection(match[1].trim(), 5200)}`);
+    }
+  }
+  const jsonBlocks = Array.from(content.matchAll(/```json\s*([\s\S]*?)```/gi))
+    .map((match) => match[1]?.trim())
+    .filter((value): value is string => Boolean(value))
+    .filter((value) => /"schemaVersion"|"phaseId"|"findings"|"proposals"/.test(value))
+    .slice(0, 2)
+    .map((value) => `### Structured JSON excerpt\n\n${clipSection(value, 3600)}`);
+  return [...blocks, ...jsonBlocks].slice(0, 3);
+}
+
+function evidenceLines(content: string, targetPhase: string): string {
+  const wanted = sectionKeywords(targetPhase);
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => hasPathEvidence(line) || /^[-*]\s*(Evidence|Affected paths|Recommended fix|Recommendation|Suggested regression test|Minimum fix scope|Reproduction|Priority|Confidence)\s*:/i.test(line))
+    .filter((line) => wanted.some((keyword) => line.toLowerCase().includes(keyword)) || hasPathEvidence(line))
+    .slice(0, 28);
+  return lines.length ? `### Evidence lines\n\n${lines.map((line) => `- ${line.replace(/^[-*]\s*/, "")}`).join("\n")}` : "";
+}
+
+function fallbackEvidenceSummary(content: string): string {
+  const paragraphs = content
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => hasPathEvidence(part) || /recommend|risk|finding|evidence|test|roadmap/i.test(part))
+    .slice(0, 6)
+    .join("\n\n");
+  return paragraphs || clipSection(content, 4000);
+}
+
+function hasPathEvidence(value: string): boolean {
+  return /(?:^|[\s`])((?:\.?\/)?(?:src|test|tests|lib|app|scripts|docs|\.github)[/\w.-]*|(?:package(?:-lock)?\.json|README\.md|tsconfig\.json|Cargo\.toml|pyproject\.toml|go\.mod))(?=$|[\s`)\],.;:])/m.test(value);
+}
+
+function clipSection(content: string, limit: number): string {
+  if (content.length <= limit) {
+    return content;
+  }
+  return `${content.slice(0, Math.floor(limit * 0.75))}
+
+... RepoVista omitted lower-priority lines from this section ...
+
+${content.slice(content.length - Math.floor(limit * 0.25))}`;
+}
+
+function clipPreviousSummary(content: string): string {
+  if (content.length <= PREVIOUS_REPORT_CONTEXT_LIMIT) {
+    return content;
+  }
+  return `${content.slice(0, PREVIOUS_REPORT_CONTEXT_LIMIT)}
+
+... RepoVista omitted remaining previous-report excerpts after evidence prioritization ...`;
 }
 
 function renderDiffScope(context: PromptContext): string {

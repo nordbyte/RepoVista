@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 
 const CLIP_LIMIT = 18000;
+const PREVIOUS_REPORT_SUMMARY_LIMIT = 14000;
 const DEFAULT_PROJECT_FILE_LIMIT = 500;
 
 export function createPromptManifest(
@@ -62,9 +63,11 @@ export async function addPromptManifestPhase(
       path: fileName,
       role: "previous-report",
       bytes: Buffer.byteLength(content, "utf8"),
-      includedBytes: Math.min(Buffer.byteLength(content, "utf8"), CLIP_LIMIT),
-      truncated: content.length > CLIP_LIMIT,
-      readable: true
+      includedBytes: Math.min(Buffer.byteLength(content, "utf8"), PREVIOUS_REPORT_SUMMARY_LIMIT),
+      truncated: content.length > PREVIOUS_REPORT_SUMMARY_LIMIT,
+      readable: true,
+      inclusionReason: "evidence-oriented previous report summary prioritized for the current phase",
+      tokenBudgetEstimate: Math.ceil(Math.min(Buffer.byteLength(content, "utf8"), PREVIOUS_REPORT_SUMMARY_LIMIT) / 4)
     });
   }
 
