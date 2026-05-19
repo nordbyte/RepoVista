@@ -13,6 +13,7 @@ test("report browser lists report runs and renders sections", async () => {
     await mkdir(outRoot, { recursive: true });
     await writeRun(path.join(outRoot, "2026-05-18T10-00-00-000Z"), {
       runId: "2026-05-18T10-00-00-000Z",
+      startedAt: "2026-05-18T10:00:00.000Z",
       completedAt: "2026-05-18T10:00:00.000Z",
       title: "Older report"
     });
@@ -93,6 +94,40 @@ test("report browser lists report runs and renders sections", async () => {
   }
 });
 
+test("report browser sorts report runs by creation time newest first", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-report-sort-"));
+  try {
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    const outRoot = path.join(root, ".repovista");
+    await mkdir(outRoot, { recursive: true });
+    await writeRun(path.join(outRoot, "2026-05-18T10-00-00-000Z"), {
+      runId: "2026-05-18T10-00-00-000Z",
+      startedAt: "2026-05-18T10:00:00.000Z",
+      completedAt: "2026-05-20T10:00:00.000Z",
+      title: "Older creation but later completion"
+    });
+    await writeRun(path.join(outRoot, "2026-05-19T10-00-00-000Z"), {
+      runId: "2026-05-19T10-00-00-000Z",
+      startedAt: "2026-05-19T10:00:00.000Z",
+      completedAt: "2026-05-19T10:30:00.000Z",
+      title: "Newer creation"
+    });
+
+    const runs = await listReportRuns(root, ".repovista");
+
+    assert.equal(runs.map((run) => run.runId).join(","), "2026-05-19T10-00-00-000Z,2026-05-18T10-00-00-000Z");
+    const listFrame = renderReportsMenuFrame(runs, {
+      screen: "runs",
+      runCursor: 0,
+      sectionCursor: 0,
+      scroll: 0
+    }, { columns: 100, rows: 24, color: false });
+    assert.match(listFrame, /\[ \] 2026-05-19 10:00/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("report browser deletes marked report run directories", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-report-delete-"));
   try {
@@ -129,7 +164,7 @@ async function writeRun(runDir, input) {
   await mkdir(runDir, { recursive: true });
   await writeFile(path.join(runDir, "meta.json"), JSON.stringify({
     runId: input.runId,
-    startedAt: input.completedAt,
+    startedAt: input.startedAt ?? input.completedAt,
     completedAt: input.completedAt,
     ai: {
       provider: "codex",

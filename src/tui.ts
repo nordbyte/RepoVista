@@ -286,6 +286,7 @@ interface StyledTextSegment {
 
 interface WrappedStyledLine {
   styled: string;
+  length: number;
 }
 
 function positionFooter(cursor: number, itemCount: number): string {
@@ -296,8 +297,17 @@ function wrapStyledTextLines(lines: string[], columns: number, useColor: boolean
   const wrapped: WrappedStyledLine[] = [];
   let inFence = false;
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
     const isFence = /^\s*(```|~~~)/.test(line);
+    if (!inFence && !isFence) {
+      const table = markdownTableAt(lines, index);
+      if (table) {
+        wrapped.push(...renderMarkdownTable(table, columns, useColor));
+        index += table.length - 1;
+        continue;
+      }
+    }
     const segments = inFence || isFence || !useColor
       ? [{ text: line }]
       : markdownSegments(line);
@@ -316,6 +326,10 @@ function markdownSegments(line: string): StyledTextSegment[] {
     return [{ text: line, style: headingStyle(heading[1].length) }];
   }
 
+  return inlineMarkdownSegments(line);
+}
+
+function inlineMarkdownSegments(line: string): StyledTextSegment[] {
   const segments: StyledTextSegment[] = [];
   const boldPattern = /\*\*([^*\n]+)\*\*/g;
   let index = 0;
@@ -357,12 +371,20 @@ function wrapStyledSegments(segments: StyledTextSegment[], columns: number, useC
       if (lineLength >= columns) {
         flush();
       }
+      if (lineLength === 0) {
+        remaining = remaining.replace(/^\s+/, "");
+        if (!remaining) {
+          break;
+        }
+      }
       const available = Math.max(1, columns - lineLength);
-      const chunk = remaining.slice(0, available);
+      const chunkLength = wrappedChunkLength(remaining, available);
+      const brokeAtWordBoundary = remaining.length > available && chunkLength < available;
+      const chunk = remaining.slice(0, chunkLength);
       lineSegments.push({ text: chunk, style: segment.style });
       lineLength += chunk.length;
       remaining = remaining.slice(chunk.length);
-      if (lineLength >= columns && remaining.length > 0) {
+      if ((lineLength >= columns || brokeAtWordBoundary) && remaining.length > 0) {
         flush();
       }
     }
@@ -372,16 +394,211 @@ function wrapStyledSegments(segments: StyledTextSegment[], columns: number, useC
   return wrapped;
 
   function flush(): void {
-    wrapped.push({ styled: renderStyledSegments(lineSegments, useColor) });
+    wrapped.push({ styled: renderStyledSegments(lineSegments, useColor), length: lineLength });
     lineSegments = [];
     lineLength = 0;
   }
+}
+
+function wrappedChunkLength(value: string, maxLength: number): number {
+  if (value.length <= maxLength) {
+    return value.length;
+  }
+  if (maxLength < 8) {
+    return maxLength;
+  }
+  const wordBoundary = value.lastIndexOf(" ", maxLength);
+  return wordBoundary > 0 ? wordBoundary : maxLength;
 }
 
 function renderStyledSegments(segments: StyledTextSegment[], useColor: boolean): string {
   return segments.map((segment) => segment.style
     ? colorize(segment.text, segment.style, useColor)
     : segment.text).join("");
+}
+
+function markdownTableAt(lines: string[], start: number): string[] | undefined {
+  const first = lines[start];
+  const second = lines[start + 1];
+  if (!first || !second || !isMarkdownTableRow(first) || !isMarkdownTableSeparator(second)) {
+    return undefined;
+  }
+  const table = [first, second];
+  for (let index = start + 2; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (!isMarkdownTableRow(line)) {
+      break;
+    }
+    table.push(line);
+  }
+  return table;
+}
+
+function isMarkdownTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && splitMarkdownTableRow(trimmed).length >= 2;
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  let value = line.trim();
+  if (value.startsWith("|")) {
+    value = value.slice(1);
+  }
+  if (value.endsWith("|")) {
+    value = value.slice(0, -1);
+  }
+
+  const cells: string[] = [];
+  let current = "";
+  let escaped = false;
+  for (const char of value) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (escaped) {
+    current += "\\";
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function renderMarkdownTable(tableLines: string[], columns: number, useColor: boolean): WrappedStyledLine[] {
+  const parsedRows = tableLines.map(splitMarkdownTableRow);
+  const contentRows = [parsedRows[0], ...parsedRows.slice(2)];
+  const columnCount = Math.max(...contentRows.map((row) => row.length));
+  const rows = contentRows.map((row) => normalizeTableRow(row, columnCount));
+  const widths = tableColumnWidths(rows, columnCount, columns, useColor);
+  const rendered: WrappedStyledLine[] = [];
+
+  rows.forEach((row, rowIndex) => {
+    rendered.push(...renderMarkdownTableRow(row, widths, useColor));
+    if (rowIndex === 0) {
+      rendered.push(renderMarkdownTableSeparator(widths, useColor));
+    }
+  });
+  return rendered;
+}
+
+function normalizeTableRow(row: string[] | undefined, columnCount: number): string[] {
+  return Array.from({ length: columnCount }, (_, index) => row?.[index] ?? "");
+}
+
+function tableColumnWidths(rows: string[][], columnCount: number, columns: number, useColor: boolean): number[] {
+  const desired = Array.from({ length: columnCount }, (_, column) => {
+    const max = Math.max(...rows.map((row) => visibleMarkdownCellLength(row[column] ?? "", useColor)));
+    return Math.max(1, max);
+  });
+  const borderWidth = columnCount * 3 + 1;
+  const available = Math.max(columnCount, columns - borderWidth);
+  const totalDesired = desired.reduce((sum, width) => sum + width, 0);
+  if (totalDesired <= available) {
+    return desired;
+  }
+
+  const minWidth = available >= columnCount * 6 ? 6 : available >= columnCount * 3 ? 3 : 1;
+  const widths = desired.map((width) => Math.max(minWidth, Math.min(width, Math.floor(available / columnCount))));
+  let total = widths.reduce((sum, width) => sum + width, 0);
+  let remaining = available - total;
+  while (remaining > 0) {
+    const index = widestGrowableColumn(desired, widths);
+    if (index < 0) {
+      break;
+    }
+    widths[index] += 1;
+    remaining -= 1;
+  }
+  total = widths.reduce((sum, width) => sum + width, 0);
+  while (total > available) {
+    const index = widestShrinkableColumn(widths, minWidth);
+    if (index < 0) {
+      break;
+    }
+    widths[index] -= 1;
+    total -= 1;
+  }
+  return widths;
+}
+
+function widestGrowableColumn(desired: number[], widths: number[]): number {
+  let best = -1;
+  let deficit = 0;
+  for (let index = 0; index < widths.length; index += 1) {
+    const currentDeficit = desired[index] - widths[index];
+    if (currentDeficit > deficit) {
+      best = index;
+      deficit = currentDeficit;
+    }
+  }
+  return best;
+}
+
+function widestShrinkableColumn(widths: number[], minWidth: number): number {
+  let best = -1;
+  let widest = 0;
+  for (let index = 0; index < widths.length; index += 1) {
+    if (widths[index] > minWidth && widths[index] > widest) {
+      best = index;
+      widest = widths[index];
+    }
+  }
+  return best;
+}
+
+function visibleMarkdownCellLength(value: string, useColor: boolean): number {
+  if (!useColor) {
+    return value.replace(/\t/g, "  ").length;
+  }
+  return inlineMarkdownSegments(value)
+    .map((segment) => segment.text.replace(/\t/g, "  ").length)
+    .reduce((sum, length) => sum + length, 0);
+}
+
+function renderMarkdownTableRow(cells: string[], widths: number[], useColor: boolean): WrappedStyledLine[] {
+  const wrappedCells = cells.map((cell, index) => wrapTableCell(cell, widths[index], useColor));
+  const rowHeight = Math.max(1, ...wrappedCells.map((cell) => cell.length));
+  const rows: WrappedStyledLine[] = [];
+  for (let rowIndex = 0; rowIndex < rowHeight; rowIndex += 1) {
+    const parts = ["|"];
+    let length = 1;
+    for (let column = 0; column < widths.length; column += 1) {
+      const cellLine = wrappedCells[column][rowIndex] ?? { styled: "", length: 0 };
+      parts.push(" ", cellLine.styled, " ".repeat(Math.max(0, widths[column] - cellLine.length)), " |");
+      length += widths[column] + 3;
+    }
+    rows.push({ styled: parts.join(""), length });
+  }
+  return rows;
+}
+
+function wrapTableCell(cell: string, width: number, useColor: boolean): WrappedStyledLine[] {
+  const segments = useColor ? inlineMarkdownSegments(cell) : [{ text: cell }];
+  return wrapStyledSegments(segments, Math.max(1, width), useColor);
+}
+
+function renderMarkdownTableSeparator(widths: number[], useColor: boolean): WrappedStyledLine {
+  const line = `|${widths.map((width) => ` ${"-".repeat(Math.max(1, width))} `).join("|")}|`;
+  return {
+    styled: colorize(line, TUI_ANSI.gray, useColor),
+    length: line.length
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {

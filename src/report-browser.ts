@@ -115,7 +115,7 @@ export async function listReportRuns(projectRoot: string, outDir: string, option
     .map(async (entry) => loadReportRun(path.join(outRoot, entry.name), entry.name, options)));
   return runs
     .filter((run): run is ReportRunSummary => Boolean(run))
-    .sort((left, right) => sortTime(right) - sortTime(left) || right.runId.localeCompare(left.runId));
+    .sort((left, right) => creationTime(right) - creationTime(left) || right.runId.localeCompare(left.runId));
 }
 
 export function renderReportsMenuFrame(
@@ -391,7 +391,7 @@ async function readText(filePath: string): Promise<string | undefined> {
 }
 
 function formatRunItem(run: ReportRunSummary, marked: boolean): string {
-  const when = compactRunTime(run.completedAt ?? run.startedAt ?? run.runId);
+  const when = compactRunTime(run.startedAt ?? run.runId ?? run.completedAt);
   const model = `model: ${run.model ?? "default"}`;
   const reasoning = `reasoning: ${run.reasoning ?? "default"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
@@ -399,7 +399,7 @@ function formatRunItem(run: ReportRunSummary, marked: boolean): string {
 }
 
 function formatDeleteItem(run: ReportRunSummary): string {
-  return `${compactRunTime(run.completedAt ?? run.startedAt ?? run.runId)} | ${run.runId} | ${run.runDir}`;
+  return `${compactRunTime(run.startedAt ?? run.runId ?? run.completedAt)} | ${run.runId} | ${run.runDir}`;
 }
 
 function formatSectionItem(section: ReportSection): string {
@@ -512,9 +512,24 @@ function clampCursor(cursor: number, length: number): number {
   return Math.min(Math.max(0, cursor), length - 1);
 }
 
-function sortTime(run: ReportRunSummary): number {
-  const parsed = Date.parse(run.completedAt ?? run.startedAt ?? run.runId);
+function creationTime(run: ReportRunSummary): number {
+  const parsed = parseRunTime(run.startedAt ?? run.runId ?? run.completedAt);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseRunTime(value: string | undefined): number {
+  if (!value) {
+    return Number.NaN;
+  }
+  const parsed = Date.parse(value);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+  const runId = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/);
+  if (!runId) {
+    return Number.NaN;
+  }
+  return Date.parse(`${runId[1]}T${runId[2]}:${runId[3]}:${runId[4]}.${runId[5]}Z`);
 }
 
 function countFindings(counts: Record<string, number> | undefined): number {
