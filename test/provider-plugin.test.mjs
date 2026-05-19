@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -63,7 +63,7 @@ test("repo-local provider plugins require explicit trust before execution", asyn
     const script = `
       import { mkdir } from 'node:fs/promises';
       import path from 'node:path';
-      import { runPreflight } from ${JSON.stringify(path.join(repoRoot, "dist", "index.js"))};
+      import { runPreflight } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "dist", "index.js")).href)};
       const root = process.cwd();
       const runDir = path.join(root, '.repovista', 'run');
       await mkdir(runDir, { recursive: true });
