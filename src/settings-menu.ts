@@ -13,7 +13,7 @@ import { AUDIT_PROFILES } from "./profiles.js";
 import { getSettingsPath, loadSettings, saveSettings, type RepoVistaSettings } from "./settings-config.js";
 import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
-type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
+export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
@@ -24,6 +24,7 @@ interface MenuState {
   done: boolean;
   saved: boolean;
   settingsPath: string;
+  lastFrame?: string;
 }
 
 type MainItem =
@@ -39,6 +40,19 @@ const PHASE_TIMEOUT_OPTIONS = [900, 1800, 3600, 5400, 7200];
 const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
 const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "test-gaps"];
 const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
+const RENDER_DEBOUNCE_MS = 16;
+
+const ANSI = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  gray: "\x1b[90m",
+  white: "\x1b[97m",
+  bgCyan: "\x1b[46m"
+} as const;
 
 export async function runSettingsMenu(
   input = process.stdin as ReadStream,
@@ -71,15 +85,41 @@ export async function runSettingsMenu(
   input.resume();
 
   return new Promise((resolve, reject) => {
+    let renderTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const requestRender = () => {
+      if (renderTimer) {
+        return;
+      }
+      renderTimer = setTimeout(() => {
+        renderTimer = undefined;
+        render(state, output);
+      }, RENDER_DEBOUNCE_MS);
+      renderTimer.unref();
+    };
+
+    const flushRender = () => {
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = undefined;
+      }
+      render(state, output);
+    };
+
     const cleanup = () => {
+      if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = undefined;
+      }
       input.off("keypress", onKeypress);
       input.setRawMode(false);
       input.pause();
-      output.write("\x1b[?25h");
+      output.write("\x1b[?25h\x1b[?1049l");
     };
 
     const finish = async () => {
       try {
+        flushRender();
         cleanup();
         if (state.saved) {
           await saveSettings(state.settings, state.settingsPath);
@@ -107,24 +147,25 @@ export async function runSettingsMenu(
           input.off("keypress", onKeypress);
           await editTextSetting(state, textItem.id, input, output);
           input.on("keypress", onKeypress);
-          render(state, output);
+          flushRender();
           return;
         }
 
         handleKey(state, key.name ?? "");
-        render(state, output);
 
         if (state.done) {
           await finish();
+          return;
         }
+        requestRender();
       })().catch((error) => {
         cleanup();
         reject(error);
       });
     };
 
-    output.write("\x1b[?25l");
-    render(state, output);
+    output.write("\x1b[?1049h\x1b[?25l");
+    flushRender();
     input.on("keypress", onKeypress);
   });
 }
@@ -167,6 +208,14 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
 
 function handleKey(state: MenuState, keyName: string): void {
   const itemCount = currentItems(state).length;
+
+  if (!itemCount) {
+    if (keyName === "escape" || keyName === "backspace" || keyName === "return" || keyName === "enter") {
+      state.screen = "main";
+      state.cursor = 0;
+    }
+    return;
+  }
 
   if (keyName === "up") {
     state.cursor = (state.cursor - 1 + itemCount) % itemCount;
@@ -360,23 +409,178 @@ function toggleBoolean(state: MenuState, key: keyof RepoVistaSettings): void {
 }
 
 function render(state: MenuState, output: WriteStream): void {
-  output.write("\x1b[2J\x1b[H");
-  output.write("RepoVista Settings\n\n");
-  output.write("Use arrow keys to move, Space to select or clear, Enter to edit/return/save.\n\n");
-
-  if (state.screen === "main") {
-    for (const line of summarizeSettings(state.settings)) {
-      output.write(`  ${line}\n`);
-    }
-    output.write("\n");
+  const frame = buildSettingsMenuFrame(state, {
+    columns: output.columns ?? 100,
+    rows: output.rows ?? 30,
+    color: shouldUseColor(output)
+  });
+  if (frame === state.lastFrame) {
+    return;
   }
+  state.lastFrame = frame;
+  output.write(`\x1b[H${frame}\x1b[J`);
+}
 
+export function renderSettingsMenuFrame(
+  settings: RepoVistaSettings,
+  options: {
+    screen?: MenuScreen;
+    cursor?: number;
+    modelsByProvider?: Partial<Record<AiProviderId, ProviderModelInfo[]>>;
+    checkCommandOptions?: string[];
+    columns?: number;
+    rows?: number;
+    color?: boolean;
+  } = {}
+): string {
+  const state: MenuState = {
+    screen: options.screen ?? "main",
+    cursor: options.cursor ?? 0,
+    settings,
+    modelsByProvider: Object.fromEntries(REPORT_PROVIDER_IDS.map((providerId) => [
+      providerId,
+      options.modelsByProvider?.[providerId] ?? []
+    ])) as Record<AiProviderId, ProviderModelInfo[]>,
+    checkCommandOptions: options.checkCommandOptions ?? [],
+    done: false,
+    saved: false,
+    settingsPath: ""
+  };
+  return buildSettingsMenuFrame(state, {
+    columns: options.columns ?? 100,
+    rows: options.rows ?? 30,
+    color: options.color ?? false
+  });
+}
+
+function buildSettingsMenuFrame(state: MenuState, options: { columns: number; rows: number; color: boolean }): string {
+  const columns = Math.max(40, options.columns);
+  const rows = Math.max(12, options.rows);
   const items = currentItems(state);
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    const marker = index === state.cursor ? ">" : " ";
-    output.write(`${marker} ${item}\n`);
+  const header = renderHeader(state, options.color);
+  const footer = renderFooter(state, items.length, options.color);
+  const availableRows = Math.max(4, rows - header.length - footer.length);
+  const start = visibleStart(state.cursor, items.length, availableRows);
+  const visibleItems = items.slice(start, start + availableRows);
+  const lines = [...header];
+
+  if (!items.length) {
+    lines.push(colorize("  No options available. Press Enter to return.", ANSI.dim, options.color));
+  } else {
+    for (let offset = 0; offset < visibleItems.length; offset += 1) {
+      const index = start + offset;
+      lines.push(renderMenuLine(visibleItems[offset] ?? "", index === state.cursor, columns, options.color));
+    }
   }
+
+  lines.push(...footer);
+  return lines.join("\n");
+}
+
+function renderHeader(state: MenuState, useColor: boolean): string[] {
+  const title = colorize("RepoVista Settings", `${ANSI.bold}${ANSI.cyan}`, useColor);
+  const help = colorize("Arrow keys move | Space toggles/selects | Enter opens/returns | Esc returns | Ctrl+C exits", ANSI.dim, useColor);
+  return [
+    title,
+    help,
+    colorize(screenTitle(state.screen), ANSI.yellow, useColor),
+    ""
+  ];
+}
+
+function renderFooter(state: MenuState, itemCount: number, useColor: boolean): string[] {
+  const position = itemCount ? `${Math.min(state.cursor + 1, itemCount)}/${itemCount}` : "0/0";
+  const action = state.screen === "main"
+    ? "Enter opens or edits, Space toggles, Save and exit writes settings"
+    : "Space selects or clears, Enter returns to the main menu";
+  return [
+    "",
+    colorize(`${position} | ${action}`, ANSI.dim, useColor)
+  ];
+}
+
+function renderMenuLine(rawItem: string, active: boolean, columns: number, useColor: boolean): string {
+  const marker = active ? ">" : " ";
+  const label = truncatePlain(rawItem, Math.max(8, columns - 4));
+  if (active) {
+    return `${colorize(marker, ANSI.cyan, useColor)} ${colorize(` ${label} `, `${ANSI.bgCyan}${ANSI.white}`, useColor)}`;
+  }
+  return `${colorize(marker, ANSI.gray, useColor)} ${styleMenuItem(label, useColor)}`;
+}
+
+function styleMenuItem(label: string, useColor: boolean): string {
+  if (!useColor) {
+    return label;
+  }
+  if (label.startsWith("[x]")) {
+    return `${colorize("[x]", ANSI.green, true)}${label.slice(3)}`;
+  }
+  if (label.startsWith("[ ]")) {
+    return `${colorize("[ ]", ANSI.gray, true)}${colorize(label.slice(3), ANSI.dim, true)}`;
+  }
+  if (label === "Save and exit") {
+    return colorize(label, ANSI.green, true);
+  }
+  if (label === "Exit without saving") {
+    return colorize(label, ANSI.yellow, true);
+  }
+
+  const separator = label.indexOf(":");
+  if (separator > 0) {
+    return `${colorize(label.slice(0, separator + 1), ANSI.cyan, true)}${label.slice(separator + 1)}`;
+  }
+  return label;
+}
+
+function visibleStart(cursor: number, itemCount: number, visibleRows: number): number {
+  if (itemCount <= visibleRows) {
+    return 0;
+  }
+  const preferred = cursor - Math.floor(visibleRows / 2);
+  return Math.min(Math.max(0, preferred), itemCount - visibleRows);
+}
+
+function screenTitle(screen: MenuScreen): string {
+  switch (screen) {
+    case "main":
+      return "Default settings";
+    case "provider":
+      return "Provider";
+    case "parallel":
+      return "Parallel execution";
+    case "auditProfile":
+      return "Audit profile";
+    case "reviewMode":
+      return "Review mode";
+    case "model":
+      return "Model";
+    case "reasoning":
+      return "Reasoning";
+    case "sandbox":
+      return "Sandbox";
+    case "language":
+      return "Language";
+    case "checkCommands":
+      return "Check commands";
+    case "exportFormats":
+      return "Export formats";
+    case "checkTimeout":
+      return "Check timeout";
+    case "phaseTimeout":
+      return "Provider phase timeout";
+  }
+}
+
+function truncatePlain(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function colorize(value: string, code: string, useColor: boolean): string {
+  return useColor ? `${code}${value}${ANSI.reset}` : value;
+}
+
+function shouldUseColor(output: WriteStream): boolean {
+  return Boolean(output.isTTY && !process.env.NO_COLOR && process.env.TERM !== "dumb");
 }
 
 function currentItems(state: MenuState): string[] {

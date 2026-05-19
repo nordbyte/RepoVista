@@ -8,6 +8,7 @@ import {
   DEFAULT_OPTIONS,
   parseCodexModelCatalog,
   reasoningOptionsForModel,
+  renderSettingsMenuFrame,
   sanitizeSettings,
   saveSettings
 } from "../dist/index.js";
@@ -145,6 +146,22 @@ test("settings are saved as JSON", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("settings menu frame renders only the menu with ANSI styling", () => {
+  const frame = renderSettingsMenuFrame({
+    provider: "codex",
+    model: "gpt-5.5",
+    reasoning: "xhigh",
+    runChecks: true
+  }, { columns: 100, rows: 24, color: true });
+  const plain = frame.replace(/\x1b\[[0-9;]*m/g, "");
+
+  assert.match(frame, /(?:\x1b\[[0-9;]*m)+RepoVista Settings/);
+  assert.match(plain, />  Provider: Codex CLI /);
+  assert.match(plain, /Model: gpt-5\.5/);
+  assert.equal(plain.match(/Provider: Codex CLI/g)?.length, 1);
+  assert.equal(plain.match(/Reasoning: xhigh/g)?.length, 1);
 });
 
 test("codex model catalog parsing exposes current model and reasoning options", () => {
