@@ -41,7 +41,7 @@ export async function runFindingsMenu(
       color: shouldUseColor(output)
     }),
     onKey: (key, controls) => {
-      const updated = handleFindingsMenuKey(findings, state, key, now, output.rows ?? 30, output.columns ?? 100);
+      const updated = handleFindingsMenuKey(findings, state, key, now, output.rows ?? 30, output.columns ?? 100, shouldUseColor(output));
       dirty = dirty || updated;
       if ((key.ctrl && key.name === "c") || key.name === "q") {
         controls.finish();
@@ -95,7 +95,8 @@ function handleFindingsMenuKey(
   key: TuiKey,
   now: Date,
   rows: number,
-  columns: number
+  columns: number,
+  color: boolean
 ): boolean {
   if ((key.ctrl && key.name === "c") || key.name === "q") {
     return false;
@@ -119,7 +120,7 @@ function handleFindingsMenuKey(
   }
   if (state.detail) {
     const finding = findings[state.cursor];
-    const lineCount = finding ? wrappedLineCount(findingDetailLines(finding), columns) : 0;
+    const lineCount = finding ? wrappedLineCount(findingDetailLines(finding), columns, color) : 0;
     const page = Math.max(4, rows - 8);
     const maxScroll = Math.max(0, lineCount - page);
     if (key.name === "escape" || key.name === "backspace" || key.name === "left" || key.name === "return" || key.name === "enter") {

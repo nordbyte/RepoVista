@@ -18,7 +18,7 @@ repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista triage --all --status uncertain --note "needs review"
 ```
 
-`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories, opens a selected run, and lets you navigate the full combined report or individual generated sections. Space marks runs for deletion, and `d` opens a confirmation screen before RepoVista removes the marked run directories.
+`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories, opens a selected run, and lets you navigate the full combined report or individual generated sections with Markdown headings and bold spans highlighted in color-capable terminals. Space marks runs for deletion, and `d` opens a confirmation screen before RepoVista removes the marked run directories.
 
 Supported statuses:
 

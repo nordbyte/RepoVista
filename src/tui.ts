@@ -181,10 +181,10 @@ export function renderTuiTextFrame(options: TuiTextFrameOptions): string {
   const header = renderTuiHeader(options.title, options.help, options.sectionTitle, options.color);
   const footer = renderTuiFooter(options.footer ?? "", options.color);
   const availableRows = Math.max(4, rows - header.length - footer.length);
-  const wrapped = wrapLines(options.lines, columns);
+  const wrapped = wrapStyledTextLines(options.lines, columns, options.color);
   const scroll = clamp(options.scroll, 0, Math.max(0, wrapped.length - availableRows));
   const visible = wrapped.slice(scroll, scroll + availableRows);
-  const lines = [...header, ...visible.map((line) => truncatePlain(line, columns))];
+  const lines = [...header, ...visible.map((line) => line.styled)];
 
   while (lines.length < rows - footer.length) {
     lines.push("");
@@ -275,30 +275,113 @@ export function checkbox(selected: boolean, label: string): string {
   return `[${selected ? "x" : " "}] ${label}`;
 }
 
-export function wrappedLineCount(lines: string[], columns: number): number {
-  return wrapLines(lines, Math.max(40, columns)).length;
+export function wrappedLineCount(lines: string[], columns: number, color = true): number {
+  return wrapStyledTextLines(lines, Math.max(40, columns), color).length;
+}
+
+interface StyledTextSegment {
+  text: string;
+  style?: string;
+}
+
+interface WrappedStyledLine {
+  styled: string;
 }
 
 function positionFooter(cursor: number, itemCount: number): string {
   return itemCount ? `${Math.min(cursor + 1, itemCount)}/${itemCount}` : "0/0";
 }
 
-function wrapLines(lines: string[], columns: number): string[] {
-  const wrapped: string[] = [];
+function wrapStyledTextLines(lines: string[], columns: number, useColor: boolean): WrappedStyledLine[] {
+  const wrapped: WrappedStyledLine[] = [];
+  let inFence = false;
+
   for (const line of lines) {
-    const expanded = line.replace(/\t/g, "  ");
-    if (!expanded) {
-      wrapped.push("");
+    const isFence = /^\s*(```|~~~)/.test(line);
+    const segments = inFence || isFence || !useColor
+      ? [{ text: line }]
+      : markdownSegments(line);
+    wrapped.push(...wrapStyledSegments(segments, columns, useColor));
+    if (isFence) {
+      inFence = !inFence;
+    }
+  }
+
+  return wrapped;
+}
+
+function markdownSegments(line: string): StyledTextSegment[] {
+  const heading = line.match(/^(#{1,6})\s+(.+)$/);
+  if (heading) {
+    return [{ text: line, style: headingStyle(heading[1].length) }];
+  }
+
+  const segments: StyledTextSegment[] = [];
+  const boldPattern = /\*\*([^*\n]+)\*\*/g;
+  let index = 0;
+  for (const match of line.matchAll(boldPattern)) {
+    const start = match.index ?? 0;
+    if (start > index) {
+      segments.push({ text: line.slice(index, start) });
+    }
+    segments.push({ text: match[1], style: `${TUI_ANSI.bold}${TUI_ANSI.white}` });
+    index = start + match[0].length;
+  }
+  if (index < line.length) {
+    segments.push({ text: line.slice(index) });
+  }
+  return segments.length ? segments : [{ text: line }];
+}
+
+function headingStyle(level: number): string {
+  if (level <= 2) {
+    return `${TUI_ANSI.bold}${TUI_ANSI.cyan}`;
+  }
+  if (level <= 4) {
+    return `${TUI_ANSI.bold}${TUI_ANSI.yellow}`;
+  }
+  return `${TUI_ANSI.bold}${TUI_ANSI.green}`;
+}
+
+function wrapStyledSegments(segments: StyledTextSegment[], columns: number, useColor: boolean): WrappedStyledLine[] {
+  const wrapped: WrappedStyledLine[] = [];
+  let lineSegments: StyledTextSegment[] = [];
+  let lineLength = 0;
+
+  for (const segment of segments) {
+    let remaining = segment.text.replace(/\t/g, "  ");
+    if (!remaining) {
       continue;
     }
-    let remaining = expanded;
-    while (remaining.length > columns) {
-      wrapped.push(remaining.slice(0, columns));
-      remaining = remaining.slice(columns);
+    while (remaining.length > 0) {
+      if (lineLength >= columns) {
+        flush();
+      }
+      const available = Math.max(1, columns - lineLength);
+      const chunk = remaining.slice(0, available);
+      lineSegments.push({ text: chunk, style: segment.style });
+      lineLength += chunk.length;
+      remaining = remaining.slice(chunk.length);
+      if (lineLength >= columns && remaining.length > 0) {
+        flush();
+      }
     }
-    wrapped.push(remaining);
   }
+
+  flush();
   return wrapped;
+
+  function flush(): void {
+    wrapped.push({ styled: renderStyledSegments(lineSegments, useColor) });
+    lineSegments = [];
+    lineLength = 0;
+  }
+}
+
+function renderStyledSegments(segments: StyledTextSegment[], useColor: boolean): string {
+  return segments.map((segment) => segment.style
+    ? colorize(segment.text, segment.style, useColor)
+    : segment.text).join("");
 }
 
 function clamp(value: number, min: number, max: number): number {

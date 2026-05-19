@@ -92,7 +92,7 @@ export async function runReportsMenu(
       color: shouldUseColor(output)
     }),
     onKey: async (key, controls) => {
-      await handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100);
+      await handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100, shouldUseColor(output));
       if ((key.ctrl && key.name === "c") || key.name === "q") {
         controls.finish();
       }
@@ -184,7 +184,7 @@ export function renderReportsMenuFrame(
   });
 }
 
-async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserState, key: TuiKey, rows: number, columns: number): Promise<void> {
+async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserState, key: TuiKey, rows: number, columns: number, color: boolean): Promise<void> {
   if ((key.ctrl && key.name === "c") || key.name === "q") {
     return;
   }
@@ -258,7 +258,7 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
 
   if (state.screen === "viewer") {
     const section = run.sections[state.sectionCursor];
-    const lineCount = section ? wrappedLineCount(section.content.split(/\r?\n/), columns) : 0;
+    const lineCount = section ? wrappedLineCount(section.content.split(/\r?\n/), columns, color) : 0;
     const page = Math.max(4, rows - 8);
     const maxScroll = Math.max(0, lineCount - page);
     if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
