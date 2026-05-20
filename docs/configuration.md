@@ -49,7 +49,7 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `repairAttempts` | `1` |
 | `incremental` | `true` |
 | `exportFormats` | `sarif`, `html`, `jsonl` |
-| `fastMode`, `deepReview`, `json`, `keepLogs`, `ci`, `failOnCritical` | `false` |
+| `fastMode`, `deepReview`, `snapshot`, `json`, `keepLogs`, `ci`, `failOnCritical`, `failOnDrift`, `failOnWeakEvidence` | `false` |
 
 `parallel=auto` creates `.repovista/project-map.json` during the first audit if the project has not been initialized yet. The parallel value is a shared provider-session budget for both phase-level parallelism and shard-level map/reduce work. Saved settings only need to be changed when a repository needs different provider, model, workspace, check, export, or runtime behavior.
 
@@ -76,6 +76,11 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `repairReports` | boolean | Repair reports that miss quality gates. |
 | `repairAttempts` | number | Maximum repair attempts. |
 | `deepReview` | boolean | Run feature-sliced risk review. |
+| `snapshot` | boolean | Run provider analysis in a detached Git worktree snapshot. |
+| `failOnDrift` | boolean | Exit `2` when repository drift is detected. |
+| `failOnWeakEvidence` | boolean | Exit `2` when findings contain weak evidence. |
+| `minQualityScore` | number | Minimum accepted phase quality score, `0`-`100`. |
+| `maxCritical`, `maxHigh`, `maxMedium` | number | Maximum allowed current findings by severity before exit `2`. |
 | `reviewMode` | enum | Risk review focus: `default`, `deslopify`, `security`, or `test-gaps`. |
 | `promptFile` | string | Additional prompt guidance file. |
 | `exportFormats` | list | Default finding export formats. |

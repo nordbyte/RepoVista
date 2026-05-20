@@ -11,7 +11,7 @@ repovista doctor [options]
 repovista providers [list|test <provider>] [--json]
 repovista profiles [--json]
 repovista ci init [--template pr-light|security|release-readiness|scheduled-audit] [--dry-run] [--force]
-repovista compare <old-run-dir> <new-run-dir> [--format markdown|json|html] [--fail-on-regression]
+repovista compare <old-run-dir> <new-run-dir> [--format markdown|json|html] [--fail-on-regression] [--max-new-high <n>]
 repovista review <run-dir> [--json]
 repovista repair-run <run-dir> [--force] [--json]
 repovista pr-comment <run-dir> [--dry-run]
@@ -26,8 +26,9 @@ repovista show <finding-id>
 repovista triage <finding-id|--all> --status <status> [--note <text>]
 repovista revalidate <finding-id|--all> [--provider-revalidate]
 repovista issue <finding-id> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing]
-repovista fix <finding-id> [--dry-run] [--check <command>]
-repovista patches [patch-id] [--json]
+repovista fix <finding-id[,finding-id...]> [--dry-run] [--check <command>] [--no-isolate]
+repovista patches [patch-id] [--json] [--dry-run]
+repovista rollback <patch-id> [--dry-run]
 repovista open-pr <patch-id> [--dry-run] [--base <branch>] [--branch <branch>] [--title <title>]
 repovista settings
 repovista settings get [key]
@@ -64,8 +65,9 @@ repovista version
 | `triage` | Update one finding or all findings. |
 | `revalidate` | Re-check finding evidence against the current checkout. |
 | `issue` | Create or update a GitHub issue with `gh`. |
-| `fix` | Create a patch attempt for one finding. |
-| `patches` | List or show patch attempts. |
+| `fix` | Create an isolated patch attempt for one or more findings. |
+| `patches` | List, show, or preview patch attempts. |
+| `rollback` | Reverse a recorded patch diff with `git apply -R`. |
 | `open-pr` | Create a pull request for a patch attempt. |
 | `settings` | Edit, read, set, or reset persisted defaults. |
 
@@ -113,6 +115,11 @@ repovista version
 | `--repair-attempts <n>` | Repair attempts per phase, `1`-`3`. |
 | `--deep-review` | Run feature-sliced risk review and merge findings. |
 | `--no-deep-review` | Disable saved deep-review default. |
+| `--snapshot` | Run provider analysis in a detached Git worktree at the current `HEAD`; dirty tracked changes are saved as `snapshot-dirty.patch` and untracked paths are listed. |
+| `--fail-on-drift` | Exit `2` when repository drift is detected during the run. |
+| `--fail-on-weak-evidence` | Exit `2` when findings lack concrete line evidence, quotes, or validated references. |
+| `--min-quality-score <0-100>` | Exit `2` when any phase quality score is below this threshold. |
+| `--max-critical <n>` / `--max-high <n>` / `--max-medium <n>` | Exit `2` when current findings exceed the configured severity count. |
 | `--export <formats>` | `sarif`, `html`, `jsonl`, `github`; comma-separated, default `sarif,html,jsonl`. |
 | `--ci` | CI-friendly mode without progress output. |
 | `--fail-on-critical` | Exit `2` when critical findings are found in CI. |
@@ -139,12 +146,14 @@ Phase ids are `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`,
 | `--title <text>` | Pull request title. |
 | `--dry-run` | Preview without remote writes or patch writes where supported. |
 | `--isolate-branch` | Run `fix` on a temporary `repovista/fix-*` branch. |
+| `--no-isolate` | Run `fix` on the current branch instead of the default isolated branch. |
 | `--post-revalidate` | Revalidate the finding after `fix`. |
 | `--max-files <n>` | Maximum changed files allowed by the fix scope gate. |
 | `--template <name>` | CI template: `pr-light`, `security`, `release-readiness`, or `scheduled-audit`. |
 | `--force` | Overwrite generated files or force cleanup where documented. |
 | `--format <format>` | Compare output: `markdown`, `json`, or `html`. |
 | `--fail-on-regression` | Compare exits `2` on new critical/high findings. |
+| `--max-new-critical <n>` / `--max-new-high <n>` / `--max-new-medium <n>` | Compare exits `2` when newly added findings exceed the threshold. |
 
 ## Exit Codes
 

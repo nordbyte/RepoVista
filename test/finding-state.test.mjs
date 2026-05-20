@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,7 @@ import {
   runListFindingsCommand,
   runNextFindingCommand,
   runFixFindingCommand,
+  runRollbackPatchCommand,
   runRevalidateFindingCommand,
   runShowFindingCommand,
   runTriageFindingCommand,
@@ -236,7 +237,8 @@ test("fix workflow records pre/post diff and fails changes outside finding scope
     const output = await runFixFindingCommand({
       outDir: ".repovista",
       findingId: "fnd_scope",
-      patchMaxFiles: 1
+      patchMaxFiles: 1,
+      force: true
     }, {
       projectRoot: root,
       runProvider: async (request) => {
@@ -255,6 +257,58 @@ test("fix workflow records pre/post diff and fails changes outside finding scope
     assert.match(output, /Scope gate: failed/);
     const patches = (await readdir(path.join(root, ".repovista", "patches"))).filter((file) => file.endsWith(".json"));
     assert.equal(patches.length, 1);
+    assert.match(output, /Patch diff:/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("patch rollback reverses a recorded patch diff", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-rollback-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    await execFileAsync("git", ["init"], { cwd: root });
+    await execFileAsync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+    await execFileAsync("git", ["config", "user.name", "RepoVista Test"], { cwd: root });
+    await execFileAsync("git", ["add", "."], { cwd: root });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: root });
+
+    await writeFindingState(root, ".repovista", [{
+      id: "fnd_rollback",
+      source: "03-risk-and-bug-report.md",
+      title: "Rollback finding",
+      severity: "high",
+      status: "open",
+      paths: ["src/index.ts"]
+    }], "run-1", new Date("2026-05-18T10:00:00.000Z"));
+
+    const output = await runFixFindingCommand({
+      outDir: ".repovista",
+      findingId: "fnd_rollback",
+      checkCommands: ["node -e \"process.exit(0)\""],
+      runChecks: true,
+      force: true
+    }, {
+      projectRoot: root,
+      runProvider: async (request) => {
+        await writeFile(path.join(root, "src", "index.ts"), "export const value = 2;\n", "utf8");
+        await writeFile(request.reportPath, "# Fix\n", "utf8");
+        return {
+          phaseId: request.phaseId,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          success: true,
+          exitCode: 0
+        };
+      }
+    });
+    const patchId = /RepoVista patch attempt (pat_[^:]+):/.exec(output)?.[1];
+    assert.ok(patchId);
+    await runRollbackPatchCommand({ outDir: ".repovista", patchId }, root, new Date("2026-05-18T11:00:00.000Z"));
+    const content = await readFile(path.join(root, "src", "index.ts"), "utf8");
+    assert.equal(content, "export const value = 1;\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

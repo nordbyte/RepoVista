@@ -1,10 +1,11 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { commandAvailable } from "./process-runner.js";
+import { commandAvailable, runProcess } from "./process-runner.js";
 import { getSettingsPath, loadSettings } from "./settings-config.js";
 import { detectWorkspaces } from "./workspaces.js";
 import { getPluginProviderDiagnostics } from "./providers/plugin.js";
-import { refreshReportProviders } from "./providers/index.js";
+import { getReportProvider, refreshReportProviders } from "./providers/index.js";
+import { resolveProviderDefaultModel } from "./provider-models.js";
 import { hasGitRepository, isRecognizableProject } from "./preflight.js";
 import { validateReportRoot } from "./reports.js";
 import { maskSensitiveText } from "./secrets.js";
@@ -40,6 +41,8 @@ export async function runDoctorCommand(options: AuditOptions, projectRoot = proc
         : `${provider.displayName} executable was not found in PATH: ${provider.executable}`
     });
   }
+
+  checks.push(...await checkEffectiveProviderSettings(options, projectRoot));
 
   const pluginDiagnostics = getPluginProviderDiagnostics();
   for (const diagnostic of pluginDiagnostics) {
@@ -144,6 +147,71 @@ async function checkSettings(): Promise<DoctorCheck> {
       message: maskSensitiveText(error instanceof Error ? error.message : String(error))
     };
   }
+}
+
+async function checkEffectiveProviderSettings(options: AuditOptions, projectRoot: string): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
+  const provider = getReportProvider(options.provider ?? "codex");
+  const resolvedModel = options.model ?? await resolveProviderDefaultModel(provider.id, options).catch(() => undefined);
+  checks.push({
+    name: "effective-model",
+    status: resolvedModel ? "ok" : "warn",
+    message: resolvedModel
+      ? `Effective model is ${resolvedModel}; reasoning is ${options.reasoning ?? "provider default"}.`
+      : `Could not resolve an effective model for ${provider.displayName}; pass --model or configure provider defaults.`
+  });
+  checks.push({
+    name: "provider-capabilities",
+    status: options.sandbox === "workspace-write" && !provider.capabilities.workspaceWrite ? "fail" : "ok",
+    message: [
+      `${provider.displayName} capabilities: outputSchema=${yesNo(provider.capabilities.outputSchema)}`,
+      `readOnlySandbox=${yesNo(provider.capabilities.readOnlySandbox)}`,
+      `workspaceWrite=${yesNo(provider.capabilities.workspaceWrite)}`,
+      `jsonEvents=${yesNo(provider.capabilities.jsonEvents)}`,
+      `promptFile=${yesNo(provider.capabilities.promptFile)}`
+    ].join(", ")
+  });
+  if (options.snapshot && !await isGitWorkTree(projectRoot)) {
+    checks.push({
+      name: "snapshot",
+      status: "fail",
+      message: "Snapshot audits require the current directory to be inside a Git work tree."
+    });
+  } else {
+    checks.push({
+      name: "snapshot",
+      status: "ok",
+      message: options.snapshot ? "Snapshot audits can create detached Git worktrees." : "Snapshot audits are disabled."
+    });
+  }
+  const gateSummary = [
+    options.failOnDrift ? "drift" : undefined,
+    options.failOnWeakEvidence ? "weak evidence" : undefined,
+    options.minQualityScore !== undefined ? `min quality ${options.minQualityScore}` : undefined,
+    options.maxCritical !== undefined ? `max critical ${options.maxCritical}` : undefined,
+    options.maxHigh !== undefined ? `max high ${options.maxHigh}` : undefined,
+    options.maxMedium !== undefined ? `max medium ${options.maxMedium}` : undefined
+  ].filter(Boolean).join(", ");
+  checks.push({
+    name: "ci-gates",
+    status: "ok",
+    message: gateSummary ? `Configured gates: ${gateSummary}.` : "No extra CI gates configured beyond command defaults."
+  });
+  return checks;
+}
+
+async function isGitWorkTree(projectRoot: string): Promise<boolean> {
+  const result = await runProcess("git", ["rev-parse", "--is-inside-work-tree"], {
+    cwd: projectRoot,
+    timeoutMs: 5000,
+    stdoutLimit: 1024,
+    stderrLimit: 1024
+  });
+  return result.exitCode === 0 && result.stdout.trim() === "true";
+}
+
+function yesNo(value: boolean): string {
+  return value ? "yes" : "no";
 }
 
 function statusIcon(status: DoctorCheck["status"]): string {

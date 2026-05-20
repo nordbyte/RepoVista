@@ -202,6 +202,8 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
 <td>${escapeHtml(phase.status)}</td>
 <td>${Math.round(phase.durationMs)}ms</td>
 <td>${phase.promptTokens}</td>
+<td>${escapeHtml(phase.actualTotalTokens === undefined ? "n/a" : String(phase.actualTotalTokens))}</td>
+<td>${escapeHtml(phase.actualCostUsd === undefined ? "n/a" : `$${phase.actualCostUsd}`)}</td>
 </tr>`).join("\n") ?? "";
   const severityCounts = countBy(findings, (finding) => finding.severity);
   const statusCounts = countBy(findings, (finding) => finding.status ?? "open");
@@ -266,6 +268,8 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
       <div><strong>Checks</strong><br>${escapeHtml(context.evidence?.checks.enabled ? `${context.evidence.checks.commands.length} command(s)` : "disabled")}</div>
       <div><strong>Suppressed</strong><br>${escapeHtml(String(context.suppressedFindings?.length ?? 0))}</div>
       <div><strong>Estimated input tokens</strong><br>${escapeHtml(String(analytics?.estimatedInputTokens ?? "not recorded"))}</div>
+      <div><strong>Actual tokens</strong><br>${escapeHtml(String(analytics?.actualTotalTokens ?? "not recorded"))}</div>
+      <div><strong>Actual cost</strong><br>${escapeHtml(analytics?.actualCostUsd === undefined ? "not recorded" : `$${analytics.actualCostUsd}`)}</div>
       <div><strong>Total phase time</strong><br>${escapeHtml(analytics ? `${Math.round(analytics.totalDurationMs)}ms` : "not recorded")}</div>
     </div>
   </header>
@@ -312,8 +316,8 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
   <section>
   <h2>Run Analytics</h2>
   <table>
-    <thead><tr><th>Phase</th><th>Status</th><th>Duration</th><th>Prompt Tokens</th></tr></thead>
-    <tbody>${analyticsRows || "<tr><td colspan=\"4\">No analytics recorded.</td></tr>"}</tbody>
+    <thead><tr><th>Phase</th><th>Status</th><th>Duration</th><th>Prompt Tokens</th><th>Actual Tokens</th><th>Actual Cost</th></tr></thead>
+    <tbody>${analyticsRows || "<tr><td colspan=\"6\">No analytics recorded.</td></tr>"}</tbody>
   </table>
   </section>
   <section>

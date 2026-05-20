@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { compareHasRegression, runCompareCommand } from "../dist/index.js";
+import { compareGateViolations, compareHasRegression, runCompareCommand } from "../dist/index.js";
 
 test("compare command renders finding and report deltas", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-compare-"));
@@ -69,6 +69,9 @@ test("compare command renders finding and report deltas", async () => {
     const htmlOutput = await runCompareCommand(".repovista/old", ".repovista/new", root, { format: "html" });
     assert.match(htmlOutput, /<!doctype html>/);
     assert.equal(await compareHasRegression(".repovista/old", ".repovista/new", root), true);
+    assert.deepEqual(await compareGateViolations(".repovista/old", ".repovista/new", root, { maxNewCritical: 0 }), [
+      "new critical findings 1 exceeds configured maximum 0."
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

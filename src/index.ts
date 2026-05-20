@@ -6,10 +6,11 @@ export { runCiInitCommand } from "./ci-init.js";
 export { BOOLEAN_OPTION_NAMES, CLI_COMMANDS, CLI_OPTIONS, VALUE_OPTION_NAMES } from "./cli-schema.js";
 export { buildCodexExecArgs, runCodexPhase } from "./codex-runner.js";
 export { buildClaudeExecArgs } from "./providers/claude.js";
-export { buildRunComparison, compareHasRegression, runCompareCommand, renderRunComparison, renderRunComparisonHtml } from "./compare.js";
+export { buildRunComparison, compareGateViolations, compareHasRegression, runCompareCommand, renderRunComparison, renderRunComparisonHtml } from "./compare.js";
 export { loadCodexConfigDefaults, loadCodexModels, parseCodexConfigDefaults, parseCodexModelCatalog, reasoningOptionsForModel, resolveCodexDefaultModel } from "./codex-models.js";
 export { loadProviderModels, reasoningOptionsForProviderModel, resolveProviderDefaultModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
+export { extractProviderUsageTelemetry } from "./provider-runner.js";
 export { commandAvailable, runProcess, signalProcess } from "./process-runner.js";
 export { runRepairRunCommand } from "./repair-run.js";
 export { createReportBrowserState, deleteMarkedReportRuns, listReportRuns, renderReportsMenuFrame, runReportsMenu } from "./report-browser.js";
@@ -51,7 +52,7 @@ export {
   writeFindingState
 } from "./finding-state.js";
 export { renderFindingsMenuFrame, runFindingsMenu } from "./finding-menu.js";
-export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
+export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpenPrCommand, runPatchesCommand, runRollbackPatchCommand } from "./patch-commands.js";
 export { fixPlanJsonSchema, phaseReportJsonSchema, revalidationJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity, findingDedupeKey } from "./findings.js";
 export { collectDiffScope } from "./git-diff.js";

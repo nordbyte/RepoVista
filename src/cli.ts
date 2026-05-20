@@ -5,7 +5,7 @@ import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { runAudit, type AuditResult } from "./audit.js";
 import { createAuditProgressController } from "./audit-progress.js";
-import { compareHasRegression, runCompareCommand } from "./compare.js";
+import { compareGateViolations, compareHasRegression, runCompareCommand } from "./compare.js";
 import { runBaselineCommand } from "./baseline.js";
 import { runCiInitCommand } from "./ci-init.js";
 import { runDoctorCommand } from "./doctor.js";
@@ -21,7 +21,7 @@ import {
 } from "./finding-state.js";
 import { runFindingsMenu } from "./finding-menu.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
-import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand } from "./patch-commands.js";
+import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand, runRollbackPatchCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
 import { runRepairRunCommand } from "./repair-run.js";
 import { runReportsMenu } from "./report-browser.js";
@@ -99,6 +99,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         process.cwd(),
         { format: optionsWithSettings.options.compareFormat ?? "markdown" }
       ));
+      const compareViolations = await compareGateViolations(
+        optionsWithSettings.options.compareOldRun ?? "",
+        optionsWithSettings.options.compareNewRun ?? "",
+        process.cwd(),
+        {
+          maxNewCritical: optionsWithSettings.options.maxNewCritical,
+          maxNewHigh: optionsWithSettings.options.maxNewHigh,
+          maxNewMedium: optionsWithSettings.options.maxNewMedium
+        }
+      );
+      if (compareViolations.length) {
+        process.stderr.write(`RepoVista compare gate failed: ${compareViolations.join("; ")}\n`);
+        return 2;
+      }
       if (optionsWithSettings.options.compareFailOnRegression && await compareHasRegression(
         optionsWithSettings.options.compareOldRun ?? "",
         optionsWithSettings.options.compareNewRun ?? ""
@@ -167,6 +181,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "patches") {
       process.stdout.write(await runPatchesCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "rollback") {
+      process.stdout.write(await runRollbackPatchCommand(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "open-pr") {

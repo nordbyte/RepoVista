@@ -115,6 +115,25 @@ export async function compareHasRegression(
   return comparison.regressions.length > 0;
 }
 
+export async function compareGateViolations(
+  oldRunDirectory: string,
+  newRunDirectory: string,
+  projectRoot = process.cwd(),
+  thresholds: {
+    maxNewCritical?: number;
+    maxNewHigh?: number;
+    maxNewMedium?: number;
+  } = {}
+): Promise<string[]> {
+  const comparison = await buildRunComparison(projectRoot, oldRunDirectory, newRunDirectory);
+  const addedCounts = findingSeverityCounts(comparison.changes.added);
+  return [
+    ...thresholdViolation("new critical findings", addedCounts.critical ?? 0, thresholds.maxNewCritical),
+    ...thresholdViolation("new high findings", addedCounts.high ?? 0, thresholds.maxNewHigh),
+    ...thresholdViolation("new medium findings", addedCounts.medium ?? 0, thresholds.maxNewMedium)
+  ];
+}
+
 export async function buildRunComparison(
   projectRoot: string,
   oldRunDirectory: string,
@@ -442,6 +461,17 @@ function findingCounts(run: LoadedRun): Record<string, number> {
     accumulator[finding.severity] = (accumulator[finding.severity] ?? 0) + 1;
     return accumulator;
   }, {});
+}
+
+function findingSeverityCounts(findings: StructuredFinding[]): Record<string, number> {
+  return findings.reduce<Record<string, number>>((counts, finding) => {
+    counts[finding.severity] = (counts[finding.severity] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function thresholdViolation(label: string, count: number, max: number | undefined): string[] {
+  return typeof max === "number" && count > max ? [`${label} ${count} exceeds configured maximum ${max}.`] : [];
 }
 
 function renderFindingList(title: string, findings: StructuredFinding[]): string {

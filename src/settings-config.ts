@@ -24,6 +24,13 @@ export interface RepoVistaSettings {
   repairReports?: boolean;
   repairAttempts?: number;
   deepReview?: boolean;
+  snapshot?: boolean;
+  failOnDrift?: boolean;
+  failOnWeakEvidence?: boolean;
+  minQualityScore?: number;
+  maxCritical?: number;
+  maxHigh?: number;
+  maxMedium?: number;
   reviewMode?: ReviewMode;
   promptFile?: string;
   exportFormats?: ReportExportFormat[];
@@ -101,6 +108,13 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     repairAttempts: settings.repairAttempts ?? defaults.repairAttempts,
     deepReview: settings.deepReview ?? defaults.deepReview,
     deepReviewExplicit: settings.deepReview !== undefined ? true : defaults.deepReviewExplicit,
+    snapshot: settings.snapshot ?? defaults.snapshot,
+    failOnDrift: settings.failOnDrift ?? defaults.failOnDrift,
+    failOnWeakEvidence: settings.failOnWeakEvidence ?? defaults.failOnWeakEvidence,
+    minQualityScore: settings.minQualityScore ?? defaults.minQualityScore,
+    maxCritical: settings.maxCritical ?? defaults.maxCritical,
+    maxHigh: settings.maxHigh ?? defaults.maxHigh,
+    maxMedium: settings.maxMedium ?? defaults.maxMedium,
     reviewMode: settings.reviewMode ?? defaults.reviewMode,
     promptFile: settings.promptFile ?? defaults.promptFile,
     exportFormats: settings.exportFormats !== undefined ? [...settings.exportFormats] : [...defaults.exportFormats],
@@ -171,14 +185,16 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     sanitized.exportFormats = Array.from(new Set(values));
   }
 
-  for (const key of ["checkTimeoutSeconds", "phaseTimeoutSeconds", "repairAttempts"] as const) {
+  for (const key of ["checkTimeoutSeconds", "phaseTimeoutSeconds", "repairAttempts", "minQualityScore", "maxCritical", "maxHigh", "maxMedium"] as const) {
     const value = settings[key];
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      sanitized[key] = Math.max(1, Math.round(value));
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      sanitized[key] = key === "minQualityScore"
+        ? Math.max(0, Math.min(100, Math.round(value)))
+        : Math.max(key === "repairAttempts" || key === "checkTimeoutSeconds" || key === "phaseTimeoutSeconds" ? 1 : 0, Math.round(value));
     }
   }
 
-  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "deepReview", "allWorkspaces", "incremental"] as const) {
+  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "deepReview", "snapshot", "failOnDrift", "failOnWeakEvidence", "allWorkspaces", "incremental"] as const) {
     if (typeof settings[key] === "boolean") {
       sanitized[key] = settings[key];
     }

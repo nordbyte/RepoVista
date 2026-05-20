@@ -34,7 +34,7 @@ jobs:
         run: repovista providers test codex
 
       - name: Run RepoVista
-        run: repovista audit --ci --pr --no-run-checks --audit-profile pr-review --export jsonl,html
+        run: repovista audit --ci --pr --no-run-checks --audit-profile pr-review --export jsonl,html --fail-on-drift --fail-on-weak-evidence --min-quality-score 70 --max-critical 0 --max-high 0
 
       - name: Upload RepoVista report
         if: always()
@@ -73,7 +73,7 @@ jobs:
         run: npm install -g repovista
 
       - name: Run RepoVista security audit
-        run: repovista audit --ci --audit-profile security --run-checks --strict-reports --export sarif,html,jsonl,github --fail-on-critical
+        run: repovista audit --ci --audit-profile security --run-checks --strict-reports --export sarif,html,jsonl,github --fail-on-critical --fail-on-drift --fail-on-weak-evidence --min-quality-score 75 --max-critical 0
 
       - name: Upload RepoVista report
         if: always()
@@ -111,7 +111,7 @@ jobs:
         run: npm install -g repovista
 
       - name: Run release-readiness audit
-        run: repovista audit --ci --audit-profile release-readiness --run-checks --strict-reports --repair-reports --export html,jsonl
+        run: repovista audit --ci --audit-profile release-readiness --snapshot --run-checks --strict-reports --repair-reports --export sarif,html,jsonl --fail-on-drift --fail-on-weak-evidence --min-quality-score 80 --max-critical 0 --max-high 0
 
       - name: Upload RepoVista report
         if: always()
@@ -148,7 +148,7 @@ jobs:
         run: npm install -g repovista
 
       - name: Run scheduled RepoVista audit
-        run: repovista audit --ci --incremental --audit-profile security --run-checks --export html,jsonl
+        run: repovista audit --ci --snapshot --incremental --audit-profile security --run-checks --export html,jsonl --fail-on-weak-evidence --min-quality-score 70 --max-critical 0
 
       - name: Upload RepoVista report
         if: always()

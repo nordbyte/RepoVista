@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { allowedEvidencePaths, collectAuditDiffScope, createInitialMeta, reportFolderName } from "./audit-context.js";
 import { createAuditSettingsSummary, createEffectiveAuditSettings } from "./audit-settings.js";
+import { prepareAuditSnapshot, type PreparedAuditSnapshot } from "./audit-snapshot.js";
 import { writeStructuredOutputs } from "./audit-outputs.js";
 import { applyBaselineToFindings } from "./baseline.js";
 import { projectScanFingerprint, updateAuditCache } from "./cache.js";
@@ -96,10 +97,10 @@ type RunPhaseFunction = typeof runProviderPhase;
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
   const runStartedAtMs = Date.now();
   options = applyAuditProfile(options);
-  const projectRoot = dependencies.cwd ?? process.cwd();
+  const outputProjectRoot = dependencies.cwd ?? process.cwd();
   const now = dependencies.now ?? new Date();
   const version = dependencies.version ?? "0.0.0";
-  const workspaceScope = await resolveWorkspaceScope(projectRoot, options);
+  const workspaceScope = await resolveWorkspaceScope(outputProjectRoot, options);
   options = {
     ...options,
     includes: workspaceIncludes(options, workspaceScope)
@@ -107,7 +108,19 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const logger = new Logger(options.progress, dependencies.loggerSink);
   const abortSignal = dependencies.abortSignal;
   const createLogs = options.keepLogs || options.json;
-  const paths = await createRunPaths(projectRoot, options, now, createLogs);
+  const paths = await createRunPaths(outputProjectRoot, options, now, createLogs);
+  let snapshot: PreparedAuditSnapshot | undefined;
+  let projectRoot = outputProjectRoot;
+  if (options.snapshot && !options.resumeDir) {
+    snapshot = await prepareAuditSnapshot(outputProjectRoot, paths.runDir, [options.outDir], now);
+    projectRoot = snapshot.meta.analysisRoot;
+    logger.info(`Snapshot audit enabled at ${snapshot.meta.commit?.slice(0, 12) ?? "HEAD"}: ${snapshot.meta.analysisRoot}`);
+    for (const warning of snapshot.meta.warnings) {
+      logger.warn(warning);
+    }
+  } else if (options.snapshot && options.resumeDir) {
+    logger.warn("Snapshot audit was requested with --resume; the existing run directory will be resumed without creating a new snapshot.");
+  }
   const provider = getReportProvider(options.provider ?? "codex");
   const effectiveModel = options.model ?? await (dependencies.resolveProviderDefaultModel ?? resolveProviderDefaultModel)(provider.id, options);
   const effectiveSettings = createEffectiveAuditSettings(options, provider, effectiveModel);
@@ -117,12 +130,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     reasoning: options.reasoning ?? effectiveSettings.reasoning
   };
 
-  const meta = createInitialMeta(projectRoot, paths, options, version, now, {
+  const meta = createInitialMeta(outputProjectRoot, paths, options, version, now, {
     model: effectiveSettings.model,
     reasoning: effectiveSettings.reasoning,
     profile: effectiveSettings.providerProfile
   });
   meta.workspace = workspaceScope;
+  if (snapshot) {
+    meta.snapshot = snapshot.meta;
+  }
   logger.auditSettings(createAuditSettingsSummary(effectiveSettings));
   const previousReports: Record<string, string> = {};
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
@@ -147,7 +163,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     throwIfCancelled(abortSignal);
     meta.evidence = evidence;
     meta.repositoryDrift = createInitialRepositoryDriftState(gitSnapshotFromEvidence(evidence, undefined, [options.outDir]));
-    repositoryDriftMonitor = startRepositoryDriftMonitor(projectRoot, meta, logger, dependencies.runCommand);
+    repositoryDriftMonitor = startRepositoryDriftMonitor(outputProjectRoot, meta, logger, dependencies.runCommand);
     if (hasFailedChecks(evidence)) {
       logger.warn("One or more local check commands failed. The report will include the check output.");
     }
@@ -161,7 +177,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       ignores: options.ignores
     });
     throwIfCancelled(abortSignal);
-    const promptGuidance = await loadPromptGuidance(options.promptFile, projectRoot);
+    const promptGuidance = await loadPromptGuidance(options.promptFile, outputProjectRoot);
 
     logger.step("Creating project inventory");
     const inventoryStartedAtMs = Date.now();
@@ -194,7 +210,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     previousReports["00-inventory.md"] = inventory.markdown;
 
     const featureMap = await createProjectMap(projectRoot, options, now, diffScope, projectScan);
-    const featureStateDir = await syncFeatureRecords(projectRoot, options.outDir, featureMap.features, paths.runId, now);
+    const featureStateDir = await syncFeatureRecords(outputProjectRoot, options.outDir, featureMap.features, paths.runId, now);
     const featuresPath = reportPath(paths.runDir, "features.json");
     await writeJsonFile(featuresPath, {
       schemaVersion: 1,
@@ -225,7 +241,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       qualityGateVersion: QUALITY_GATES_VERSION
     });
     meta.cache = await updateAuditCache({
-      projectRoot,
+      projectRoot: outputProjectRoot,
       outDir: options.outDir,
       runDir: paths.runDir,
       runId: paths.runId,
@@ -251,7 +267,10 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
-    const parallel = await resolveParallelMeta(projectRoot, options, logger, featureMap);
+    const parallel = await resolveParallelMeta(outputProjectRoot, options, logger, {
+      ...featureMap,
+      projectRoot: outputProjectRoot
+    });
     meta.parallel = parallel;
     const providerConcurrency = resolveProviderConcurrency(options, parallel);
     if (providerConcurrency > 1) {
@@ -303,7 +322,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       allowedEvidencePathsFromPromptManifest(promptManifest, "risk-and-bug") ?? allowedEvidencePaths(featureMap.features),
       now
     );
-    const baseline = await applyBaselineToFindings(projectRoot, options.outDir, validatedFindings, paths.runId, now);
+    const baseline = await applyBaselineToFindings(outputProjectRoot, options.outDir, validatedFindings, paths.runId, now);
     const findings = baseline.activeFindings;
     const suppressedFindings = baseline.suppressedFindings;
     const structuredReports = ANALYSIS_PHASES.map((phase) => extractStructuredPhaseReport(
@@ -313,10 +332,11 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     ));
     meta.findings = findings;
     meta.suppressedFindings = suppressedFindings;
-    meta.exitCode = determineExitCode(options, meta.phases, previousReports["03-risk-and-bug-report.md"], findings, evidence);
+    await repositoryDriftMonitor?.checkNow();
+    meta.exitCode = determineExitCode(options, meta, previousReports["03-risk-and-bug-report.md"], findings, evidence);
     completeRunTiming(meta, runStartedAtMs);
-    await updateFeatureRecordsFromFindings(projectRoot, options.outDir, findings, paths.runId, now);
-    await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings);
+    await updateFeatureRecordsFromFindings(outputProjectRoot, options.outDir, findings, paths.runId, now);
+    await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings, outputProjectRoot);
     await appendGithubStepSummary(meta);
   } catch (error) {
     if (isAuditCancelled(error, abortSignal)) {
@@ -329,6 +349,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   } finally {
     await repositoryDriftMonitor?.checkNow();
     repositoryDriftMonitor?.stop();
+    await snapshot?.cleanup();
     completeRunTiming(meta, runStartedAtMs);
     await writeMeta(paths.runDir, meta);
   }
@@ -999,7 +1020,7 @@ function filterFindingsForReviewMode(findings: StructuredFinding[], mode: NonNul
 
 function determineExitCode(
   options: AuditOptions,
-  phases: PhaseReportStatus[],
+  meta: AuditMeta,
   riskReport: string | undefined,
   findings: StructuredFinding[],
   evidence: EvidencePack | undefined
@@ -1009,13 +1030,59 @@ function determineExitCode(
   if (options.ci && options.failOnCritical && hasCritical) {
     return 2;
   }
-  if (phases.some((phase) => phase.status === "failed")) {
+  const severityCounts = countFindingsBySeverity(findings);
+  const gateViolations = [
+    ...thresholdViolation("critical findings", severityCounts.critical ?? 0, options.maxCritical),
+    ...thresholdViolation("high findings", severityCounts.high ?? 0, options.maxHigh),
+    ...thresholdViolation("medium findings", severityCounts.medium ?? 0, options.maxMedium),
+    ...qualityGateViolations(meta.phases, options.minQualityScore),
+    ...(options.failOnWeakEvidence ? weakEvidenceGateViolations(findings) : []),
+    ...(options.failOnDrift && meta.repositoryDrift?.detected ? meta.repositoryDrift.warnings : [])
+  ];
+  if (gateViolations.length) {
+    meta.preflight.warnings.push(...gateViolations.map((warning) => `CI gate: ${warning}`));
+    return 2;
+  }
+  if (meta.phases.some((phase) => phase.status === "failed")) {
     return 1;
   }
   if (options.ci && evidence && hasFailedChecks(evidence)) {
     return 1;
   }
   return 0;
+}
+
+function thresholdViolation(label: string, count: number, max: number | undefined): string[] {
+  return typeof max === "number" && count > max ? [`${label} ${count} exceeds configured maximum ${max}.`] : [];
+}
+
+function qualityGateViolations(phases: PhaseReportStatus[], minimum: number | undefined): string[] {
+  if (typeof minimum !== "number") {
+    return [];
+  }
+  return phases
+    .filter((phase) => typeof phase.qualityScore === "number" && phase.qualityScore < minimum)
+    .map((phase) => `${phase.title} quality score ${phase.qualityScore}/100 is below configured minimum ${minimum}/100.`);
+}
+
+function weakEvidenceGateViolations(findings: StructuredFinding[]): string[] {
+  const weak = findings.filter((finding) => {
+    const refs = finding.evidenceDetails?.length
+      ? finding.evidenceDetails
+      : (finding.evidenceReferences ?? []).map((reference) => typeof reference === "string" ? { path: reference } : reference);
+    return !refs.length ||
+      refs.some((reference) => !reference.startLine || !reference.endLine) ||
+      !refs.some((reference) => reference.quote) ||
+      Boolean(finding.evidenceValidation && !finding.evidenceValidation.passed);
+  });
+  return weak.length ? [`${weak.length} finding(s) contain weak evidence.`] : [];
+}
+
+function countFindingsBySeverity(findings: StructuredFinding[]): Record<string, number> {
+  return findings.reduce<Record<string, number>>((counts, finding) => {
+    counts[finding.severity] = (counts[finding.severity] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 function auditCacheContext(
@@ -1049,6 +1116,7 @@ function auditCacheContext(
     strictReports: Boolean(options.strictReports),
     repairReports: Boolean(options.repairReports),
     deepReview: Boolean(options.deepReview),
+    snapshot: Boolean(options.snapshot),
     reviewMode: options.reviewMode ?? "default",
     promptFile: options.promptFile ?? null,
     auditProfile: options.auditProfile ?? null,

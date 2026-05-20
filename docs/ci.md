@@ -29,7 +29,7 @@ repovista ci init --template scheduled-audit
 ## Recommended CI Command
 
 ```sh
-repovista audit --ci --json --fail-on-critical --run-checks --strict-reports
+repovista audit --ci --json --fail-on-critical --fail-on-drift --fail-on-weak-evidence --min-quality-score 75 --max-critical 0 --run-checks --strict-reports
 ```
 
 Common additions:
@@ -39,6 +39,8 @@ repovista audit --export sarif,html,jsonl,github
 repovista audit --audit-profile security
 repovista audit --audit-profile release-readiness
 repovista audit --since origin/main
+repovista audit --snapshot
+repovista compare .repovista/old .repovista/new --max-new-critical 0 --max-new-high 0
 ```
 
 ## Exit Codes

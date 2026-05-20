@@ -449,6 +449,9 @@ function phaseReviewNotes(phase: PhaseReportStatus | undefined): string[] {
     if (run.timedOut || run.interrupted || phase.status === "failed") {
       notes.push(`Provider process: pid=${run.pid ?? "n/a"}, timeout=${run.timeoutSeconds}s, timedOut=${run.timedOut}, interrupted=${run.interrupted}, exit=${run.exitCode ?? "n/a"}, signal=${run.signal ?? "n/a"}${termination}`);
     }
+    if (run.telemetry) {
+      notes.push(`Provider telemetry: input=${run.telemetry.inputTokens ?? "n/a"}, output=${run.telemetry.outputTokens ?? "n/a"}, total=${run.telemetry.totalTokens ?? "n/a"}, cost=${run.telemetry.costUsd === undefined ? "n/a" : `$${run.telemetry.costUsd}`}.`);
+    }
   }
   const failedShards = [...(phase.shards ?? []), ...(phase.deepReviewShards ?? [])].filter((shard) => shard.status === "failed");
   for (const shard of failedShards.slice(0, 5)) {

@@ -50,7 +50,7 @@ Use `repovista reports` to browse completed runs in the terminal, select a run, 
 | `03-risk-and-bug-report.md` | Risk, bug, and security finding report. |
 | `04-feature-roadmap.md` | Feature and improvement roadmap. |
 | `index.md` | Summary entry point linking all phase outputs. |
-| `meta.json` | Run metadata, provider/model/reasoning/fast mode, total and per-report durations, phase status, quality, cache, workspace, and analytics. |
+| `meta.json` | Run metadata, provider/model/reasoning/fast mode, snapshot/drift state, total and per-report durations, phase status, quality, cache, workspace, and analytics. Analytics include estimated prompt tokens and provider-reported token/cost telemetry when the provider output exposes it. |
 | `summary.json` | Machine-readable run summary. |
 | `report.json` | Complete machine-readable run artifact. |
 | `structured-reports.json` | Normalized structured phase reports. |

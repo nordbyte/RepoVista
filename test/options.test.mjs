@@ -26,6 +26,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.options.strictReports, true);
   assert.equal(parsed.options.repairReports, true);
   assert.equal(parsed.options.incremental, true);
+  assert.equal(parsed.options.snapshot, false);
   assert.deepEqual(parsed.options.exportFormats, ["sarif", "html", "jsonl"]);
   assert.equal(parsed.options.progress, true);
 });
@@ -67,8 +68,19 @@ test("explicit audit command parses supported options", () => {
     "--since",
     "origin/main",
     "--strict-reports",
+    "--snapshot",
     "--ci",
     "--fail-on-critical",
+    "--fail-on-drift",
+    "--fail-on-weak-evidence",
+    "--min-quality-score",
+    "80",
+    "--max-critical",
+    "0",
+    "--max-high",
+    "2",
+    "--max-medium",
+    "5",
     "--keep-logs"
   ]);
 
@@ -93,9 +105,16 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.phaseTimeoutSeconds, 2700);
   assert.equal(parsed.options.since, "origin/main");
   assert.equal(parsed.options.strictReports, true);
+  assert.equal(parsed.options.snapshot, true);
   assert.equal(parsed.options.ci, true);
   assert.equal(parsed.options.progress, false);
   assert.equal(parsed.options.failOnCritical, true);
+  assert.equal(parsed.options.failOnDrift, true);
+  assert.equal(parsed.options.failOnWeakEvidence, true);
+  assert.equal(parsed.options.minQualityScore, 80);
+  assert.equal(parsed.options.maxCritical, 0);
+  assert.equal(parsed.options.maxHigh, 2);
+  assert.equal(parsed.options.maxMedium, 5);
   assert.equal(parsed.options.keepLogs, true);
 });
 
@@ -204,19 +223,21 @@ test("new operational commands and options are recognized", () => {
   assert.equal(ci.options.force, true);
   assert.equal(ci.options.ciTemplate, "security");
 
-  const compare = parseCliArgs(["compare", "old", "new", "--format", "json", "--fail-on-regression"]);
+  const compare = parseCliArgs(["compare", "old", "new", "--format", "json", "--fail-on-regression", "--max-new-high", "0"]);
   assert.equal(compare.options.compareFormat, "json");
   assert.equal(compare.options.compareFailOnRegression, true);
+  assert.equal(compare.options.maxNewHigh, 0);
 
   const cleanLocks = parseCliArgs(["clean-locks", "--force"]);
   assert.equal(cleanLocks.action, "clean-locks");
   assert.equal(cleanLocks.options.force, true);
 
-  const fix = parseCliArgs(["fix", "fnd_123", "--dry-run", "--isolate-branch", "--post-revalidate", "--max-files", "4"]);
+  const fix = parseCliArgs(["fix", "fnd_123,fnd_456", "--dry-run", "--isolate-branch", "--no-isolate", "--post-revalidate", "--max-files", "4"]);
   assert.equal(fix.action, "fix");
-  assert.equal(fix.options.findingId, "fnd_123");
+  assert.equal(fix.options.findingId, "fnd_123,fnd_456");
   assert.equal(fix.options.dryRun, true);
   assert.equal(fix.options.fixIsolateBranch, true);
+  assert.equal(fix.options.fixNoIsolate, true);
   assert.equal(fix.options.fixPostRevalidate, true);
   assert.equal(fix.options.patchMaxFiles, 4);
 
@@ -226,6 +247,11 @@ test("new operational commands and options are recognized", () => {
   const patches = parseCliArgs(["patches", "pat_123"]);
   assert.equal(patches.action, "patches");
   assert.equal(patches.options.patchId, "pat_123");
+
+  const rollback = parseCliArgs(["rollback", "pat_123", "--dry-run"]);
+  assert.equal(rollback.action, "rollback");
+  assert.equal(rollback.options.patchId, "pat_123");
+  assert.equal(rollback.options.dryRun, true);
 
   const openPr = parseCliArgs(["open-pr", "pat_123", "--branch", "repovista/fix", "--title", "Fix"]);
   assert.equal(openPr.action, "open-pr");

@@ -85,6 +85,12 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "fail-on-critical":
         options.failOnCritical = true;
         break;
+      case "fail-on-drift":
+        options.failOnDrift = true;
+        break;
+      case "fail-on-weak-evidence":
+        options.failOnWeakEvidence = true;
+        break;
       case "fast":
         options.fastMode = true;
         break;
@@ -118,6 +124,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "deep-review":
         options.deepReview = true;
         options.deepReviewExplicit = true;
+        break;
+      case "snapshot":
+        options.snapshot = true;
         break;
       case "no-deep-review":
         options.deepReview = false;
@@ -153,6 +162,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
         break;
       case "isolate-branch":
         options.fixIsolateBranch = true;
+        break;
+      case "no-isolate":
+        options.fixNoIsolate = true;
         break;
       case "post-revalidate":
         options.fixPostRevalidate = true;
@@ -403,6 +415,14 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "patches", options };
   }
 
+  if (command === "rollback") {
+    if (positionals.length !== 2) {
+      throw new CliUsageError("Command rollback requires one patch id.");
+    }
+    options.patchId = requireNonEmpty("patch", positionals[1]);
+    return { action: "rollback", options };
+  }
+
   if (command === "open-pr") {
     if (positionals.length > 2) {
       throw new CliUsageError("Command open-pr accepts at most one patch id.");
@@ -505,6 +525,27 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "repair-attempts":
       options.repairAttempts = parsePositiveInteger(name, value, 3);
       break;
+    case "min-quality-score":
+      options.minQualityScore = parseNonNegativeInteger(name, value, 100);
+      break;
+    case "max-critical":
+      options.maxCritical = parseNonNegativeInteger(name, value, 10_000);
+      break;
+    case "max-high":
+      options.maxHigh = parseNonNegativeInteger(name, value, 10_000);
+      break;
+    case "max-medium":
+      options.maxMedium = parseNonNegativeInteger(name, value, 10_000);
+      break;
+    case "max-new-critical":
+      options.maxNewCritical = parseNonNegativeInteger(name, value, 10_000);
+      break;
+    case "max-new-high":
+      options.maxNewHigh = parseNonNegativeInteger(name, value, 10_000);
+      break;
+    case "max-new-medium":
+      options.maxNewMedium = parseNonNegativeInteger(name, value, 10_000);
+      break;
     case "max-files":
       options.patchMaxFiles = parsePositiveInteger(name, value, 100);
       break;
@@ -575,6 +616,7 @@ function isCommand(value: string): boolean {
     value === "revalidate" ||
     value === "fix" ||
     value === "patches" ||
+    value === "rollback" ||
     value === "open-pr" ||
     value === "issue";
 }
@@ -596,7 +638,7 @@ function maxPositionalsFor(positionals: string[]): number {
   if (command === "baseline" && (positionals[1] === "add" || positionals[1] === "remove")) {
     return 3;
   }
-  if (command === "fix" || command === "patches" || command === "open-pr") {
+  if (command === "fix" || command === "patches" || command === "rollback" || command === "open-pr") {
     return 2;
   }
   if (command === "ci") {
@@ -667,6 +709,14 @@ function parsePositiveInteger(optionName: string, value: string, max: number): n
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) {
     throw new CliUsageError(`Option --${optionName} must be an integer from 1 to ${max}.`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(optionName: string, value: string, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > max) {
+    throw new CliUsageError(`Option --${optionName} must be an integer from 0 to ${max}.`);
   }
   return parsed;
 }

@@ -14,6 +14,7 @@ import {
   renderStructuredProviderOutput,
   riskReportJsonSchema,
   structuredPromptForPhase,
+  extractProviderUsageTelemetry,
   runCodexPhase,
   runProviderPhase
 } from "../dist/index.js";
@@ -23,6 +24,18 @@ class FakeChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
 }
+
+test("provider telemetry extracts token and cost usage from provider output", () => {
+  const telemetry = extractProviderUsageTelemetry(
+    '{"usage":{"input_tokens":1234,"output_tokens":56,"total_tokens":1290},"cost_usd":0.042}\n',
+    ""
+  );
+  assert.equal(telemetry.source, "stdout");
+  assert.equal(telemetry.inputTokens, 1234);
+  assert.equal(telemetry.outputTokens, 56);
+  assert.equal(telemetry.totalTokens, 1290);
+  assert.equal(telemetry.costUsd, 0.042);
+});
 
 function assertAllObjectPropertiesRequired(schema, label = "schema") {
   if (!schema || typeof schema !== "object") {

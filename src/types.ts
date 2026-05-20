@@ -30,6 +30,7 @@ export type CliAction =
   | "clean-locks"
   | "fix"
   | "patches"
+  | "rollback"
   | "open-pr"
   | "ci-init"
   | "profiles"
@@ -71,6 +72,16 @@ export interface AuditOptions {
   repairAttempts: number;
   deepReview: boolean;
   deepReviewExplicit?: boolean;
+  snapshot: boolean;
+  failOnDrift?: boolean;
+  failOnWeakEvidence?: boolean;
+  minQualityScore?: number;
+  maxCritical?: number;
+  maxHigh?: number;
+  maxMedium?: number;
+  maxNewCritical?: number;
+  maxNewHigh?: number;
+  maxNewMedium?: number;
   reviewMode?: ReviewMode;
   promptFile?: string;
   exportFormats: ReportExportFormat[];
@@ -111,6 +122,7 @@ export interface AuditOptions {
   patchBranch?: string;
   patchTitle?: string;
   fixIsolateBranch?: boolean;
+  fixNoIsolate?: boolean;
   fixPostRevalidate?: boolean;
   patchMaxFiles?: number;
   allowRepoProviderPlugin?: boolean;
@@ -354,6 +366,16 @@ export interface AuditMeta {
     repairReports: boolean;
     repairAttempts?: number;
     deepReview?: boolean;
+    snapshot?: boolean;
+    failOnDrift?: boolean;
+    failOnWeakEvidence?: boolean;
+    minQualityScore?: number;
+    maxCritical?: number;
+    maxHigh?: number;
+    maxMedium?: number;
+    maxNewCritical?: number;
+    maxNewHigh?: number;
+    maxNewMedium?: number;
     reviewMode?: ReviewMode;
     promptFile?: string;
     exportFormats: ReportExportFormat[];
@@ -421,7 +443,23 @@ export interface AuditMeta {
   };
   analytics?: RunAnalytics;
   repositoryDrift?: RepositoryDriftState;
+  snapshot?: AuditSnapshotMeta;
   exitCode: number;
+}
+
+export interface AuditSnapshotMeta {
+  enabled: boolean;
+  originalRoot: string;
+  analysisRoot: string;
+  commit?: string;
+  branch?: string;
+  dirty: boolean;
+  statusShort: string[];
+  patchPath?: string;
+  untrackedPath?: string;
+  createdAt: string;
+  cleanupStatus?: "pending" | "removed" | "failed";
+  warnings: string[];
 }
 
 export interface RepositoryGitSnapshot {
@@ -452,6 +490,11 @@ export interface RunAnalytics {
   estimatedOutputTokens?: number;
   estimatedTotalTokens: number;
   estimatedCostUsd?: number;
+  actualInputTokens?: number;
+  actualOutputTokens?: number;
+  actualTotalTokens?: number;
+  actualCostUsd?: number;
+  telemetryKnown?: boolean;
   pricingKnown: boolean;
   phases: Array<{
     id: string;
@@ -459,6 +502,11 @@ export interface RunAnalytics {
     durationMs: number;
     totalDurationMs?: number;
     promptTokens: number;
+    actualInputTokens?: number;
+    actualOutputTokens?: number;
+    actualTotalTokens?: number;
+    actualCostUsd?: number;
+    telemetryKnown?: boolean;
     reportFile: string;
   }>;
 }
@@ -736,6 +784,7 @@ export interface ProviderRunDiagnostics {
   stdoutLogPath?: string;
   stderrLogPath?: string;
   structuredOutputPath?: string;
+  telemetry?: ProviderUsageTelemetry;
   termination?: {
     reason: "timeout" | "interrupt";
     sigintSent?: boolean;
@@ -747,6 +796,14 @@ export interface ProviderRunDiagnostics {
     forcedSettle: boolean;
     errors: string[];
   };
+}
+
+export interface ProviderUsageTelemetry {
+  source: "stdout" | "stderr" | "combined";
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
 }
 
 export interface ProviderCapabilities {
@@ -788,9 +845,11 @@ export interface PatchAttempt {
   };
   git: {
     baseSha?: string;
+    originalBranch?: string;
     branchName?: string;
     commitSha?: string;
     prUrl?: string;
+    diffPath?: string;
   };
   error?: string;
   createdAt: string;

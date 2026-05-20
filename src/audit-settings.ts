@@ -21,6 +21,10 @@ export interface EffectiveAuditSettings {
   strictReports: boolean;
   repairReports: string;
   deepReview: boolean;
+  snapshot: boolean;
+  failOnDrift: boolean;
+  failOnWeakEvidence: boolean;
+  minQualityScore?: number;
   incremental: boolean;
   exportFormats: string;
   outDir: string;
@@ -62,6 +66,10 @@ export function createEffectiveAuditSettings(
     strictReports: Boolean(options.strictReports),
     repairReports: repairReportsLabel(options),
     deepReview: Boolean(options.deepReview),
+    snapshot: Boolean(options.snapshot),
+    failOnDrift: Boolean(options.failOnDrift),
+    failOnWeakEvidence: Boolean(options.failOnWeakEvidence),
+    minQualityScore: options.minQualityScore,
     incremental: Boolean(options.incremental),
     exportFormats: options.exportFormats?.length ? options.exportFormats.join(", ") : "none",
     outDir: firstText(options.outDir, ".repovista") ?? ".repovista",
@@ -79,7 +87,8 @@ export function createAuditSettingsSummary(settings: EffectiveAuditSettings): Au
       `Model: ${settings.model} | reasoning: ${settings.reasoning} | fast mode: ${onOff(settings.fastMode)} | profile: ${settings.providerProfile} | sandbox: ${settings.sandbox}`,
       `Report: audit profile: ${settings.auditProfile} | review: ${settings.reviewMode} | phases: ${settings.phases} | parallel: ${settings.parallel}`,
       `Scope: ${settings.scope}`,
-      `Quality: checks: ${settings.runChecks} | strict gates: ${onOff(settings.strictReports)} | repair: ${settings.repairReports} | deep review: ${onOff(settings.deepReview)} | incremental: ${onOff(settings.incremental)}`,
+      `Quality: checks: ${settings.runChecks} | strict gates: ${onOff(settings.strictReports)} | repair: ${settings.repairReports} | weak evidence gate: ${onOff(settings.failOnWeakEvidence)} | min quality: ${settings.minQualityScore ?? "off"}`,
+      `Execution: snapshot: ${onOff(settings.snapshot)} | drift gate: ${onOff(settings.failOnDrift)} | deep review: ${onOff(settings.deepReview)} | incremental: ${onOff(settings.incremental)}`,
       `Output: ${settings.outDir} | exports: ${settings.exportFormats} | JSON events: ${onOff(settings.jsonEvents)} | logs: ${onOff(settings.keepLogs)} | phase timeout: ${settings.phaseTimeout}`
     ]
   };

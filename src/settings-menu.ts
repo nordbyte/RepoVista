@@ -37,7 +37,7 @@ interface MenuState {
 
 type MainItem =
   | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
-  | { id: "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
+  | { id: "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "snapshot" | "failOnDrift" | "failOnWeakEvidence" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
@@ -207,6 +207,10 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Strict report gates: ${effectiveBoolean(settings, "strictReports") ? "on" : "off"}`,
     `Repair reports: ${effectiveBoolean(settings, "repairReports") ? "on" : "off"}`,
     `Deep review: ${effectiveBoolean(settings, "deepReview") ? "on" : "off"}`,
+    `Snapshot audit: ${effectiveBoolean(settings, "snapshot") ? "on" : "off"}`,
+    `Fail on drift: ${effectiveBoolean(settings, "failOnDrift") ? "on" : "off"}`,
+    `Fail on weak evidence: ${effectiveBoolean(settings, "failOnWeakEvidence") ? "on" : "off"}`,
+    `Minimum quality score: ${settings.minQualityScore ?? "off"}`,
     `Export formats: ${formatArray(effectiveExportFormats(settings))}`,
     `JSON: ${effectiveBoolean(settings, "json") ? "on" : "off"}`,
     `Keep logs: ${effectiveBoolean(settings, "keepLogs") ? "on" : "off"}`,
@@ -287,6 +291,9 @@ function activateCurrentItem(state: MenuState): void {
     case "strictReports":
     case "repairReports":
     case "deepReview":
+    case "snapshot":
+    case "failOnDrift":
+    case "failOnWeakEvidence":
     case "allWorkspaces":
     case "incremental":
       toggleBoolean(state, item.id);
@@ -796,6 +803,9 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "strictReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "strictReports"), "Strict report quality gates (fail weak phases)") },
   { id: "repairReports", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "repairReports"), "Repair reports that miss quality gates (provider repair pass)") },
   { id: "deepReview", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "deepReview"), "Feature-sliced deep review (extra risk shards)") },
+  { id: "snapshot", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "snapshot"), "Snapshot audit (detached Git worktree)") },
+  { id: "failOnDrift", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnDrift"), "Fail on repository drift (exit 2)") },
+  { id: "failOnWeakEvidence", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnWeakEvidence"), "Fail on weak evidence (exit 2)") },
   { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(effectiveExportFormats(settings))}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "json"), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "keepLogs"), "Keep technical logs") },

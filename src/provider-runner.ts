@@ -9,7 +9,7 @@ import { signalProcess } from "./process-runner.js";
 import { getReportProvider } from "./providers/index.js";
 import { renderStructuredProviderOutput } from "./provider-schema.js";
 import { createSensitiveTextMasker, maskSensitiveText } from "./secrets.js";
-import type { ProviderRunDiagnostics, ProviderRunRequest, ProviderRunResult } from "./types.js";
+import type { ProviderRunDiagnostics, ProviderRunRequest, ProviderRunResult, ProviderUsageTelemetry } from "./types.js";
 
 export type SpawnAdapter = (
   command: string,
@@ -95,6 +95,7 @@ export async function runProviderPhase(
       process.off("SIGTERM", interruptHandler);
       request.abortSignal?.removeEventListener("abort", abortHandler);
       diagnostics.endedAt = new Date().toISOString();
+      diagnostics.telemetry = extractProviderUsageTelemetry(stdoutText, stderrText);
       writeMasked(stdoutLog, stdoutMasker.flush());
       writeMasked(stderrLog, stderrMasker.flush());
       await Promise.all([
@@ -483,4 +484,141 @@ function appendBounded(current: string, addition: string): string {
 
 function truncate(value: string): string {
   return value.length <= MAX_ERROR_TEXT ? value : `${value.slice(0, MAX_ERROR_TEXT)}\n... truncated ...`;
+}
+
+export function extractProviderUsageTelemetry(stdoutText: string, stderrText: string): ProviderUsageTelemetry | undefined {
+  const stdout = parseUsageText(stdoutText);
+  const stderr = parseUsageText(stderrText);
+  const combined = mergeTelemetry(stdout, stderr);
+  if (!combined) {
+    return undefined;
+  }
+  return {
+    source: stdout && stderr ? "combined" : stdout ? "stdout" : "stderr",
+    ...combined
+  };
+}
+
+function parseUsageText(text: string): Omit<ProviderUsageTelemetry, "source"> | undefined {
+  if (!text.trim()) {
+    return undefined;
+  }
+  const jsonTelemetry = parseJsonUsageTelemetry(text);
+  const regexTelemetry = parseRegexUsageTelemetry(text);
+  return mergeTelemetry(jsonTelemetry, regexTelemetry);
+}
+
+function parseJsonUsageTelemetry(text: string): Omit<ProviderUsageTelemetry, "source"> | undefined {
+  let telemetry: Omit<ProviderUsageTelemetry, "source"> | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      telemetry = mergeTelemetry(telemetry, telemetryFromUnknown(parsed));
+    } catch {
+      // Ignore non-JSON provider output.
+    }
+  }
+  return telemetry;
+}
+
+function telemetryFromUnknown(value: unknown): Omit<ProviderUsageTelemetry, "source"> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const candidates = [
+    record,
+    record.usage,
+    record.token_usage,
+    record.tokenUsage,
+    record.metrics,
+    record.response
+  ];
+  let telemetry: Omit<ProviderUsageTelemetry, "source"> | undefined;
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+    const item = candidate as Record<string, unknown>;
+    telemetry = mergeTelemetry(telemetry, {
+      inputTokens: readNumber(item.input_tokens ?? item.inputTokens ?? item.prompt_tokens ?? item.promptTokens),
+      outputTokens: readNumber(item.output_tokens ?? item.outputTokens ?? item.completion_tokens ?? item.completionTokens),
+      totalTokens: readNumber(item.total_tokens ?? item.totalTokens),
+      costUsd: readNumber(item.cost_usd ?? item.costUsd ?? item.cost)
+    });
+  }
+  return telemetry;
+}
+
+function parseRegexUsageTelemetry(text: string): Omit<ProviderUsageTelemetry, "source"> | undefined {
+  return removeEmptyTelemetry({
+    inputTokens: firstNumber(text, [
+      /\b(?:input|prompt)\s+tokens?\s*[:=]\s*([0-9][0-9,._]*)/i,
+      /\b(?:input_tokens|prompt_tokens)\s*[:=]\s*([0-9][0-9,._]*)/i
+    ]),
+    outputTokens: firstNumber(text, [
+      /\b(?:output|completion)\s+tokens?\s*[:=]\s*([0-9][0-9,._]*)/i,
+      /\b(?:output_tokens|completion_tokens)\s*[:=]\s*([0-9][0-9,._]*)/i
+    ]),
+    totalTokens: firstNumber(text, [
+      /\btotal\s+tokens?\s*[:=]\s*([0-9][0-9,._]*)/i,
+      /\btotal_tokens\s*[:=]\s*([0-9][0-9,._]*)/i
+    ]),
+    costUsd: firstNumber(text, [
+      /\bcost(?:\s+usd)?\s*[:=]\s*\$?([0-9]+(?:\.[0-9]+)?)/i,
+      /\busd\s*[:=]\s*\$?([0-9]+(?:\.[0-9]+)?)/i
+    ])
+  });
+}
+
+function mergeTelemetry(
+  left: Omit<ProviderUsageTelemetry, "source"> | undefined,
+  right: Omit<ProviderUsageTelemetry, "source"> | undefined
+): Omit<ProviderUsageTelemetry, "source"> | undefined {
+  const merged = removeEmptyTelemetry({
+    inputTokens: right?.inputTokens ?? left?.inputTokens,
+    outputTokens: right?.outputTokens ?? left?.outputTokens,
+    totalTokens: right?.totalTokens ?? left?.totalTokens,
+    costUsd: right?.costUsd ?? left?.costUsd
+  });
+  if (merged && merged.totalTokens === undefined && (merged.inputTokens !== undefined || merged.outputTokens !== undefined)) {
+    merged.totalTokens = (merged.inputTokens ?? 0) + (merged.outputTokens ?? 0);
+  }
+  return removeEmptyTelemetry(merged);
+}
+
+function removeEmptyTelemetry(value: Omit<ProviderUsageTelemetry, "source"> | undefined): Omit<ProviderUsageTelemetry, "source"> | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.inputTokens !== undefined || value.outputTokens !== undefined || value.totalTokens !== undefined || value.costUsd !== undefined
+    ? value
+    : undefined;
+}
+
+function firstNumber(text: string, patterns: RegExp[]): number | undefined {
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const value = readNumber(match?.[1]);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/,/g, "").replace(/_/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
