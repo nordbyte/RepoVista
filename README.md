@@ -42,7 +42,7 @@ The main report entry point is written to:
 .repovista/<run-id>/index.md
 ```
 
-Use `repovista reports` to open the terminal report browser, select a generated run, search inside reports, filter findings by severity/status, jump to evidence refs, compare with the previous run, and navigate the full report or individual sections.
+Use `repovista reports` to open the terminal report browser, select a generated run, search inside one section or across runs, filter/sort findings, open finding details with evidence previews, triage statuses, compare with the previous run, bookmark sections/findings, export the current view, and navigate the full report or individual sections.
 
 During an interactive audit, RepoVista shows a live progress TUI with the current step and elapsed counters. Press `q` or `Ctrl+C` to cancel; RepoVista sends `SIGINT` to the provider process group so the provider can cancel cleanly, then escalates to `SIGTERM` and `SIGKILL` if it does not exit.
 

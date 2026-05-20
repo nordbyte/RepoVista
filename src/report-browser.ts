@@ -1,4 +1,5 @@
-import { lstat, readFile, readdir, rm, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { lstat, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { runCompareCommand } from "./compare.js";
@@ -9,6 +10,7 @@ import {
   renderTuiTextFrame,
   runTuiSession,
   shouldUseColor,
+  truncatePlain,
   wrappedLineCount,
   type TuiKey
 } from "./tui.js";
@@ -27,6 +29,8 @@ export interface ReportRunListOptions {
 export interface ReportRunSummary {
   runId: string;
   runDir: string;
+  projectRoot: string;
+  meta?: AuditMeta;
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -37,6 +41,8 @@ export interface ReportRunSummary {
   exitCode?: number;
   findings: StructuredFinding[];
   sections: ReportSection[];
+  evidencePreviews: Record<string, EvidencePreview>;
+  compareGroups?: ReportCompareGroups;
 }
 
 export interface ReportSection {
@@ -48,7 +54,35 @@ export interface ReportSection {
   phaseTotalDurationMs?: number;
 }
 
-export type ReportBrowserScreen = "runs" | "sections" | "viewer" | "confirm-delete";
+export interface EvidencePreview {
+  absolutePath?: string;
+  startLine?: number;
+  endLine?: number;
+  content: string;
+  error?: string;
+}
+
+export interface ReportCompareGroups {
+  added: StructuredFinding[];
+  changed: StructuredFinding[];
+  persisting: StructuredFinding[];
+  resolved: StructuredFinding[];
+}
+
+export type ReportBrowserScreen =
+  | "runs"
+  | "sections"
+  | "viewer"
+  | "findings-list"
+  | "finding-detail"
+  | "evidence-detail"
+  | "outline"
+  | "global-search"
+  | "compare-groups"
+  | "bookmarks"
+  | "export"
+  | "help"
+  | "confirm-delete";
 export type ReportBrowserInitialScreen = "runs" | "sections" | "viewer";
 
 export interface ReportBrowserState {
@@ -62,12 +96,27 @@ export interface ReportBrowserState {
   searchInput?: string;
   searchQuery?: string;
   searchMatchIndex?: number;
+  searchScope?: ReportSearchScope;
+  findingCursor?: number;
+  evidenceCursor?: number;
+  outlineCursor?: number;
+  globalSearchCursor?: number;
+  compareCursor?: number;
+  exportCursor?: number;
+  previousScreen?: ReportBrowserScreen;
+  findingSort?: ReportFindingSort;
+  layout?: ReportLayout;
+  bookmarkedFindings?: Set<string>;
+  bookmarkedSections?: Set<string>;
   severityFilter?: ReportSeverityFilter;
   statusFilter?: ReportStatusFilter;
 }
 
 export type ReportSeverityFilter = "all" | StructuredFinding["severity"];
 export type ReportStatusFilter = "all" | FindingStatus;
+export type ReportFindingSort = "severity" | "confidence" | "status" | "owner" | "sla" | "path" | "first-seen";
+export type ReportLayout = "compact" | "normal" | "detailed";
+export type ReportSearchScope = "section" | "run" | "all";
 
 export interface ReportBrowserLaunchOptions {
   initialRunDir?: string;
@@ -110,7 +159,7 @@ export async function runReportsMenu(
     }),
     onKey: async (key, controls) => {
       await handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100, shouldUseColor(output));
-      if ((key.ctrl && key.name === "c") || key.name === "q") {
+      if ((key.ctrl && key.name === "c") || (!state.searchMode && key.name === "q")) {
         controls.finish();
       }
     },
@@ -132,6 +181,15 @@ export function createReportBrowserState(
     runCursor,
     sectionCursor: 0,
     scroll: 0,
+    searchScope: "section",
+    findingCursor: 0,
+    evidenceCursor: 0,
+    outlineCursor: 0,
+    globalSearchCursor: 0,
+    compareCursor: 0,
+    exportCursor: 0,
+    findingSort: "severity",
+    layout: "normal",
     severityFilter: "all",
     statusFilter: "all"
   };
@@ -148,7 +206,7 @@ export async function listReportRuns(projectRoot: string, outDir: string, option
 
   const runs = await Promise.all(entries
     .filter((entry) => entry.isDirectory())
-    .map(async (entry) => loadReportRun(path.join(outRoot, entry.name), entry.name, options)));
+    .map(async (entry) => loadReportRun(path.join(outRoot, entry.name), entry.name, projectRoot, options)));
   const sorted = runs
     .filter((run): run is ReportRunSummary => Boolean(run))
     .sort((left, right) => creationTime(right) - creationTime(left) || right.runId.localeCompare(left.runId));
@@ -187,41 +245,189 @@ export function renderReportsMenuFrame(
     });
   }
 
-  if (state.screen === "viewer" && run && section) {
-    const content = renderSectionContent(run, section, state);
+  if (state.screen === "help") {
     return renderTuiTextFrame({
+      title: "RepoVista Reports",
+      help: "Esc returns | q exits",
+      sectionTitle: `Help: ${state.previousScreen ?? "reports"}`,
+      lines: helpLines(state.previousScreen ?? "runs"),
+      scroll: state.scroll,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      footer: contextFooter(run, state)
+    });
+  }
+
+  if (state.screen === "global-search") {
+    const matches = globalSearchMatches(runs, state);
+    return renderTuiListFrame({
       title: "RepoVista Reports",
       help: state.searchMode
         ? "Type search | Enter applies | Esc cancels | Backspace deletes"
-        : "Up/Down scroll | / search | n next | f severity | t status | e evidence | Esc returns | q exits",
-      sectionTitle: `${run.runId} / ${section.title}`,
+        : "/ edit search | Tab scope | Enter opens match | Up/Down move | Esc returns | q exits",
+      sectionTitle: `Global Search (${state.searchScope ?? "run"})`,
+      items: matches.map(formatGlobalSearchMatch),
+      cursor: state.globalSearchCursor ?? 0,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: state.searchQuery ? "No matches found." : "Press / to enter a search term.",
+      footer: `${contextFooter(run, state)} | ${matches.length} match(es)`
+    });
+  }
+
+  if (state.screen === "bookmarks") {
+    const items = bookmarkItems(runs, state);
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter opens bookmark | b removes selected | Esc returns | q exits",
+      sectionTitle: "Bookmarks",
+      items: items.map((item) => item.label),
+      cursor: state.globalSearchCursor ?? 0,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No bookmarks set in this TUI session.",
+      footer: contextFooter(run, state)
+    });
+  }
+
+  if (state.screen === "export" && run) {
+    const items = exportItems();
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter exports current view | Esc returns | q exits",
+      sectionTitle: "Export Current View",
+      items: items.map((item) => item.label),
+      cursor: state.exportCursor ?? 0,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No export formats available.",
+      footer: contextFooter(run, state)
+    });
+  }
+
+  if (state.screen === "outline" && run && section) {
+    const outline = outlineItems(section);
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter jumps to heading | Up/Down move | Esc returns | q exits",
+      sectionTitle: `${run.runId} / ${section.title} outline`,
+      items: outline.map((item) => item.label),
+      cursor: state.outlineCursor ?? 0,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No markdown headings found in this section.",
+      footer: contextFooter(run, state)
+    });
+  }
+
+  if (state.screen === "compare-groups" && run) {
+    const items = compareGroupItems(run);
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter opens finding | Up/Down move | v markdown compare | Esc returns | q exits",
+      sectionTitle: `${run.runId} compare groups`,
+      items: items.map((item) => item.label),
+      cursor: state.compareCursor ?? 0,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No previous run is available for grouped comparison.",
+      footer: contextFooter(run, state)
+    });
+  }
+
+  if (state.screen === "findings-list" && run) {
+    const findings = sortedFilteredFindings(run.findings, state);
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter details | 1-5 triage | s sort | f severity | t status | e evidence | b bookmark | Esc returns",
+      sectionTitle: `${run.runId} findings`,
+      items: findings.map((finding) => formatFindingListItem(run, finding, state)),
+      cursor: state.findingCursor ?? 0,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No findings match the current filters.",
+      footer: `${contextFooter(run, state)} | sort ${state.findingSort ?? "severity"}`
+    });
+  }
+
+  if (state.screen === "finding-detail" && run) {
+    const finding = currentFinding(run, state);
+    const content = finding ? renderFindingDetail(run, finding, state) : "No finding selected.";
+    return renderTuiTextFrame({
+      title: "RepoVista Reports",
+      help: "Up/Down scroll | e evidence | 1-5 triage | o editor | b bookmark | x export | Esc returns",
+      sectionTitle: finding ? `${finding.severity.toUpperCase()}: ${finding.title}` : "Finding Detail",
       lines: content.split(/\r?\n/),
       scroll: state.scroll,
       columns: options.columns,
       rows: options.rows,
       color: options.color,
-      footer: formatViewerFooter(section, state)
+      searchQuery: state.searchQuery,
+      footer: contextFooter(run, state, finding ? finding.id : undefined)
+    });
+  }
+
+  if (state.screen === "evidence-detail" && run) {
+    const finding = currentFinding(run, state);
+    const content = finding ? renderFindingEvidenceDetail(run, finding, state) : "No finding selected.";
+    return renderTuiTextFrame({
+      title: "RepoVista Reports",
+      help: "Up/Down scroll | o editor | b bookmark | Esc returns | q exits",
+      sectionTitle: finding ? `${finding.id} evidence` : "Evidence",
+      lines: content.split(/\r?\n/),
+      scroll: state.scroll,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      searchQuery: state.searchQuery,
+      footer: contextFooter(run, state)
+    });
+  }
+
+  if (state.screen === "viewer" && run && section) {
+    const content = renderSectionContent(run, section, state);
+    const matches = state.searchQuery ? searchMatchCount(content, state.searchQuery) : 0;
+    return renderTuiTextFrame({
+      title: "RepoVista Reports",
+      help: state.searchMode
+        ? "Type search | Enter applies | Esc cancels | Backspace deletes"
+        : "Up/Down scroll | / search | n next | o outline | g global | f severity | t status | e evidence | ? help",
+      sectionTitle: `${run.runId} / ${section.title} | ${runContextLabel(run)}`,
+      lines: content.split(/\r?\n/),
+      scroll: state.scroll,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      searchQuery: state.searchQuery,
+      footer: `${formatViewerFooter(section, state, matches)} | ${contextFooter(run, state)}`
     });
   }
 
   if (state.screen === "sections" && run) {
     return renderTuiListFrame({
       title: "RepoVista Reports",
-      help: "Up/Down move | Enter opens | f severity | t status | e evidence | c compare | Esc returns | q exits",
-      sectionTitle: `${run.runId} sections`,
+      help: "Enter opens | f/t filters | h health | c compare | g search | b bookmark | ? help | Esc returns",
+      sectionTitle: `${run.runId} sections | ${runContextLabel(run)}`,
       items: run.sections.map(formatSectionItem),
       cursor: state.sectionCursor,
       columns: options.columns,
       rows: options.rows,
       color: options.color,
       emptyMessage: "No report sections found.",
-      footer: `${Math.min(state.sectionCursor + 1, run.sections.length)}/${run.sections.length} | ${filterLabel(state)} | ${run.runDir}`
+      footer: `${Math.min(state.sectionCursor + 1, run.sections.length)}/${run.sections.length} | ${contextFooter(run, state)} | ${run.runDir}`
     });
   }
 
   return renderTuiListFrame({
     title: "RepoVista Reports",
-    help: "Up/Down move | Enter opens report | Space marks delete | d deletes marked | q exits",
+    help: "Up/Down move | Enter opens report | Space marks delete | d deletes marked | g search | ? help | q exits",
     sectionTitle: "Report runs",
     items: runs.map((item) => formatRunItem(item, isRunMarked(state, item))),
     cursor: state.runCursor,
@@ -234,7 +440,39 @@ export function renderReportsMenuFrame(
 }
 
 async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserState, key: TuiKey, rows: number, columns: number, color: boolean): Promise<void> {
-  if ((key.ctrl && key.name === "c") || key.name === "q") {
+  if ((key.ctrl && key.name === "c") || (!state.searchMode && key.name === "q")) {
+    return;
+  }
+  if (!state.searchMode && (key.name === "?" || key.sequence === "?")) {
+    state.previousScreen = state.screen;
+    state.screen = "help";
+    state.scroll = 0;
+    return;
+  }
+  if (!state.searchMode && key.name === "l") {
+    state.layout = nextLayout(state.layout ?? "normal");
+    state.notice = `Layout: ${state.layout}.`;
+    return;
+  }
+  if (!state.searchMode && key.name === "m") {
+    state.previousScreen = state.screen;
+    state.screen = "bookmarks";
+    state.globalSearchCursor = 0;
+    return;
+  }
+  if (!state.searchMode && key.name === "x" && state.screen !== "runs" && state.screen !== "confirm-delete") {
+    state.previousScreen = state.screen;
+    state.screen = "export";
+    state.exportCursor = 0;
+    return;
+  }
+  if (!state.searchMode && key.name === "g" && state.screen !== "confirm-delete") {
+    state.previousScreen = state.screen;
+    state.screen = "global-search";
+    state.searchScope = state.searchScope === "all" ? "all" : "run";
+    state.globalSearchCursor = 0;
+    state.searchMode = !state.searchQuery;
+    state.searchInput = state.searchQuery ?? "";
     return;
   }
   if (state.screen === "confirm-delete") {
@@ -253,6 +491,68 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
       } catch (error) {
         state.notice = `Delete failed: ${error instanceof Error ? error.message : String(error)}`;
       }
+    }
+    return;
+  }
+
+  if (state.screen === "help") {
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace" || key.name === "return" || key.name === "enter") {
+      state.screen = state.previousScreen ?? "runs";
+      state.previousScreen = undefined;
+      state.scroll = 0;
+    } else if (key.name === "up") {
+      state.scroll = Math.max(0, state.scroll - 1);
+    } else if (key.name === "down") {
+      state.scroll += 1;
+    }
+    return;
+  }
+
+  if (state.screen === "global-search") {
+    if (state.searchMode) {
+      handleSearchInput(state, key);
+      state.globalSearchCursor = 0;
+      return;
+    }
+    const matches = globalSearchMatches(runs, state);
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = state.previousScreen ?? "sections";
+      state.previousScreen = undefined;
+    } else if (key.name === "/" || key.sequence === "/") {
+      state.searchMode = true;
+      state.searchInput = state.searchQuery ?? "";
+    } else if (key.name === "tab") {
+      state.searchScope = nextSearchScope(state.searchScope ?? "run");
+      state.globalSearchCursor = 0;
+    } else if (key.name === "up") {
+      state.globalSearchCursor = wrapIndex((state.globalSearchCursor ?? 0) - 1, matches.length);
+    } else if (key.name === "down") {
+      state.globalSearchCursor = wrapIndex((state.globalSearchCursor ?? 0) + 1, matches.length);
+    } else if ((key.name === "return" || key.name === "enter" || key.name === "right") && matches.length) {
+      const match = matches[clampCursor(state.globalSearchCursor ?? 0, matches.length)];
+      state.runCursor = match.runIndex;
+      state.sectionCursor = match.sectionIndex;
+      state.screen = "viewer";
+      state.scroll = match.line;
+      state.searchMatchIndex = 0;
+    }
+    return;
+  }
+
+  if (state.screen === "bookmarks") {
+    const items = bookmarkItems(runs, state);
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = state.previousScreen ?? "runs";
+      state.previousScreen = undefined;
+    } else if (key.name === "up") {
+      state.globalSearchCursor = wrapIndex((state.globalSearchCursor ?? 0) - 1, items.length);
+    } else if (key.name === "down") {
+      state.globalSearchCursor = wrapIndex((state.globalSearchCursor ?? 0) + 1, items.length);
+    } else if (key.name === "b" && items.length) {
+      removeBookmark(items[clampCursor(state.globalSearchCursor ?? 0, items.length)], state);
+      state.globalSearchCursor = clampCursor(state.globalSearchCursor ?? 0, Math.max(0, items.length - 1));
+    } else if ((key.name === "return" || key.name === "enter" || key.name === "right") && items.length) {
+      openBookmark(items[clampCursor(state.globalSearchCursor ?? 0, items.length)], runs, state);
     }
     return;
   }
@@ -290,6 +590,28 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
     return;
   }
 
+  if (state.screen === "export") {
+    const items = exportItems();
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = state.previousScreen ?? "sections";
+      state.previousScreen = undefined;
+    } else if (key.name === "up") {
+      state.exportCursor = wrapIndex((state.exportCursor ?? 0) - 1, items.length);
+    } else if (key.name === "down") {
+      state.exportCursor = wrapIndex((state.exportCursor ?? 0) + 1, items.length);
+    } else if ((key.name === "return" || key.name === "enter") && items.length) {
+      try {
+        const exported = await exportCurrentView(run, state, items[clampCursor(state.exportCursor ?? 0, items.length)].format);
+        state.notice = `Exported ${exported}.`;
+      } catch (error) {
+        state.notice = `Export failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      state.screen = state.previousScreen ?? "sections";
+      state.previousScreen = undefined;
+    }
+    return;
+  }
+
   if (state.screen === "sections") {
     if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
       state.screen = "runs";
@@ -307,10 +629,169 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
     } else if (key.name === "e") {
       selectSectionById(run, state, "evidence-refs");
     } else if (key.name === "c") {
-      selectSectionById(run, state, "compare-previous");
+      state.screen = "compare-groups";
+      state.compareCursor = 0;
+    } else if (key.name === "h") {
+      selectSectionById(run, state, "health");
+    } else if (key.name === "b") {
+      toggleSectionBookmark(run, state);
+    } else if (key.name === "o") {
+      state.screen = "outline";
+      state.outlineCursor = 0;
     } else if (key.name === "return" || key.name === "enter" || key.name === "right") {
-      state.screen = "viewer";
+      if (run.sections[state.sectionCursor]?.id === "findings") {
+        state.screen = "findings-list";
+        state.findingCursor = 0;
+      } else if (run.sections[state.sectionCursor]?.id === "compare-previous") {
+        state.screen = "compare-groups";
+        state.compareCursor = 0;
+      } else {
+        state.screen = "viewer";
+      }
       state.scroll = 0;
+    }
+    return;
+  }
+
+  if (state.screen === "outline") {
+    const section = run.sections[state.sectionCursor];
+    const outline = section ? outlineItems(section) : [];
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = "viewer";
+    } else if (key.name === "up") {
+      state.outlineCursor = wrapIndex((state.outlineCursor ?? 0) - 1, outline.length);
+    } else if (key.name === "down") {
+      state.outlineCursor = wrapIndex((state.outlineCursor ?? 0) + 1, outline.length);
+    } else if ((key.name === "return" || key.name === "enter" || key.name === "right") && outline.length) {
+      state.screen = "viewer";
+      state.scroll = outline[clampCursor(state.outlineCursor ?? 0, outline.length)].line;
+    }
+    return;
+  }
+
+  if (state.screen === "compare-groups") {
+    const items = compareGroupItems(run);
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = "sections";
+    } else if (key.name === "up") {
+      state.compareCursor = wrapIndex((state.compareCursor ?? 0) - 1, items.length);
+    } else if (key.name === "down") {
+      state.compareCursor = wrapIndex((state.compareCursor ?? 0) + 1, items.length);
+    } else if (key.name === "v") {
+      selectSectionById(run, state, "compare-previous");
+      state.screen = "viewer";
+    } else if ((key.name === "return" || key.name === "enter" || key.name === "right") && items.length) {
+      const item = items[clampCursor(state.compareCursor ?? 0, items.length)];
+      if (item.finding) {
+        selectFinding(run, state, item.finding);
+        state.screen = "finding-detail";
+        state.scroll = 0;
+      }
+    }
+    return;
+  }
+
+  if (state.screen === "findings-list") {
+    const findings = sortedFilteredFindings(run.findings, state);
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = "sections";
+      selectSectionById(run, state, "findings");
+    } else if (key.name === "up") {
+      state.findingCursor = wrapIndex((state.findingCursor ?? 0) - 1, findings.length);
+    } else if (key.name === "down") {
+      state.findingCursor = wrapIndex((state.findingCursor ?? 0) + 1, findings.length);
+    } else if (key.name === "s") {
+      state.findingSort = nextFindingSort(state.findingSort ?? "severity");
+      state.findingCursor = 0;
+    } else if (key.name === "f") {
+      state.severityFilter = nextSeverityFilter(state.severityFilter ?? "all");
+      state.findingCursor = 0;
+    } else if (key.name === "t") {
+      state.statusFilter = nextStatusFilter(state.statusFilter ?? "all");
+      state.findingCursor = 0;
+    } else if (isTriageKey(key) && findings.length) {
+      await triageFinding(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], triageStatusForKey(key));
+      state.notice = `Status set to ${triageStatusForKey(key)}.`;
+    } else if (key.name === "b" && findings.length) {
+      toggleFindingBookmark(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
+    } else if (key.name === "e" && findings.length) {
+      state.screen = "evidence-detail";
+      state.scroll = 0;
+      state.evidenceCursor = 0;
+    } else if (key.name === "v") {
+      state.screen = "compare-groups";
+      state.compareCursor = 0;
+    } else if ((key.name === "return" || key.name === "enter" || key.name === "right") && findings.length) {
+      state.screen = "finding-detail";
+      state.scroll = 0;
+    }
+    return;
+  }
+
+  if (state.screen === "finding-detail") {
+    const finding = currentFinding(run, state);
+    const content = finding ? renderFindingDetail(run, finding, state) : "";
+    const lineCount = wrappedLineCount(content.split(/\r?\n/), columns, color);
+    const page = Math.max(4, rows - 8);
+    const maxScroll = Math.max(0, lineCount - page);
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = "findings-list";
+      state.scroll = 0;
+    } else if (key.name === "e" && finding) {
+      state.screen = "evidence-detail";
+      state.scroll = 0;
+      state.evidenceCursor = 0;
+    } else if (key.name === "b" && finding) {
+      toggleFindingBookmark(run, finding, state);
+    } else if (key.name === "o" && finding) {
+      state.notice = openFindingEvidenceInEditor(run, finding, state);
+    } else if (isTriageKey(key) && finding) {
+      await triageFinding(run, finding, triageStatusForKey(key));
+      state.notice = `Status set to ${triageStatusForKey(key)}.`;
+    } else if (key.name === "v") {
+      state.screen = "compare-groups";
+      state.compareCursor = 0;
+    } else if (key.name === "up") {
+      state.scroll = Math.max(0, state.scroll - 1);
+    } else if (key.name === "down") {
+      state.scroll = Math.min(maxScroll, state.scroll + 1);
+    } else if (key.name === "pageup") {
+      state.scroll = Math.max(0, state.scroll - page);
+    } else if (key.name === "pagedown" || key.name === "space") {
+      state.scroll = Math.min(maxScroll, state.scroll + page);
+    } else if (key.name === "home") {
+      state.scroll = 0;
+    } else if (key.name === "end") {
+      state.scroll = maxScroll;
+    }
+    return;
+  }
+
+  if (state.screen === "evidence-detail") {
+    const finding = currentFinding(run, state);
+    const content = finding ? renderFindingEvidenceDetail(run, finding, state) : "";
+    const lineCount = wrappedLineCount(content.split(/\r?\n/), columns, color);
+    const page = Math.max(4, rows - 8);
+    const maxScroll = Math.max(0, lineCount - page);
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = "finding-detail";
+      state.scroll = 0;
+    } else if (key.name === "o" && finding) {
+      state.notice = openFindingEvidenceInEditor(run, finding, state);
+    } else if (key.name === "b" && finding) {
+      toggleFindingBookmark(run, finding, state);
+    } else if (key.name === "up") {
+      state.scroll = Math.max(0, state.scroll - 1);
+    } else if (key.name === "down") {
+      state.scroll = Math.min(maxScroll, state.scroll + 1);
+    } else if (key.name === "pageup") {
+      state.scroll = Math.max(0, state.scroll - page);
+    } else if (key.name === "pagedown" || key.name === "space") {
+      state.scroll = Math.min(maxScroll, state.scroll + page);
+    } else if (key.name === "home") {
+      state.scroll = 0;
+    } else if (key.name === "end") {
+      state.scroll = maxScroll;
     }
     return;
   }
@@ -351,6 +832,24 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
       selectSectionById(run, state, "evidence-refs");
       state.screen = "viewer";
       state.scroll = 0;
+    } else if (key.name === "h") {
+      selectSectionById(run, state, "health");
+      state.scroll = 0;
+    } else if (key.name === "o") {
+      state.screen = "outline";
+      state.outlineCursor = 0;
+    } else if (key.name === "b") {
+      toggleSectionBookmark(run, state);
+    } else if (key.name === "return" || key.name === "enter") {
+      if (section?.id === "findings") {
+        state.screen = "findings-list";
+        state.findingCursor = 0;
+        state.scroll = 0;
+      } else if (section?.id === "compare-previous") {
+        state.screen = "compare-groups";
+        state.compareCursor = 0;
+        state.scroll = 0;
+      }
     } else if (key.name === "up") {
       state.scroll = Math.max(0, state.scroll - 1);
     } else if (key.name === "down") {
@@ -383,7 +882,12 @@ export async function deleteMarkedReportRuns(runs: ReportRunSummary[], markedDir
   return deleted;
 }
 
-async function loadReportRun(runDir: string, fallbackRunId: string, options: ReportRunListOptions): Promise<ReportRunSummary | undefined> {
+async function loadReportRun(
+  runDir: string,
+  fallbackRunId: string,
+  projectRoot: string,
+  options: ReportRunListOptions
+): Promise<ReportRunSummary | undefined> {
   const marker = await hasRunMarker(runDir);
   if (!marker) {
     return undefined;
@@ -393,6 +897,8 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
     readJson<StructuredFinding[]>(path.join(runDir, "findings.json"))
   ]);
   const normalizedFindings = findings ?? meta?.findings ?? [];
+  const resolvedProjectRoot = meta?.projectRoot ?? meta?.evidence?.projectRoot ?? projectRoot;
+  const evidencePreviews = await loadEvidencePreviews(resolvedProjectRoot, normalizedFindings);
   const durationMs = runDurationMs(meta);
   const sections = await loadReportSections(runDir, meta, durationMs, normalizedFindings);
   if (!sections.length) {
@@ -409,6 +915,8 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
   return {
     runId: meta?.runId ?? fallbackRunId,
     runDir,
+    projectRoot: resolvedProjectRoot,
+    meta,
     startedAt: meta?.startedAt,
     completedAt: meta?.completedAt,
     durationMs,
@@ -418,7 +926,8 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
     findingCount: normalizedFindings.length || countFindings(meta?.findingCounts),
     exitCode: meta?.exitCode,
     findings: normalizedFindings,
-    sections
+    sections,
+    evidencePreviews
   };
 }
 
@@ -442,6 +951,11 @@ async function loadReportSections(runDir: string, meta: AuditMeta | undefined, r
     return [];
   }
   const generatedSections: ReportSection[] = [
+    {
+      id: "health",
+      title: "Report Health",
+      content: renderReportHealthSection(meta, findings)
+    },
     {
       id: "findings",
       title: "Findings",
@@ -473,6 +987,7 @@ async function attachCompareSections(projectRoot: string, runs: ReportRunSummary
   for (let index = 0; index < runs.length - 1; index += 1) {
     const current = runs[index];
     const previous = runs[index + 1];
+    current.compareGroups = buildCompareGroups(current.findings, previous.findings);
     try {
       current.sections.push({
         id: "compare-previous",
@@ -490,11 +1005,17 @@ async function attachCompareSections(projectRoot: string, runs: ReportRunSummary
 }
 
 function renderSectionContent(run: ReportRunSummary, section: ReportSection, state: ReportBrowserState): string {
+  if (section.id === "health") {
+    return renderReportHealthSection(run.meta, run.findings);
+  }
   if (section.id === "findings") {
-    return renderFindingsSection(filteredFindings(run.findings, state));
+    return renderFindingsSection(sortedFilteredFindings(run.findings, state), run);
   }
   if (section.id === "evidence-refs") {
-    return renderEvidenceRefsSection(filteredFindings(run.findings, state));
+    return renderEvidenceRefsSection(sortedFilteredFindings(run.findings, state), run);
+  }
+  if (section.id === "compare-previous" && run.compareGroups) {
+    return renderCompareGroupsSection(run.compareGroups);
   }
   return section.content;
 }
@@ -510,7 +1031,11 @@ function filteredFindings(findings: StructuredFinding[], state: ReportBrowserSta
   );
 }
 
-function renderFindingsSection(findings: StructuredFinding[]): string {
+function sortedFilteredFindings(findings: StructuredFinding[], state: ReportBrowserState): StructuredFinding[] {
+  return [...filteredFindings(findings, state)].sort((left, right) => compareFindings(left, right, state.findingSort ?? "severity"));
+}
+
+function renderFindingsSection(findings: StructuredFinding[], run?: ReportRunSummary): string {
   if (!findings.length) {
     return "# Findings\n\nNo findings match the current filters.\n";
   }
@@ -519,6 +1044,7 @@ function renderFindingsSection(findings: StructuredFinding[]): string {
     "",
     `- ID: ${finding.id}`,
     `- Status: ${finding.status ?? "open"}`,
+    run?.compareGroups ? `- Diff: ${findingDiffLabel(run, finding)}` : undefined,
     `- Category: ${finding.category ?? "n/a"}`,
     `- Owner: ${finding.owner ?? "n/a"}`,
     `- Labels: ${finding.labels?.join(", ") || "n/a"}`,
@@ -533,10 +1059,10 @@ function renderFindingsSection(findings: StructuredFinding[]): string {
     "",
     "Evidence references:",
     renderEvidenceReferences(findingEvidenceReferences(finding)).map((line) => `- ${line}`).join("\n") || "- n/a"
-  ].join("\n")).join("\n\n")}\n`;
+  ].filter(Boolean).join("\n")).join("\n\n")}\n`;
 }
 
-function renderEvidenceRefsSection(findings: StructuredFinding[]): string {
+function renderEvidenceRefsSection(findings: StructuredFinding[], run?: ReportRunSummary): string {
   const rows = findings.flatMap((finding) => findingEvidenceReferences(finding).map((reference) => ({
     finding,
     reference
@@ -550,8 +1076,167 @@ function renderEvidenceRefsSection(findings: StructuredFinding[]): string {
     `- Severity: ${finding.severity}`,
     `- Status: ${finding.status ?? "open"}`,
     `- Path: ${formatEvidenceReference(reference)}`,
-    reference.quote ? `- Quote: ${reference.quote}` : undefined
+    reference.quote ? `- Quote: ${reference.quote}` : undefined,
+    run ? renderEvidencePreviewMarkdown(run, finding, reference) : undefined
   ].filter(Boolean).join("\n")).join("\n\n")}\n`;
+}
+
+function renderReportHealthSection(meta: AuditMeta | undefined, findings: StructuredFinding[]): string {
+  const quality = meta?.analytics ? Math.max(0, Math.min(100, Math.round(100 - weakEvidenceFindings(findings).length * 5))) : undefined;
+  const failedPhases = (meta?.phases ?? []).filter((phase) => phase.status === "failed");
+  const repairAttempts = (meta?.phases ?? []).reduce((sum, phase) => sum + (phase.repairAttempts?.length ?? 0), meta?.options?.repairAttempts ?? 0);
+  const driftWarnings = meta?.repositoryDrift?.warnings ?? [];
+  const weakEvidence = weakEvidenceFindings(findings);
+  const preflightWarnings = meta?.preflight?.warnings ?? [];
+  const checks = [
+    `- Quality score: ${quality === undefined ? "n/a" : `${quality}/100`}`,
+    `- Repair attempts configured: ${repairAttempts}`,
+    `- Weak evidence findings: ${weakEvidence.length}`,
+    `- Repository drift: ${meta?.repositoryDrift?.detected ? "detected" : "not detected"}`,
+    `- Failed phases/checks: ${failedPhases.length}`,
+    `- Preflight warnings: ${preflightWarnings.length}`,
+    `- Exit: ${meta?.exitCode ?? "n/a"}`
+  ];
+  const details = [
+    failedPhases.length ? ["## Failed Phases", "", ...failedPhases.map((phase) => `- ${phase.id}: ${phase.status}${phase.error ? ` (${phase.error})` : ""}`)] : [],
+    weakEvidence.length ? ["## Weak Evidence", "", ...weakEvidence.map((finding) => `- ${finding.id}: ${finding.title}`)] : [],
+    driftWarnings.length ? ["## Drift Warnings", "", ...driftWarnings.map((warning) => `- ${warning}`)] : [],
+    preflightWarnings.length ? ["## Preflight Warnings", "", ...preflightWarnings.map((warning) => `- ${warning}`)] : []
+  ].flat();
+  return ["# Report Health", "", ...checks, "", ...details].join("\n").trimEnd() + "\n";
+}
+
+function weakEvidenceFindings(findings: StructuredFinding[]): StructuredFinding[] {
+  return findings.filter((finding) => {
+    const references = findingEvidenceReferences(finding);
+    return !references.length || finding.evidenceValidation?.passed === false || references.some((reference) => !reference.quote && !reference.startLine);
+  });
+}
+
+function renderCompareGroupsSection(groups: ReportCompareGroups): string {
+  const groupEntries: Array<[string, StructuredFinding[]]> = [
+    ["Added", groups.added],
+    ["Changed", groups.changed],
+    ["Persisting", groups.persisting],
+    ["Resolved", groups.resolved]
+  ];
+  return ["# Compare Previous Run", "", ...groupEntries.flatMap(([title, findings]) => [
+    `## ${title} (${findings.length})`,
+    "",
+    ...(findings.length ? findings.map((finding) => `- ${finding.severity.toUpperCase()}: ${finding.id} - ${finding.title}`) : ["- n/a"]),
+    ""
+  ])].join("\n");
+}
+
+function buildCompareGroups(currentFindings: StructuredFinding[], previousFindings: StructuredFinding[]): ReportCompareGroups {
+  const previousByKey = new Map(previousFindings.map((finding) => [findingCompareKey(finding), finding]));
+  const currentKeys = new Set(currentFindings.map(findingCompareKey));
+  const groups: ReportCompareGroups = {
+    added: [],
+    changed: [],
+    persisting: [],
+    resolved: []
+  };
+
+  for (const finding of currentFindings) {
+    const previous = previousByKey.get(findingCompareKey(finding));
+    if (!previous) {
+      groups.added.push(finding);
+    } else if (findingChanged(previous, finding)) {
+      groups.changed.push(finding);
+    } else {
+      groups.persisting.push(finding);
+    }
+  }
+
+  for (const finding of previousFindings) {
+    if (!currentKeys.has(findingCompareKey(finding))) {
+      groups.resolved.push(finding);
+    }
+  }
+
+  return groups;
+}
+
+function findingCompareKey(finding: StructuredFinding): string {
+  return finding.signature ?? finding.id ?? `${finding.title}:${finding.paths.join(",")}`;
+}
+
+function findingChanged(previous: StructuredFinding, current: StructuredFinding): boolean {
+  return previous.severity !== current.severity ||
+    (previous.status ?? "open") !== (current.status ?? "open") ||
+    previous.title !== current.title ||
+    previous.recommendation !== current.recommendation;
+}
+
+async function loadEvidencePreviews(projectRoot: string, findings: StructuredFinding[]): Promise<Record<string, EvidencePreview>> {
+  const previews: Record<string, EvidencePreview> = {};
+  await Promise.all(findings.flatMap((finding) => findingEvidenceReferences(finding).map(async (reference) => {
+    previews[evidencePreviewKey(finding, reference)] = await readEvidencePreview(projectRoot, reference);
+  })));
+  return previews;
+}
+
+async function readEvidencePreview(projectRoot: string, reference: FindingEvidenceReference): Promise<EvidencePreview> {
+  if (!reference.path) {
+    return { content: "", error: "Evidence reference has no path." };
+  }
+  const absolutePath = path.resolve(projectRoot, reference.path);
+  const root = path.resolve(projectRoot);
+  if (absolutePath !== root && !absolutePath.startsWith(`${root}${path.sep}`)) {
+    return { absolutePath, content: "", error: "Evidence path is outside the project root." };
+  }
+  try {
+    const content = await readFile(absolutePath, "utf8");
+    const lines = content.split(/\r?\n/);
+    const quoteLine = reference.quote
+      ? lines.findIndex((line) => line.includes(reference.quote as string)) + 1
+      : 0;
+    const startLine = Math.max(1, reference.startLine ?? quoteLine ?? 1);
+    const endLine = Math.max(startLine, reference.endLine ?? startLine);
+    const previewStart = Math.max(1, startLine - 2);
+    const previewEnd = Math.min(lines.length, endLine + 2);
+    const rendered = [];
+    for (let line = previewStart; line <= previewEnd; line += 1) {
+      const marker = line >= startLine && line <= endLine ? ">" : " ";
+      rendered.push(`${marker} ${String(line).padStart(5, " ")} | ${lines[line - 1] ?? ""}`);
+    }
+    return {
+      absolutePath,
+      startLine,
+      endLine,
+      content: rendered.join("\n")
+    };
+  } catch (error) {
+    return {
+      absolutePath,
+      startLine: reference.startLine,
+      endLine: reference.endLine,
+      content: "",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function evidencePreviewKey(finding: StructuredFinding, reference: FindingEvidenceReference): string {
+  return `${finding.id}|${reference.path}|${reference.startLine ?? ""}|${reference.endLine ?? ""}|${reference.quote ?? ""}`;
+}
+
+function renderEvidencePreviewMarkdown(run: ReportRunSummary, finding: StructuredFinding, reference: FindingEvidenceReference): string | undefined {
+  const preview = run.evidencePreviews[evidencePreviewKey(finding, reference)];
+  if (!preview) {
+    return undefined;
+  }
+  if (preview.error) {
+    return `\nPreview: ${preview.error}`;
+  }
+  return [
+    "",
+    "Preview:",
+    "```text",
+    preview.content,
+    "```"
+  ].join("\n");
 }
 
 async function hasRunMarker(runDir: string): Promise<boolean> {
@@ -586,8 +1271,8 @@ async function readText(filePath: string): Promise<string | undefined> {
 
 function formatRunItem(run: ReportRunSummary, marked: boolean): string {
   const when = compactRunTime(run.startedAt ?? run.runId ?? run.completedAt);
-  const model = `model: ${run.model ?? "default"}`;
-  const reasoning = `reasoning: ${run.reasoning ?? "default"}`;
+  const model = `model: ${run.model ?? "n/a"}`;
+  const reasoning = `reasoning: ${run.reasoning ?? "n/a"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
   return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | total ${formatDuration(run.durationMs)}`;
 }
@@ -604,18 +1289,690 @@ function formatSectionItem(section: ReportSection): string {
   return `${section.title}: ${section.fileName ?? "combined"} | ${lines} line(s) | ${duration}`;
 }
 
-function formatViewerFooter(section: ReportSection, state: ReportBrowserState): string {
+function formatViewerFooter(section: ReportSection, state: ReportBrowserState, matchCount = 0): string {
   const parts = [
     section.fileName ?? "combined",
     `${state.scroll + 1}+`,
     filterLabel(state),
-    state.searchMode ? `search: ${state.searchInput ?? ""}` : state.searchQuery ? `search: ${state.searchQuery}` : undefined
+    state.searchMode
+      ? `search: ${state.searchInput ?? ""}`
+      : state.searchQuery
+        ? `search: ${state.searchQuery} (${matchPositionLabel(state, matchCount)})`
+        : undefined
   ];
   return parts.filter(Boolean).join(" | ");
 }
 
 function filterLabel(state: ReportBrowserState): string {
   return `severity ${state.severityFilter ?? "all"} | status ${state.statusFilter ?? "all"}`;
+}
+
+function contextFooter(run: ReportRunSummary | undefined, state: ReportBrowserState, suffix?: string): string {
+  if (!run) {
+    return state.notice ?? "";
+  }
+  return [
+    state.notice,
+    runContextLabel(run),
+    `total ${formatDuration(run.durationMs)}`,
+    filterLabel(state),
+    `scope ${state.searchScope ?? "section"}`,
+    `layout ${state.layout ?? "normal"}`,
+    suffix
+  ].filter(Boolean).join(" | ");
+}
+
+function runContextLabel(run: ReportRunSummary): string {
+  return [
+    run.provider ?? "provider n/a",
+    `model ${run.model ?? "n/a"}`,
+    `reasoning ${run.reasoning ?? "n/a"}`,
+    run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`
+  ].join(" | ");
+}
+
+function matchPositionLabel(state: ReportBrowserState, matchCount: number): string {
+  if (!matchCount) {
+    return "0/0";
+  }
+  const index = Math.min(matchCount, Math.max(1, (state.searchMatchIndex ?? 0) + 1));
+  return `${index}/${matchCount}`;
+}
+
+function searchMatchCount(content: string, query: string): number {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return 0;
+  }
+  return content
+    .split(/\r?\n/)
+    .reduce((count, line) => {
+      let offset = 0;
+      let matches = 0;
+      const haystack = line.toLowerCase();
+      while (haystack.indexOf(needle, offset) >= 0) {
+        const index = haystack.indexOf(needle, offset);
+        matches += 1;
+        offset = index + needle.length;
+      }
+      return count + matches;
+    }, 0);
+}
+
+function currentFinding(run: ReportRunSummary, state: ReportBrowserState): StructuredFinding | undefined {
+  const findings = sortedFilteredFindings(run.findings, state);
+  return findings[clampCursor(state.findingCursor ?? 0, findings.length)];
+}
+
+function selectFinding(run: ReportRunSummary, state: ReportBrowserState, finding: StructuredFinding): void {
+  const findings = sortedFilteredFindings(run.findings, state);
+  const index = findings.findIndex((item) => item.id === finding.id);
+  state.findingCursor = index >= 0 ? index : 0;
+}
+
+function formatFindingListItem(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
+  const bookmarked = findingBookmarks(state).has(findingBookmarkKey(run, finding)) ? "*" : " ";
+  const diff = run.compareGroups ? `${findingDiffLabel(run, finding)} | ` : "";
+  const owner = finding.owner ?? "owner n/a";
+  const confidence = finding.confidence ? ` | confidence ${finding.confidence}` : "";
+  const sla = finding.sla?.dueAt ? ` | SLA ${finding.sla.dueAt}${finding.sla.overdue ? " overdue" : ""}` : "";
+  const pathLabel = finding.paths[0] ?? "path n/a";
+  if ((state.layout ?? "normal") === "compact") {
+    return `${bookmarked} ${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${finding.title}`;
+  }
+  if (state.layout === "detailed") {
+    return `${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner}${confidence}${sla} | ${pathLabel} | ${finding.title}`;
+  }
+  return `${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner} | ${pathLabel} | ${finding.title}`;
+}
+
+function renderFindingDetail(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
+  const references = findingEvidenceReferences(finding);
+  const lines = [
+    `# ${finding.title}`,
+    "",
+    `- ID: ${finding.id}`,
+    `- Severity: ${finding.severity}`,
+    `- Status: ${finding.status ?? "open"}`,
+    `- Diff: ${findingDiffLabel(run, finding)}`,
+    `- Category: ${finding.category ?? "n/a"}`,
+    `- Confidence: ${finding.confidence ?? "n/a"}`,
+    `- Owner: ${finding.owner ?? "n/a"}`,
+    `- Labels: ${finding.labels?.join(", ") || "n/a"}`,
+    `- SLA: ${finding.sla ? `${finding.sla.dueAt}${finding.sla.overdue ? " (overdue)" : ""}` : "n/a"}`,
+    `- First seen: ${finding.firstSeenRunId ?? finding.createdAt ?? "n/a"}`,
+    `- Last seen: ${finding.lastSeenRunId ?? finding.updatedAt ?? "n/a"}`,
+    "",
+    "## Paths",
+    "",
+    ...(finding.paths.length ? finding.paths.map((item) => `- ${item}`) : ["- n/a"]),
+    "",
+    "## Evidence",
+    "",
+    finding.evidence ?? "n/a"
+  ];
+
+  if ((state.layout ?? "normal") !== "compact") {
+    lines.push(
+      "",
+      "## Recommendation",
+      "",
+      finding.recommendation ?? "n/a",
+      "",
+      "## Problem Rationale",
+      "",
+      finding.problemRationale ?? "n/a",
+      "",
+      "## Reproduction",
+      "",
+      finding.reproduction ?? "n/a",
+      "",
+      "## Suggested Regression Test",
+      "",
+      finding.suggestedRegressionTest ?? "n/a"
+    );
+  }
+
+  if (state.layout === "detailed") {
+    lines.push(
+      "",
+      "## Minimum Fix Scope",
+      "",
+      finding.minimumFixScope ?? "n/a",
+      "",
+      "## Issue",
+      "",
+      finding.issue?.url ?? "n/a",
+      "",
+      "## History",
+      "",
+      ...(finding.history?.length ? finding.history.map((entry) => `- ${entry.createdAt}: ${entry.kind} -> ${entry.status ?? "n/a"}${entry.note ? ` (${entry.note})` : ""}`) : ["- n/a"])
+    );
+  }
+
+  lines.push(
+    "",
+    "## Evidence References",
+    "",
+    ...(references.length ? references.map((reference, index) => `${index + 1}. ${formatEvidenceReference(reference)}${reference.quote ? ` - ${reference.quote}` : ""}`) : ["n/a"])
+  );
+
+  return lines.join("\n");
+}
+
+function renderFindingEvidenceDetail(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
+  const references = findingEvidenceReferences(finding);
+  if (!references.length) {
+    return `# Evidence\n\nNo evidence references available for ${finding.id}.\n`;
+  }
+  return [
+    `# Evidence for ${finding.id}`,
+    "",
+    ...references.flatMap((reference, index) => {
+      const preview = run.evidencePreviews[evidencePreviewKey(finding, reference)];
+      const active = index === (state.evidenceCursor ?? 0) ? "current" : "ref";
+      if (!preview) {
+        return [`## ${index + 1}. ${formatEvidenceReference(reference)} (${active})`, "", "No preview loaded."];
+      }
+      return [
+        `## ${index + 1}. ${formatEvidenceReference(reference)} (${active})`,
+        "",
+        reference.quote ? `> ${reference.quote}` : "",
+        preview.error ? `Preview error: ${preview.error}` : "",
+        preview.absolutePath ? `File: ${preview.absolutePath}${preview.startLine ? `:${preview.startLine}` : ""}` : "",
+        "",
+        preview.content ? "```text" : "",
+        preview.content,
+        preview.content ? "```" : ""
+      ].filter(Boolean);
+    })
+  ].join("\n");
+}
+
+function findingDiffLabel(run: ReportRunSummary, finding: StructuredFinding): string {
+  const groups = run.compareGroups;
+  if (!groups) {
+    return "n/a";
+  }
+  for (const [label, findings] of Object.entries(groups) as Array<[keyof ReportCompareGroups, StructuredFinding[]]>) {
+    if (findings.some((item) => item.id === finding.id || findingCompareKey(item) === findingCompareKey(finding))) {
+      return label;
+    }
+  }
+  return "n/a";
+}
+
+function compareFindings(left: StructuredFinding, right: StructuredFinding, sort: ReportFindingSort): number {
+  if (sort === "severity") {
+    return severityRank(left.severity) - severityRank(right.severity) || left.title.localeCompare(right.title);
+  }
+  if (sort === "confidence") {
+    return confidenceRank(right.confidence) - confidenceRank(left.confidence) || left.title.localeCompare(right.title);
+  }
+  if (sort === "status") {
+    return (left.status ?? "open").localeCompare(right.status ?? "open") || severityRank(left.severity) - severityRank(right.severity);
+  }
+  if (sort === "owner") {
+    return (left.owner ?? "").localeCompare(right.owner ?? "") || left.title.localeCompare(right.title);
+  }
+  if (sort === "sla") {
+    return (left.sla?.dueAt ?? "9999").localeCompare(right.sla?.dueAt ?? "9999") || left.title.localeCompare(right.title);
+  }
+  if (sort === "path") {
+    return (left.paths[0] ?? "").localeCompare(right.paths[0] ?? "") || left.title.localeCompare(right.title);
+  }
+  return (left.firstSeenRunId ?? left.createdAt ?? "").localeCompare(right.firstSeenRunId ?? right.createdAt ?? "") || left.title.localeCompare(right.title);
+}
+
+function severityRank(severity: StructuredFinding["severity"]): number {
+  return { critical: 0, high: 1, medium: 2, low: 3, unknown: 4 }[severity] ?? 5;
+}
+
+function confidenceRank(confidence: string | undefined): number {
+  const value = confidence?.toLowerCase() ?? "";
+  if (value.includes("high")) {
+    return 3;
+  }
+  if (value.includes("medium")) {
+    return 2;
+  }
+  if (value.includes("low")) {
+    return 1;
+  }
+  return 0;
+}
+
+function outlineItems(section: ReportSection): Array<{ label: string; line: number }> {
+  return section.content
+    .split(/\r?\n/)
+    .map((line, index) => ({ line, index }))
+    .filter((item) => /^#{1,6}\s+/.test(item.line))
+    .map((item) => {
+      const heading = /^(#{1,6})\s+(.+)$/.exec(item.line);
+      const level = heading?.[1].length ?? 1;
+      return {
+        label: `${"  ".repeat(Math.max(0, level - 1))}${heading?.[2] ?? item.line}`,
+        line: item.index
+      };
+    });
+}
+
+interface GlobalSearchMatch {
+  runIndex: number;
+  sectionIndex: number;
+  line: number;
+  label: string;
+}
+
+function globalSearchMatches(runs: ReportRunSummary[], state: ReportBrowserState): GlobalSearchMatch[] {
+  const query = state.searchQuery?.trim().toLowerCase();
+  if (!query) {
+    return [];
+  }
+  const scope = state.searchScope ?? "run";
+  const runIndexes = scope === "all" ? runs.map((_, index) => index) : [state.runCursor];
+  const matches: GlobalSearchMatch[] = [];
+  for (const runIndex of runIndexes) {
+    const run = runs[runIndex];
+    if (!run) {
+      continue;
+    }
+    for (let sectionIndex = 0; sectionIndex < run.sections.length; sectionIndex += 1) {
+      const section = run.sections[sectionIndex];
+      const content = renderSectionContent(run, section, state);
+      const lines = content.split(/\r?\n/);
+      for (let line = 0; line < lines.length; line += 1) {
+        if (lines[line].toLowerCase().includes(query)) {
+          matches.push({
+            runIndex,
+            sectionIndex,
+            line,
+            label: `${compactRunTime(run.startedAt ?? run.runId)} | ${section.title}:${line + 1} | ${truncatePlain(lines[line].trim(), 100)}`
+          });
+        }
+      }
+    }
+  }
+  return matches;
+}
+
+function formatGlobalSearchMatch(match: GlobalSearchMatch): string {
+  return match.label;
+}
+
+interface CompareGroupItem {
+  label: string;
+  finding?: StructuredFinding;
+}
+
+function compareGroupItems(run: ReportRunSummary): CompareGroupItem[] {
+  const groups = run.compareGroups;
+  if (!groups) {
+    return [];
+  }
+  return [
+    ...formatCompareGroup("Added", groups.added),
+    ...formatCompareGroup("Changed", groups.changed),
+    ...formatCompareGroup("Persisting", groups.persisting),
+    ...formatCompareGroup("Resolved", groups.resolved)
+  ];
+}
+
+function formatCompareGroup(title: string, findings: StructuredFinding[]): CompareGroupItem[] {
+  return [
+    { label: `${title} (${findings.length})` },
+    ...findings.map((finding) => ({
+      label: `  ${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${finding.id} | ${finding.title}`,
+      finding
+    }))
+  ];
+}
+
+interface BookmarkItem {
+  label: string;
+  kind: "section" | "finding";
+  runIndex: number;
+  sectionIndex?: number;
+  findingId?: string;
+  key: string;
+}
+
+function bookmarkItems(runs: ReportRunSummary[], state: ReportBrowserState): BookmarkItem[] {
+  const sectionMarks = sectionBookmarks(state);
+  const findingMarks = findingBookmarks(state);
+  const items: BookmarkItem[] = [];
+  runs.forEach((run, runIndex) => {
+    run.sections.forEach((section, sectionIndex) => {
+      const key = sectionBookmarkKey(run, section);
+      if (sectionMarks.has(key)) {
+        items.push({
+          label: `Section | ${compactRunTime(run.startedAt ?? run.runId)} | ${section.title}`,
+          kind: "section",
+          runIndex,
+          sectionIndex,
+          key
+        });
+      }
+    });
+    run.findings.forEach((finding) => {
+      const key = findingBookmarkKey(run, finding);
+      if (findingMarks.has(key)) {
+        items.push({
+          label: `Finding | ${compactRunTime(run.startedAt ?? run.runId)} | ${finding.severity.toUpperCase()} | ${finding.title}`,
+          kind: "finding",
+          runIndex,
+          findingId: finding.id,
+          key
+        });
+      }
+    });
+  });
+  return items;
+}
+
+function sectionBookmarks(state: ReportBrowserState): Set<string> {
+  state.bookmarkedSections ??= new Set<string>();
+  return state.bookmarkedSections;
+}
+
+function findingBookmarks(state: ReportBrowserState): Set<string> {
+  state.bookmarkedFindings ??= new Set<string>();
+  return state.bookmarkedFindings;
+}
+
+function sectionBookmarkKey(run: ReportRunSummary, section: ReportSection): string {
+  return `${run.runDir}|section|${section.id}`;
+}
+
+function findingBookmarkKey(run: ReportRunSummary, finding: StructuredFinding): string {
+  return `${run.runDir}|finding|${finding.id}`;
+}
+
+function toggleSectionBookmark(run: ReportRunSummary, state: ReportBrowserState): void {
+  const section = run.sections[state.sectionCursor];
+  if (!section) {
+    return;
+  }
+  const marks = sectionBookmarks(state);
+  const key = sectionBookmarkKey(run, section);
+  if (marks.has(key)) {
+    marks.delete(key);
+    state.notice = `Removed bookmark: ${section.title}.`;
+  } else {
+    marks.add(key);
+    state.notice = `Bookmarked section: ${section.title}.`;
+  }
+}
+
+function toggleFindingBookmark(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): void {
+  const marks = findingBookmarks(state);
+  const key = findingBookmarkKey(run, finding);
+  if (marks.has(key)) {
+    marks.delete(key);
+    state.notice = `Removed bookmark: ${finding.id}.`;
+  } else {
+    marks.add(key);
+    state.notice = `Bookmarked finding: ${finding.id}.`;
+  }
+}
+
+function removeBookmark(item: BookmarkItem, state: ReportBrowserState): void {
+  if (item.kind === "section") {
+    sectionBookmarks(state).delete(item.key);
+  } else {
+    findingBookmarks(state).delete(item.key);
+  }
+  state.notice = "Bookmark removed.";
+}
+
+function openBookmark(item: BookmarkItem, runs: ReportRunSummary[], state: ReportBrowserState): void {
+  state.runCursor = item.runIndex;
+  if (item.kind === "section") {
+    state.sectionCursor = item.sectionIndex ?? 0;
+    state.screen = "viewer";
+  } else {
+    const run = runs[item.runIndex];
+    state.severityFilter = "all";
+    state.statusFilter = "all";
+    state.screen = "findings-list";
+    if (run && item.findingId) {
+      const findings = sortedFilteredFindings(run.findings, state);
+      state.findingCursor = Math.max(0, findings.findIndex((finding) => finding.id === item.findingId));
+    } else {
+      state.findingCursor = 0;
+    }
+  }
+  state.scroll = 0;
+}
+
+function exportItems(): Array<{ label: string; format: "markdown" | "json" | "html" | "sarif" }> {
+  return [
+    { label: "Markdown current view", format: "markdown" },
+    { label: "JSON current findings", format: "json" },
+    { label: "HTML current view", format: "html" },
+    { label: "SARIF current findings", format: "sarif" }
+  ];
+}
+
+async function exportCurrentView(
+  run: ReportRunSummary,
+  state: ReportBrowserState,
+  format: "markdown" | "json" | "html" | "sarif",
+): Promise<string> {
+  const base = path.join(run.runDir, `tui-export-current.${format === "markdown" ? "md" : format}`);
+  if (format === "json") {
+    await writeFile(base, JSON.stringify(sortedFilteredFindings(run.findings, state), null, 2), "utf8");
+    return base;
+  }
+  if (format === "sarif") {
+    await writeFile(base, JSON.stringify(renderSarif(run, sortedFilteredFindings(run.findings, state)), null, 2), "utf8");
+    return base;
+  }
+  const content = currentViewMarkdown(run, state);
+  if (format === "html") {
+    await writeFile(base, renderSimpleHtml(content), "utf8");
+    return base;
+  }
+  await writeFile(base, content, "utf8");
+  return base;
+}
+
+function currentViewMarkdown(run: ReportRunSummary, state: ReportBrowserState): string {
+  const screen = state.screen === "export" ? state.previousScreen : state.screen;
+  if (screen === "finding-detail" || screen === "evidence-detail") {
+    const finding = currentFinding(run, state);
+    if (!finding) {
+      return "# Current View\n\nNo finding selected.\n";
+    }
+    return screen === "evidence-detail"
+      ? renderFindingEvidenceDetail(run, finding, state)
+      : renderFindingDetail(run, finding, state);
+  }
+  if (screen === "findings-list") {
+    return renderFindingsSection(sortedFilteredFindings(run.findings, state), run);
+  }
+  const section = run.sections[state.sectionCursor];
+  return section ? renderSectionContent(run, section, state) : "# Current View\n\nNo section selected.\n";
+}
+
+function renderSimpleHtml(markdown: string): string {
+  const escaped = markdown
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RepoVista TUI Export</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 1100px; line-height: 1.45; }
+    pre { white-space: pre-wrap; background: #f6f8fa; padding: 1rem; border-radius: 6px; }
+  </style>
+</head>
+<body><pre>${escaped}</pre></body>
+</html>
+`;
+}
+
+function renderSarif(run: ReportRunSummary, findings: StructuredFinding[]): unknown {
+  return {
+    version: "2.1.0",
+    runs: [{
+      tool: { driver: { name: "RepoVista" } },
+      results: findings.map((finding) => {
+        const reference = findingEvidenceReferences(finding)[0];
+        return {
+          ruleId: finding.id,
+          level: finding.severity === "critical" || finding.severity === "high" ? "error" : finding.severity === "medium" ? "warning" : "note",
+          message: { text: finding.title },
+          locations: reference ? [{
+            physicalLocation: {
+              artifactLocation: { uri: reference.path },
+              region: { startLine: reference.startLine ?? 1, endLine: reference.endLine ?? reference.startLine ?? 1 }
+            }
+          }] : [],
+          properties: {
+            status: finding.status ?? "open",
+            runId: run.runId,
+            recommendation: finding.recommendation
+          }
+        };
+      })
+    }]
+  };
+}
+
+function isTriageKey(key: TuiKey): boolean {
+  return ["1", "2", "3", "4", "5"].includes(key.name ?? key.sequence ?? "");
+}
+
+function triageStatusForKey(key: TuiKey): FindingStatus {
+  const value = key.name ?? key.sequence ?? "1";
+  const map: Record<string, FindingStatus> = {
+    "1": "open",
+    "2": "uncertain",
+    "3": "fixed",
+    "4": "false-positive",
+    "5": "wont-fix"
+  };
+  return map[value] ?? "open";
+}
+
+async function triageFinding(run: ReportRunSummary, finding: StructuredFinding, status: FindingStatus): Promise<void> {
+  const now = new Date().toISOString();
+  finding.status = status;
+  finding.updatedAt = now;
+  finding.history = [
+    ...(finding.history ?? []),
+    {
+      runId: run.runId,
+      kind: "triage",
+      status,
+      note: "Updated from repovista reports TUI.",
+      commands: ["repovista reports"],
+      createdAt: now
+    }
+  ];
+  if (run.meta) {
+    run.meta.findings = run.findings;
+  }
+  await Promise.all([
+    writeFile(path.join(run.runDir, "findings.json"), JSON.stringify(run.findings, null, 2), "utf8"),
+    run.meta ? writeFile(path.join(run.runDir, "meta.json"), JSON.stringify(run.meta, null, 2), "utf8") : Promise.resolve()
+  ]);
+}
+
+function openFindingEvidenceInEditor(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
+  const references = findingEvidenceReferences(finding);
+  const reference = references[clampCursor(state.evidenceCursor ?? 0, references.length)] ?? references[0];
+  if (!reference) {
+    return "No evidence reference available.";
+  }
+  const preview = run.evidencePreviews[evidencePreviewKey(finding, reference)];
+  const filePath = preview?.absolutePath ?? path.resolve(run.projectRoot, reference.path);
+  const editor = process.env.REPOVISTA_EDITOR ?? process.env.VISUAL ?? process.env.EDITOR;
+  if (!editor) {
+    return `Set REPOVISTA_EDITOR, VISUAL, or EDITOR to open ${filePath}.`;
+  }
+  const line = preview?.startLine ?? reference.startLine ?? 1;
+  const command = editor.split(/\s+/)[0];
+  const args = editor.split(/\s+/).slice(1);
+  const commandName = path.basename(command);
+  if (commandName === "code" || commandName === "codium" || commandName === "cursor") {
+    args.push("-g", `${filePath}:${line}`);
+  } else {
+    args.push(`+${line}`, filePath);
+  }
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => undefined);
+    child.unref();
+    return `Requested editor for ${filePath}:${line}.`;
+  } catch (error) {
+    return `Editor failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+function nextFindingSort(current: ReportFindingSort): ReportFindingSort {
+  const values: ReportFindingSort[] = ["severity", "confidence", "status", "owner", "sla", "path", "first-seen"];
+  return values[(values.indexOf(current) + 1) % values.length];
+}
+
+function nextLayout(current: ReportLayout): ReportLayout {
+  const values: ReportLayout[] = ["normal", "compact", "detailed"];
+  return values[(values.indexOf(current) + 1) % values.length];
+}
+
+function nextSearchScope(current: ReportSearchScope): ReportSearchScope {
+  const values: ReportSearchScope[] = ["run", "all"];
+  return values[(values.indexOf(current) + 1) % values.length];
+}
+
+function helpLines(screen: ReportBrowserScreen): string[] {
+  return [
+    "# Keyboard Help",
+    "",
+    "## Global",
+    "",
+    "- `?`: show this help",
+    "- `g`: global search; Tab toggles run/all scope",
+    "- `m`: bookmarks",
+    "- `x`: export current view",
+    "- `l`: cycle layout preset",
+    "- `q` or Ctrl-C: close",
+    "",
+    "## Runs",
+    "",
+    "- Enter: open run",
+    "- Space: mark report for deletion",
+    "- `d`: delete marked reports after confirmation",
+    "",
+    "## Sections and Report Viewer",
+    "",
+    "- Enter: open selected section; findings opens the finding list",
+    "- `/`: search current section",
+    "- `n`: next search hit",
+    "- `o`: outline/table of contents",
+    "- `h`: report health panel",
+    "- `f`: cycle severity filter",
+    "- `t`: cycle status filter",
+    "- `e`: evidence references",
+    "- `c`: grouped compare with previous run",
+    "- `b`: bookmark current section",
+    "",
+    "## Findings",
+    "",
+    "- Enter: finding detail",
+    "- `s`: cycle finding sort",
+    "- `1`: open, `2`: uncertain, `3`: fixed, `4`: false-positive, `5`: wont-fix",
+    "- `e`: evidence preview",
+    "- `o`: open selected evidence in editor",
+    "- `v`: compare groups",
+    "- `b`: bookmark finding",
+    "",
+    `Current screen: ${screen}`
+  ];
 }
 
 function cleanModelLabel(value: string | undefined, providerDisplayName: string | undefined): string | undefined {

@@ -116,3 +116,47 @@ test("TUI text frame styles bold spans inside markdown tables in color mode", ()
   assert.match(plain, /\| Finding \| Important detail \|/);
   assert.doesNotMatch(plain, /\*\*Important\*\*/);
 });
+
+test("TUI text frame highlights search matches without changing plain content", () => {
+  const frame = renderTuiTextFrame({
+    title: "RepoVista Reports",
+    help: "Help",
+    sectionTitle: "Section",
+    lines: [
+      "A target finding appears here."
+    ],
+    scroll: 0,
+    columns: 100,
+    rows: 10,
+    color: true,
+    searchQuery: "target"
+  });
+  const plain = frame.replace(/\x1b\[[0-9;]*m/g, "");
+
+  assert.match(frame, /\x1b\[43m\x1b\[30m\x1b\[1mtarget\x1b\[0m/);
+  assert.match(plain, /A target finding appears here\./);
+});
+
+test("TUI text frame styles inline code, links, lists, and blockquotes", () => {
+  const frame = renderTuiTextFrame({
+    title: "RepoVista Reports",
+    help: "Help",
+    sectionTitle: "Section",
+    lines: [
+      "- Use `repovista reports`",
+      "> quoted evidence",
+      "Read [Docs](https://example.com)."
+    ],
+    scroll: 0,
+    columns: 100,
+    rows: 12,
+    color: true
+  });
+  const plain = frame.replace(/\x1b\[[0-9;]*m/g, "");
+
+  assert.match(frame, /\x1b\[32mrepovista reports\x1b\[0m/);
+  assert.match(frame, /\x1b\[36m\x1b\[4mDocs\x1b\[0m/);
+  assert.match(plain, /- Use repovista reports/);
+  assert.match(plain, /> quoted evidence/);
+  assert.match(plain, /Read Docs \(https:\/\/example\.com\)\./);
+});

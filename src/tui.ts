@@ -49,11 +49,13 @@ export interface TuiTextFrameOptions {
   rows: number;
   color: boolean;
   footer?: string;
+  searchQuery?: string;
 }
 
 export const TUI_ANSI = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
+  underline: "\x1b[4m",
   dim: "\x1b[2m",
   cyan: "\x1b[36m",
   green: "\x1b[32m",
@@ -62,7 +64,9 @@ export const TUI_ANSI = {
   orange: "\x1b[38;5;208m",
   gray: "\x1b[90m",
   white: "\x1b[97m",
-  bgCyan: "\x1b[46m"
+  black: "\x1b[30m",
+  bgCyan: "\x1b[46m",
+  bgYellow: "\x1b[43m"
 } as const;
 
 const RENDER_DEBOUNCE_MS = 16;
@@ -184,7 +188,7 @@ export function renderTuiTextFrame(options: TuiTextFrameOptions): string {
   const header = renderTuiHeader(options.title, options.help, options.sectionTitle, options.color);
   const footer = renderTuiFooter(options.footer ?? "", options.color);
   const availableRows = Math.max(4, rows - header.length - footer.length);
-  const wrapped = wrapStyledTextLines(options.lines, columns, options.color);
+  const wrapped = wrapStyledTextLines(options.lines, columns, options.color, options.searchQuery);
   const scroll = clamp(options.scroll, 0, Math.max(0, wrapped.length - availableRows));
   const visible = wrapped.slice(scroll, scroll + availableRows);
   const lines = [...header, ...visible.map((line) => line.styled)];
@@ -296,7 +300,12 @@ function positionFooter(cursor: number, itemCount: number): string {
   return itemCount ? `${Math.min(cursor + 1, itemCount)}/${itemCount}` : "0/0";
 }
 
-function wrapStyledTextLines(lines: string[], columns: number, useColor: boolean): WrappedStyledLine[] {
+function wrapStyledTextLines(
+  lines: string[],
+  columns: number,
+  useColor: boolean,
+  searchQuery?: string,
+): WrappedStyledLine[] {
   const wrapped: WrappedStyledLine[] = [];
   let inFence = false;
 
@@ -311,9 +320,12 @@ function wrapStyledTextLines(lines: string[], columns: number, useColor: boolean
         continue;
       }
     }
-    const segments = inFence || isFence || !useColor
+    const baseSegments = !useColor
       ? [{ text: line }]
+      : inFence || isFence
+      ? [{ text: line, style: useColor ? TUI_ANSI.gray : undefined }]
       : markdownSegments(line);
+    const segments = highlightSegments(baseSegments, searchQuery, useColor);
     wrapped.push(...wrapStyledSegments(segments, columns, useColor));
     if (isFence) {
       inFence = !inFence;
@@ -329,25 +341,127 @@ function markdownSegments(line: string): StyledTextSegment[] {
     return [{ text: line, style: headingStyle(heading[1].length) }];
   }
 
+  const quote = line.match(/^(\s*> ?)(.*)$/);
+  if (quote) {
+    return [
+      { text: quote[1], style: TUI_ANSI.gray },
+      { text: quote[2], style: `${TUI_ANSI.cyan}${TUI_ANSI.dim}` }
+    ];
+  }
+
+  const list = line.match(/^(\s*)([-*+]|\d+\.)\s+(.+)$/);
+  if (list) {
+    return [
+      { text: `${list[1]}${list[2]} `, style: TUI_ANSI.yellow },
+      ...inlineMarkdownSegments(list[3])
+    ];
+  }
+
   return inlineMarkdownSegments(line);
 }
 
 function inlineMarkdownSegments(line: string): StyledTextSegment[] {
   const segments: StyledTextSegment[] = [];
-  const boldPattern = /\*\*([^*\n]+)\*\*/g;
   let index = 0;
-  for (const match of line.matchAll(boldPattern)) {
-    const start = match.index ?? 0;
-    if (start > index) {
-      segments.push({ text: line.slice(index, start) });
+
+  const pushPlain = (value: string): void => {
+    if (value) {
+      segments.push({ text: value });
     }
-    segments.push({ text: match[1], style: `${TUI_ANSI.bold}${TUI_ANSI.white}` });
-    index = start + match[0].length;
+  };
+
+  while (index < line.length) {
+    const boldStart = line.indexOf("**", index);
+    const codeStart = line.indexOf("`", index);
+    const linkStart = line.indexOf("[", index);
+    const candidates = [boldStart, codeStart, linkStart].filter((value) => value >= 0);
+    const next = candidates.length ? Math.min(...candidates) : -1;
+
+    if (next < 0) {
+      pushPlain(line.slice(index));
+      break;
+    }
+
+    if (next > index) {
+      pushPlain(line.slice(index, next));
+      index = next;
+      continue;
+    }
+
+    if (line.startsWith("**", index)) {
+      const end = line.indexOf("**", index + 2);
+      if (end > index + 2) {
+        segments.push({ text: line.slice(index + 2, end), style: `${TUI_ANSI.bold}${TUI_ANSI.white}` });
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (line[index] === "`") {
+      const end = line.indexOf("`", index + 1);
+      if (end > index + 1) {
+        segments.push({ text: line.slice(index + 1, end), style: TUI_ANSI.green });
+        index = end + 1;
+        continue;
+      }
+    }
+
+    if (line[index] === "[") {
+      const labelEnd = line.indexOf("](", index + 1);
+      const urlEnd = labelEnd >= 0 ? line.indexOf(")", labelEnd + 2) : -1;
+      if (labelEnd > index + 1 && urlEnd > labelEnd + 2) {
+        segments.push({
+          text: line.slice(index + 1, labelEnd),
+          style: `${TUI_ANSI.cyan}${TUI_ANSI.underline}`
+        });
+        segments.push({
+          text: ` (${line.slice(labelEnd + 2, urlEnd)})`,
+          style: TUI_ANSI.gray
+        });
+        index = urlEnd + 1;
+        continue;
+      }
+    }
+
+    pushPlain(line[index]);
+    index += 1;
   }
-  if (index < line.length) {
-    segments.push({ text: line.slice(index) });
-  }
+
   return segments.length ? segments : [{ text: line }];
+}
+
+function highlightSegments(
+  segments: StyledTextSegment[],
+  searchQuery: string | undefined,
+  useColor: boolean,
+): StyledTextSegment[] {
+  const query = searchQuery?.trim();
+  if (!query || !useColor) {
+    return segments;
+  }
+
+  const highlighted: StyledTextSegment[] = [];
+  const needle = query.toLowerCase();
+  for (const segment of segments) {
+    const haystack = segment.text.toLowerCase();
+    let index = 0;
+    let match = haystack.indexOf(needle, index);
+    while (match >= 0) {
+      if (match > index) {
+        highlighted.push({ text: segment.text.slice(index, match), style: segment.style });
+      }
+      highlighted.push({
+        text: segment.text.slice(match, match + query.length),
+        style: `${segment.style ?? ""}${TUI_ANSI.bgYellow}${TUI_ANSI.black}${TUI_ANSI.bold}`
+      });
+      index = match + query.length;
+      match = haystack.indexOf(needle, index);
+    }
+    if (index < segment.text.length) {
+      highlighted.push({ text: segment.text.slice(index), style: segment.style });
+    }
+  }
+  return highlighted;
 }
 
 function headingStyle(level: number): string {

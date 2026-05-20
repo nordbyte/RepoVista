@@ -37,6 +37,7 @@ test("report browser lists report runs and renders sections", async () => {
     assert.equal(runs[0].runId, "2026-05-19T10-00-00-000Z");
     assert.equal(runs[0].findingCount, 1);
     assert.ok(runs[0].sections.some((section) => section.id === "full"));
+    assert.ok(runs[0].sections.some((section) => section.id === "health"));
     assert.ok(runs[0].sections.some((section) => section.id === "findings"));
     assert.ok(runs[0].sections.some((section) => section.id === "evidence-refs"));
     assert.ok(runs[0].sections.some((section) => section.id === "compare-previous"));
@@ -47,7 +48,7 @@ test("report browser lists report runs and renders sections", async () => {
       runCursor: 0,
       sectionCursor: 0,
       scroll: 0
-    }, { columns: 140, rows: 24, color: false });
+    }, { columns: 140, rows: 50, color: false });
     assert.match(listFrame, /RepoVista Reports/);
     assert.match(listFrame, /2026-05-19 10:00/);
     assert.match(listFrame, /model: gpt-resolved-default/);
@@ -87,6 +88,7 @@ test("report browser lists report runs and renders sections", async () => {
       scroll: 0
     }, { columns: 100, rows: 24, color: false });
     assert.match(sectionFrame, /Full Report/);
+    assert.match(sectionFrame, /Report Health/);
     assert.match(sectionFrame, /Findings/);
     assert.match(sectionFrame, /Evidence Refs/);
     assert.match(sectionFrame, /Compare Previous Run/);
@@ -118,6 +120,79 @@ test("report browser lists report runs and renders sections", async () => {
     }, { columns: 100, rows: 24, color: false });
     assert.match(filteredFrame, /HIGH: Fixture finding/);
     assert.match(filteredFrame, /severity high \| status open/);
+
+    const findingsFrame = renderReportsMenuFrame(runs, {
+      screen: "findings-list",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      findingCursor: 0,
+      severityFilter: "all",
+      statusFilter: "all",
+      findingSort: "severity",
+      layout: "normal"
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(findingsFrame, /Fixture finding/);
+    assert.match(findingsFrame, /sort severity/);
+    assert.match(findingsFrame, /1-5 triage/);
+
+    const findingDetailFrame = renderReportsMenuFrame(runs, {
+      screen: "finding-detail",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      findingCursor: 0,
+      severityFilter: "all",
+      statusFilter: "all",
+      layout: "normal"
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(findingDetailFrame, /# Fixture finding/);
+    assert.match(findingDetailFrame, /## Evidence References/);
+    assert.match(findingDetailFrame, /Diff: persisting/);
+
+    const evidenceFrame = renderReportsMenuFrame(runs, {
+      screen: "evidence-detail",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      findingCursor: 0,
+      evidenceCursor: 0,
+      severityFilter: "all",
+      statusFilter: "all"
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(evidenceFrame, /Evidence for fnd_test/);
+    assert.match(evidenceFrame, /return "fixture bug";/);
+
+    const compareFrame = renderReportsMenuFrame(runs, {
+      screen: "compare-groups",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      compareCursor: 0
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(compareFrame, /Persisting \(1\)/);
+
+    const searchFrame = renderReportsMenuFrame(runs, {
+      screen: "global-search",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      globalSearchCursor: 0,
+      searchQuery: "fixture",
+      searchScope: "all"
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(searchFrame, /Global Search \(all\)/);
+    assert.match(searchFrame, /Fixture finding/);
+
+    const helpFrame = renderReportsMenuFrame(runs, {
+      screen: "help",
+      previousScreen: "finding-detail",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(helpFrame, /Keyboard Help/);
+    assert.match(helpFrame, /`1`: open/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -230,7 +305,11 @@ test("report browser deletes marked report run directories", async () => {
 
 async function writeRun(runDir, input) {
   await mkdir(runDir, { recursive: true });
+  const projectRoot = path.dirname(path.dirname(runDir));
+  await mkdir(path.join(projectRoot, "src"), { recursive: true });
+  await writeFile(path.join(projectRoot, "src", "audit.ts"), "export function fixture() {\n  return \"fixture bug\";\n}\n", "utf8");
   await writeFile(path.join(runDir, "meta.json"), JSON.stringify({
+    projectRoot,
     runId: input.runId,
     startedAt: input.startedAt ?? input.completedAt,
     completedAt: input.completedAt,
@@ -273,7 +352,22 @@ async function writeRun(runDir, input) {
       severity: "high",
       category: "bug",
       status: "open",
-      paths: ["src/audit.ts"]
+      confidence: "high",
+      owner: "core",
+      labels: ["bug"],
+      sla: {
+        dueAt: "2026-05-25T00:00:00.000Z",
+        overdue: false
+      },
+      paths: ["src/audit.ts"],
+      evidence: "Fixture evidence.",
+      recommendation: "Fix the fixture.",
+      evidenceDetails: [{
+        path: "src/audit.ts",
+        startLine: 2,
+        endLine: 2,
+        quote: "return \"fixture bug\";"
+      }]
     }
   ], null, 2), "utf8");
   await writeFile(path.join(runDir, "index.md"), `# ${input.title}\n\nSummary text.\n`, "utf8");
