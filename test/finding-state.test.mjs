@@ -20,6 +20,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+async function initTestGitRepo(root) {
+  await execFileAsync("git", ["init"], { cwd: root });
+  await execFileAsync("git", ["config", "core.autocrlf", "false"], { cwd: root });
+  await execFileAsync("git", ["config", "core.eol", "lf"], { cwd: root });
+  await execFileAsync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+  await execFileAsync("git", ["config", "user.name", "RepoVista Test"], { cwd: root });
+}
+
 test("finding lifecycle commands read, triage and revalidate persistent state", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-finding-state-"));
   try {
@@ -257,9 +265,7 @@ test("fix workflow records pre/post diff and fails changes outside finding scope
     await writeFile(path.join(root, "package.json"), "{}", "utf8");
     await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
     await writeFile(path.join(root, "src", "other.ts"), "export const other = 1;\n", "utf8");
-    await execFileAsync("git", ["init"], { cwd: root });
-    await execFileAsync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
-    await execFileAsync("git", ["config", "user.name", "RepoVista Test"], { cwd: root });
+    await initTestGitRepo(root);
     await execFileAsync("git", ["add", "."], { cwd: root });
     await execFileAsync("git", ["commit", "-m", "initial"], { cwd: root });
 
@@ -309,9 +315,7 @@ test("patch rollback reverses a recorded patch diff", async () => {
     await mkdir(path.join(root, "src"), { recursive: true });
     await writeFile(path.join(root, "package.json"), "{}", "utf8");
     await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
-    await execFileAsync("git", ["init"], { cwd: root });
-    await execFileAsync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
-    await execFileAsync("git", ["config", "user.name", "RepoVista Test"], { cwd: root });
+    await initTestGitRepo(root);
     await execFileAsync("git", ["add", "."], { cwd: root });
     await execFileAsync("git", ["commit", "-m", "initial"], { cwd: root });
 
