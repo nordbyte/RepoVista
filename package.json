@@ -4,7 +4,7 @@
   "description": "Read-only AI-powered repository audit reports from local provider CLIs.",
   "type": "module",
   "bin": {
-    "repovista": "./dist/cli.js"
+    "repovista": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
