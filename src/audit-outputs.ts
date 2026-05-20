@@ -32,7 +32,7 @@ export async function writeStructuredOutputs(
   const reportJsonPath = reportPath(paths.runDir, "report.json");
   const promptManifestPath = reportPath(paths.runDir, "prompt-manifest.json");
   const structuredReportsPath = reportPath(paths.runDir, "structured-reports.json");
-  const findingStateDir = await writeFindingState(stateProjectRoot, meta.options.outDir, findings, meta.runId);
+  const findingStateDir = await writeFindingState(stateProjectRoot, meta.options.outDir, findings, meta.runId, new Date(meta.completedAt ?? meta.startedAt), meta.options);
   const featureStateDir = await featureStateDirectory(stateProjectRoot, meta.options.outDir);
   const findingCounts = findingCountsBySeverity(findings);
   const suppressedFindingCounts = findingCountsBySeverity(suppressedFindings);

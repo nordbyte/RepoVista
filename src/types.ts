@@ -82,6 +82,7 @@ export interface AuditOptions {
   maxNewCritical?: number;
   maxNewHigh?: number;
   maxNewMedium?: number;
+  workspaceMatrix?: boolean;
   reviewMode?: ReviewMode;
   promptFile?: string;
   exportFormats: ReportExportFormat[];
@@ -118,6 +119,11 @@ export interface AuditOptions {
   issueLabels?: string[];
   issueAssignees?: string[];
   issueUpdateExisting?: boolean;
+  issueSync?: boolean;
+  issueReopen?: boolean;
+  ownerRules?: string[];
+  labelRules?: string[];
+  slaDays?: number;
   patchId?: string;
   patchBranch?: string;
   patchTitle?: string;
@@ -258,6 +264,10 @@ export interface StructuredFinding {
   minimumFixScope?: string;
   estimatedEffort?: string;
   confidence?: string;
+  owner?: string;
+  labels?: string[];
+  sla?: FindingSla;
+  issue?: FindingIssueLink;
   parentId?: string;
   parentTitle?: string;
   childFindings?: StructuredFinding[];
@@ -325,12 +335,29 @@ export interface FindingEvidenceValidationReference {
 
 export interface FindingHistoryEntry {
   runId?: string;
-  kind: "audit" | "triage" | "revalidate" | "provider-revalidate";
+  kind: "audit" | "triage" | "revalidate" | "provider-revalidate" | "issue-sync";
   status?: FindingStatus;
   note?: string;
   reasoning?: string;
   commands: string[];
   createdAt: string;
+}
+
+export interface FindingSla {
+  days: number;
+  dueAt: string;
+  overdue: boolean;
+}
+
+export interface FindingIssueLink {
+  provider: "github";
+  number?: number;
+  url?: string;
+  title?: string;
+  state?: "open" | "closed" | "unknown";
+  syncedAt: string;
+  labels?: string[];
+  assignees?: string[];
 }
 
 export interface AuditMeta {
@@ -376,9 +403,13 @@ export interface AuditMeta {
     maxNewCritical?: number;
     maxNewHigh?: number;
     maxNewMedium?: number;
+    workspaceMatrix?: boolean;
     reviewMode?: ReviewMode;
     promptFile?: string;
     exportFormats: ReportExportFormat[];
+    ownerRules?: string[];
+    labelRules?: string[];
+    slaDays?: number;
     ci: boolean;
     failOnCritical: boolean;
     progress: boolean;
@@ -544,6 +575,7 @@ export interface WorkspaceDetectionResult {
 export interface AuditCacheMeta {
   enabled: boolean;
   cachePath: string;
+  schemaVersion?: number;
   scanFingerprint: string;
   reuseKey?: string;
   promptManifestFingerprint?: string;
@@ -555,7 +587,39 @@ export interface AuditCacheMeta {
   previousRunDir?: string;
   previousRunId?: string;
   mismatchReasons?: string[];
+  phaseReuse?: PhaseCacheReuse[];
+  featureReuse?: FeatureCacheReuse[];
+  shardReuse?: ShardCacheReuse[];
   updatedAt: string;
+}
+
+export interface PhaseCacheReuse {
+  phaseId: string;
+  reportFile: string;
+  fingerprint: string;
+  hit: boolean;
+  previousRunDir?: string;
+  previousRunId?: string;
+  mismatchReasons: string[];
+}
+
+export interface FeatureCacheReuse {
+  featureId: string;
+  fingerprint: string;
+  hit: boolean;
+  previousRunId?: string;
+  mismatchReasons: string[];
+}
+
+export interface ShardCacheReuse {
+  phaseId: string;
+  shardId: string;
+  reportFile: string;
+  fingerprint: string;
+  hit: boolean;
+  previousRunDir?: string;
+  previousRunId?: string;
+  mismatchReasons: string[];
 }
 
 export interface ProjectArea {

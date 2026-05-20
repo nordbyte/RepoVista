@@ -23,7 +23,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     checkCommands: [...defaults.checkCommands],
     exportFormats: [...defaults.exportFormats],
     issueLabels: [...(defaults.issueLabels ?? [])],
-    issueAssignees: [...(defaults.issueAssignees ?? [])]
+    issueAssignees: [...(defaults.issueAssignees ?? [])],
+    ownerRules: [...(defaults.ownerRules ?? [])],
+    labelRules: [...(defaults.labelRules ?? [])]
   };
   const positionals: string[] = [];
   let wantsHelp = false;
@@ -148,6 +150,10 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "all-workspaces":
         options.allWorkspaces = true;
         break;
+      case "workspace-matrix":
+        options.workspaceMatrix = true;
+        options.allWorkspaces = true;
+        break;
       case "incremental":
         options.incremental = true;
         break;
@@ -177,6 +183,12 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
         break;
       case "update-existing":
         options.issueUpdateExisting = true;
+        break;
+      case "sync-issues":
+        options.issueSync = true;
+        break;
+      case "reopen-issues":
+        options.issueReopen = true;
         break;
       case "pr":
         options.prMode = true;
@@ -549,6 +561,15 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "max-files":
       options.patchMaxFiles = parsePositiveInteger(name, value, 100);
       break;
+    case "owner-rule":
+      options.ownerRules = [...(options.ownerRules ?? []), requireRule(name, value)];
+      break;
+    case "label-rule":
+      options.labelRules = [...(options.labelRules ?? []), requireRule(name, value)];
+      break;
+    case "sla-days":
+      options.slaDays = parsePositiveInteger(name, value, 3650);
+      break;
     case "template":
       options.ciTemplate = validateCiTemplate(value);
       break;
@@ -619,6 +640,14 @@ function isCommand(value: string): boolean {
     value === "rollback" ||
     value === "open-pr" ||
     value === "issue";
+}
+
+function requireRule(name: string, value: string): string {
+  const parsed = requireNonEmpty(name, value);
+  if (!/[:=]/.test(parsed)) {
+    throw new CliUsageError(`Option --${name} must use path-glob=value syntax.`);
+  }
+  return parsed;
 }
 
 function maxPositionalsFor(positionals: string[]): number {

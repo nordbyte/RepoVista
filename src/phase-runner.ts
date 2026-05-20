@@ -41,7 +41,14 @@ export interface ParallelPhaseInput {
   resume: boolean;
   status: PhaseReportStatus;
   previousStatus?: PhaseReportStatus;
+  reusableShards?: Record<string, ReusableShardReport>;
   abortSignal?: AbortSignal;
+}
+
+export interface ReusableShardReport {
+  previousRunDir: string;
+  reportFile: string;
+  previousRunId?: string;
 }
 
 export async function runSinglePhase(input: SinglePhaseInput): Promise<ProviderRunResult> {
@@ -95,6 +102,28 @@ export async function runParallelPhase(input: ParallelPhaseInput): Promise<Provi
           reportPath: report,
           durationMs: 0,
           exitCode: 0
+        } satisfies ProviderRunResult
+      };
+    }
+    const reusableShard = input.reusableShards?.[shard.id];
+    if (!input.resume && reusableShard) {
+      const previousReportPath = path.join(reusableShard.previousRunDir, reusableShard.reportFile);
+      const content = await safeReadReport(previousReportPath, shard.title);
+      await writeFile(report, content, "utf8");
+      if (shardStatus) {
+        shardStatus.status = "success";
+        shardStatus.durationMs = 0;
+        shardStatus.error = undefined;
+      }
+      return {
+        shard,
+        result: {
+          phaseId: `${input.phase.id}-${shard.id}`,
+          success: true,
+          reportPath: report,
+          durationMs: 0,
+          exitCode: 0,
+          preservedPreviousReport: true
         } satisfies ProviderRunResult
       };
     }

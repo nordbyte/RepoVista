@@ -120,9 +120,10 @@ RepoVista detects npm/yarn package workspaces and `pnpm-workspace.yaml`.
 ```sh
 repovista audit --workspace packages/api
 repovista audit --all-workspaces
+repovista audit --workspace-matrix
 ```
 
-Use a workspace when one package or service should be emphasized in inventory and prompts.
+Use a workspace when one package or service should be emphasized in inventory and prompts. Use `--workspace-matrix` when each workspace should receive its own run directory plus an aggregate matrix summary.
 
 ## Incremental Mode
 
@@ -130,4 +131,15 @@ Use a workspace when one package or service should be emphasized in inventory an
 repovista audit --incremental
 ```
 
-Incremental reuse is tied to file hashes, prompt-manifest inputs, provider version, prompt context version, phase schema version, quality-gate version, selected options, and reusable successful artifacts from previous runs. When any reuse condition changes, RepoVista reruns the affected phase.
+Incremental reuse is tied to file hashes, prompt-manifest inputs, provider version, prompt context version, phase schema version, quality-gate version, selected options, and reusable successful artifacts from previous runs. RepoVista stores global scan fingerprints plus phase, feature, and shard fingerprints. When the full scan changed but a phase or shard input fingerprint is still compatible, RepoVista can reuse that successful artifact and rerun only the affected work.
+
+## Finding Lifecycle Rules
+
+Owner, label, SLA, and issue-sync metadata are CLI-level audit options:
+
+```sh
+repovista audit --owner-rule 'packages/api/**=team-api' --label-rule 'packages/api/**=area-api' --sla-days 14
+repovista issue --all --sync-issues --update-existing --reopen-issues --label repovista
+```
+
+Rules are matched against affected finding paths. Matching owners, labels, SLA due dates, and GitHub issue links are stored in `.repovista/findings/` and shown by `repovista findings`, `repovista show`, `repovista findings-ui`, `repovista reports`, and the HTML dashboard.

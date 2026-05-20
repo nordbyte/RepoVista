@@ -28,7 +28,8 @@ export async function writeFindingState(
   outDir: string,
   findings: StructuredFinding[],
   runId: string,
-  now = new Date()
+  now = new Date(),
+  options: Pick<AuditOptions, "ownerRules" | "labelRules" | "slaDays"> = {}
 ): Promise<string> {
   const stateDirectory = await findingStateDirectory(projectRoot, outDir);
   await mkdir(stateDirectory, { recursive: true });
@@ -53,7 +54,7 @@ export async function writeFindingState(
     seenDedupeKeys.add(dedupeKey);
     const mergedPrevious = updatedById.get(findingId) ?? previous;
     const status = previous?.status === "fixed" ? "open" : previous?.status ?? finding.status ?? "open";
-    const merged: StructuredFinding = {
+    const merged: StructuredFinding = applyFindingLifecycleRules({
       ...mergedPrevious,
       ...finding,
       id: findingId,
@@ -71,7 +72,7 @@ export async function writeFindingState(
         commands: [],
         createdAt: now.toISOString()
       })
-    };
+    }, options, now);
     updatedById.set(merged.id, merged);
   }
 
@@ -96,6 +97,80 @@ function auditHistoryNote(previous: StructuredFinding | undefined): string {
     return "Reopened by RepoVista audit because the finding was detected again.";
   }
   return "Seen again by RepoVista audit.";
+}
+
+function applyFindingLifecycleRules(
+  finding: StructuredFinding,
+  options: Pick<AuditOptions, "ownerRules" | "labelRules" | "slaDays">,
+  now: Date
+): StructuredFinding {
+  const owner = finding.owner ?? matchingRuleValue(finding, options.ownerRules ?? []);
+  const labels = Array.from(new Set([
+    ...(finding.labels ?? []),
+    ...matchingRuleValues(finding, options.labelRules ?? [])
+  ])).sort();
+  const sla = typeof options.slaDays === "number"
+    ? findingSla(finding.createdAt ?? finding.firstSeenRunId ?? now.toISOString(), options.slaDays, now)
+    : finding.sla;
+  return {
+    ...finding,
+    owner,
+    labels: labels.length ? labels : finding.labels,
+    sla
+  };
+}
+
+function matchingRuleValue(finding: StructuredFinding, rules: string[]): string | undefined {
+  return matchingRuleValues(finding, rules)[0];
+}
+
+function matchingRuleValues(finding: StructuredFinding, rules: string[]): string[] {
+  const values: string[] = [];
+  for (const rule of rules) {
+    const parsed = parseLifecycleRule(rule);
+    if (!parsed) {
+      continue;
+    }
+    if (finding.paths.some((findingPath) => matchesRulePattern(findingPath, parsed.pattern))) {
+      values.push(parsed.value);
+    }
+  }
+  return values;
+}
+
+function parseLifecycleRule(rule: string): { pattern: string; value: string } | undefined {
+  const separator = rule.includes("=") ? rule.indexOf("=") : rule.indexOf(":");
+  if (separator <= 0) {
+    return undefined;
+  }
+  const pattern = rule.slice(0, separator).trim();
+  const value = rule.slice(separator + 1).trim();
+  return pattern && value ? { pattern, value } : undefined;
+}
+
+function matchesRulePattern(value: string, pattern: string): boolean {
+  const normalizedValue = value.replace(/\\/g, "/");
+  const normalizedPattern = pattern.replace(/\\/g, "/");
+  if (normalizedPattern === "*" || normalizedPattern === normalizedValue) {
+    return true;
+  }
+  const expression = normalizedPattern
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(`^${expression}$`).test(normalizedValue) ||
+    normalizedValue.startsWith(`${normalizedPattern.replace(/\/+$/g, "")}/`);
+}
+
+function findingSla(anchor: string, days: number, now: Date): StructuredFinding["sla"] {
+  const anchorMs = Date.parse(anchor);
+  const startMs = Number.isFinite(anchorMs) ? anchorMs : now.getTime();
+  const dueAt = new Date(startMs + days * 24 * 60 * 60 * 1000).toISOString();
+  return {
+    days,
+    dueAt,
+    overdue: Date.parse(dueAt) < now.getTime()
+  };
 }
 
 export async function runNextFindingCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
@@ -139,7 +214,7 @@ export async function runListFindingsCommand(options: AuditOptions, projectRoot 
   }
 
   return `${selected.map((finding) => [
-    `${finding.id}  ${finding.severity.toUpperCase()}  ${finding.status ?? "open"}  ${finding.title}`,
+    `${finding.id}  ${finding.severity.toUpperCase()}  ${finding.status ?? "open"}  ${finding.title}${finding.owner ? `  owner:${finding.owner}` : ""}${finding.sla?.overdue ? "  SLA:overdue" : finding.sla ? `  SLA:${finding.sla.dueAt.slice(0, 10)}` : ""}`,
     `  paths: ${finding.paths.join(", ") || "n/a"}`
   ].join("\n")).join("\n")}\n`;
 }
@@ -354,47 +429,167 @@ export async function runProviderRevalidateFindingCommand(
   return `Provider-revalidated RepoVista findings:\n${rows.join("\n")}\n`;
 }
 
-export async function runCreateIssueCommand(options: AuditOptions, projectRoot = process.cwd()): Promise<string> {
-  const finding = await requireFinding(projectRoot, options);
-  const title = `[RepoVista] ${finding.severity.toUpperCase()}: ${finding.title}`;
-  const body = renderIssueBody(finding);
-  if (options.dryRun) {
-    return `GitHub issue dry run:\n\nTitle: ${title}\nLabels: ${renderInlineList(options.issueLabels ?? [])}\nAssignees: ${renderInlineList(options.issueAssignees ?? [])}\nUpdate existing: ${options.issueUpdateExisting ? "yes" : "no"}\n\n${body}\n`;
+export async function runCreateIssueCommand(options: AuditOptions, projectRoot = process.cwd(), now = new Date()): Promise<string> {
+  const findings = await loadStoredFindings(projectRoot, options.outDir);
+  const selected = options.allFindings
+    ? findings.filter((finding) => options.allFindings || (finding.status ?? "open") === "open")
+    : [findings.find((finding) => finding.id === requireFindingId(options))].filter((finding): finding is StructuredFinding => Boolean(finding));
+  if (!selected.length) {
+    throw new RepoVistaError(options.allFindings ? "No findings found." : `Finding not found: ${requireFindingId(options)}`);
   }
 
-  try {
-    const existingIssue = await findExistingIssue(projectRoot, finding.id);
-    if (existingIssue && !options.issueUpdateExisting) {
-      return `GitHub issue already exists for ${finding.id}: ${existingIssue.url}\n`;
-    }
-    if (existingIssue && options.issueUpdateExisting) {
-      const comment = `${body}\n\n_RepoVista updated this issue from finding ${finding.id}._`;
-      await execFileAsync("gh", ["issue", "comment", String(existingIssue.number), "--body", comment], {
-        cwd: projectRoot,
-        timeout: 30_000,
-        maxBuffer: 1024 * 1024
-      });
-      await applyIssueMetadata(projectRoot, existingIssue.number, options);
-      return `Updated GitHub issue for ${finding.id}: ${existingIssue.url}\n`;
-    }
+  if (options.dryRun) {
+    return `GitHub issue dry run for ${selected.length} finding(s):\n\n${selected.map((finding) => renderIssueDryRun(finding, options)).join("\n\n---\n\n")}\n`;
+  }
 
-    const args = ["issue", "create", "--title", title, "--body", body];
-    for (const label of options.issueLabels ?? []) {
-      args.push("--label", label);
+  const selectedIds = new Set(selected.map((finding) => finding.id));
+  const rows: string[] = [];
+  const updated: StructuredFinding[] = [];
+  for (const finding of findings) {
+    if (!selectedIds.has(finding.id)) {
+      updated.push(finding);
+      continue;
     }
-    for (const assignee of options.issueAssignees ?? []) {
-      args.push("--assignee", assignee);
+    try {
+      const synced = await syncGithubIssueForFinding(projectRoot, finding, options, now);
+      updated.push(synced.finding);
+      rows.push(`- ${finding.id}: ${synced.action} ${synced.url ?? ""}`.trimEnd());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      rows.push(`- ${finding.id}: failed (${message})`);
+      updated.push(finding);
     }
-    const { stdout } = await execFileAsync("gh", args, {
+  }
+
+  await rewriteFindingState(projectRoot, options.outDir, updated);
+  return `GitHub issue sync completed:\n${rows.join("\n")}\n`;
+}
+
+async function syncGithubIssueForFinding(
+  projectRoot: string,
+  finding: StructuredFinding,
+  options: AuditOptions,
+  now: Date
+): Promise<{ finding: StructuredFinding; action: string; url?: string }> {
+  const title = issueTitle(finding);
+  const body = renderIssueBody(finding);
+  const existingIssue = await findExistingIssue(projectRoot, finding.id);
+  if (existingIssue && !options.issueUpdateExisting && !options.issueSync) {
+    return {
+      finding: issueLinkedFinding(finding, existingIssue, "open", options, now, "Existing GitHub issue detected."),
+      action: "existing",
+      url: existingIssue.url
+    };
+  }
+  if (existingIssue) {
+    const comment = `${body}\n\n_RepoVista synced this issue from finding ${finding.id}._`;
+    await execFileAsync("gh", ["issue", "comment", String(existingIssue.number), "--body", comment], {
       cwd: projectRoot,
       timeout: 30_000,
       maxBuffer: 1024 * 1024
     });
-    return stdout.trim() ? `${stdout.trim()}\n` : `Created GitHub issue for ${finding.id}.\n`;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new RepoVistaError(`Could not create GitHub issue with gh: ${message}`);
+    if (options.issueReopen && (finding.status ?? "open") === "open") {
+      await reopenIssue(projectRoot, existingIssue.number);
+    }
+    await applyIssueMetadata(projectRoot, existingIssue.number, {
+      ...options,
+      issueLabels: combinedIssueLabels(finding, options)
+    });
+    return {
+      finding: issueLinkedFinding(finding, existingIssue, "open", options, now, "Synced existing GitHub issue."),
+      action: "updated",
+      url: existingIssue.url
+    };
   }
+
+  const args = ["issue", "create", "--title", title, "--body", body];
+  for (const label of combinedIssueLabels(finding, options)) {
+    args.push("--label", label);
+  }
+  for (const assignee of options.issueAssignees ?? []) {
+    args.push("--assignee", assignee);
+  }
+  const { stdout } = await execFileAsync("gh", args, {
+    cwd: projectRoot,
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024
+  });
+  const url = stdout.trim().split(/\r?\n/).find((line) => /^https?:\/\//.test(line.trim()))?.trim();
+  const number = issueNumberFromUrl(url);
+  return {
+    finding: issueLinkedFinding(finding, { number, title, url }, "open", options, now, "Created GitHub issue."),
+    action: "created",
+    url
+  };
+}
+
+function renderIssueDryRun(finding: StructuredFinding, options: AuditOptions): string {
+  return `Title: ${issueTitle(finding)}
+Labels: ${renderInlineList(combinedIssueLabels(finding, options))}
+Assignees: ${renderInlineList(options.issueAssignees ?? [])}
+Update existing: ${options.issueUpdateExisting || options.issueSync ? "yes" : "no"}
+Reopen linked: ${options.issueReopen ? "yes" : "no"}
+
+${renderIssueBody(finding)}`;
+}
+
+function issueTitle(finding: StructuredFinding): string {
+  return `[RepoVista] ${finding.severity.toUpperCase()}: ${finding.title}`;
+}
+
+function issueLinkedFinding(
+  finding: StructuredFinding,
+  issue: { number?: number; title?: string; url?: string },
+  state: "open" | "closed" | "unknown",
+  options: AuditOptions,
+  now: Date,
+  note: string
+): StructuredFinding {
+  const status = finding.status ?? "open";
+  return {
+    ...finding,
+    issue: {
+      provider: "github",
+      number: issue.number,
+      url: issue.url,
+      title: issue.title,
+      state,
+      syncedAt: now.toISOString(),
+      labels: combinedIssueLabels(finding, options),
+      assignees: options.issueAssignees ?? []
+    },
+    updatedAt: now.toISOString(),
+    history: appendHistory(finding.history, {
+      kind: "issue-sync",
+      status,
+      note,
+      commands: ["gh issue"],
+      createdAt: now.toISOString()
+    })
+  };
+}
+
+function combinedIssueLabels(finding: StructuredFinding, options: AuditOptions): string[] {
+  return Array.from(new Set([
+    ...(finding.labels ?? []),
+    ...(options.issueLabels ?? [])
+  ])).sort();
+}
+
+async function reopenIssue(projectRoot: string, issueNumber: number | undefined): Promise<void> {
+  if (!issueNumber) {
+    return;
+  }
+  await execFileAsync("gh", ["issue", "reopen", String(issueNumber)], {
+    cwd: projectRoot,
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024
+  }).catch(() => undefined);
+}
+
+function issueNumberFromUrl(url: string | undefined): number | undefined {
+  const match = url?.match(/\/issues\/(\d+)(?:$|[/?#])/);
+  return match ? Number(match[1]) : undefined;
 }
 
 function buildProviderRevalidationPrompt(finding: StructuredFinding): string {
@@ -506,6 +701,9 @@ function renderIssueBody(finding: StructuredFinding): string {
 - Status: ${finding.status ?? "open"}
 - Category: ${finding.category ?? "n/a"}
 - Confidence: ${finding.confidence ?? "n/a"}
+- Owner: ${finding.owner ?? "n/a"}
+- Labels: ${finding.labels?.join(", ") || "n/a"}
+- SLA: ${finding.sla ? `${finding.sla.dueAt}${finding.sla.overdue ? " (overdue)" : ""}` : "n/a"}
 
 ## Affected Paths
 
@@ -649,6 +847,10 @@ Severity: ${finding.severity}
 Category: ${finding.category ?? "n/a"}
 Triage: ${finding.triage ?? "review"}
 Confidence: ${finding.confidence ?? "n/a"}
+Owner: ${finding.owner ?? "n/a"}
+Labels: ${finding.labels?.join(", ") || "n/a"}
+SLA: ${finding.sla ? `${finding.sla.dueAt}${finding.sla.overdue ? " (overdue)" : ""}` : "n/a"}
+Issue: ${finding.issue?.url ?? "n/a"}
 
 Affected paths:
 ${renderList(finding.paths)}

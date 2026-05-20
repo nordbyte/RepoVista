@@ -9,6 +9,7 @@ import {
   loadStoredFindings,
   runListFindingsCommand,
   runNextFindingCommand,
+  runCreateIssueCommand,
   runFixFindingCommand,
   runRollbackPatchCommand,
   runRevalidateFindingCommand,
@@ -70,6 +71,45 @@ test("finding lifecycle commands read, triage and revalidate persistent state", 
     const revalidated = (await loadStoredFindings(root, ".repovista"))[0];
     assert.equal(revalidated.status, "open");
     assert.equal(revalidated.evidenceValidation.passed, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("finding lifecycle rules add owners labels sla and issue dry-run metadata", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-finding-rules-"));
+  try {
+    const finding = {
+      id: "fnd_rules",
+      source: "03-risk-and-bug-report.md",
+      title: "API route lacks timeout",
+      severity: "medium",
+      status: "open",
+      paths: ["packages/api/src/route.ts"]
+    };
+    await writeFindingState(root, ".repovista", [finding], "run-1", new Date("2026-05-01T10:00:00.000Z"), {
+      ownerRules: ["packages/api/**=team-api"],
+      labelRules: ["packages/api/**=area-api"],
+      slaDays: 7
+    });
+    const stored = (await loadStoredFindings(root, ".repovista"))[0];
+    assert.equal(stored.owner, "team-api");
+    assert.deepEqual(stored.labels, ["area-api"]);
+    assert.equal(stored.sla.days, 7);
+    assert.equal(stored.sla.overdue, false);
+
+    const dryRun = await runCreateIssueCommand({
+      outDir: ".repovista",
+      findingId: "fnd_rules",
+      dryRun: true,
+      issueLabels: ["repovista"],
+      issueAssignees: ["octocat"],
+      issueSync: true,
+      issueReopen: true
+    }, root);
+    assert.match(dryRun, /GitHub issue dry run/);
+    assert.match(dryRun, /area-api, repovista/);
+    assert.match(dryRun, /Reopen linked: yes/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -79,9 +79,13 @@ export function createInitialMeta(
       maxNewCritical: options.maxNewCritical,
       maxNewHigh: options.maxNewHigh,
       maxNewMedium: options.maxNewMedium,
+      workspaceMatrix: options.workspaceMatrix,
       reviewMode: options.reviewMode ?? "default",
       promptFile: options.promptFile,
-      exportFormats: options.exportFormats ?? []
+      exportFormats: options.exportFormats ?? [],
+      ownerRules: options.ownerRules,
+      labelRules: options.labelRules,
+      slaDays: options.slaDays
     },
     codex: {
       model: recordedModel,

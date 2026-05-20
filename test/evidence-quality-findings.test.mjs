@@ -719,6 +719,11 @@ None.
     assert.equal(features.features.length > 0, true);
     assert.equal(storedFindings[0].id, findings[0].id);
     assert.match(html, /RepoVista Dashboard/);
+    assert.match(html, /<details class="finding-card finding-row"/);
+    assert.match(html, /Report Sections/);
+    assert.match(html, /Report Comparison/);
+    assert.match(html, /download>findings\.json/);
+    assert.match(html, /class="snippet"/);
     assert.match(html, /Evidence Pack/);
     assert.match(html, /Phase Quality/);
     assert.match(html, /Suppressed Findings/);

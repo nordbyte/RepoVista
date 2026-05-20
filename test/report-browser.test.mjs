@@ -37,6 +37,9 @@ test("report browser lists report runs and renders sections", async () => {
     assert.equal(runs[0].runId, "2026-05-19T10-00-00-000Z");
     assert.equal(runs[0].findingCount, 1);
     assert.ok(runs[0].sections.some((section) => section.id === "full"));
+    assert.ok(runs[0].sections.some((section) => section.id === "findings"));
+    assert.ok(runs[0].sections.some((section) => section.id === "evidence-refs"));
+    assert.ok(runs[0].sections.some((section) => section.id === "compare-previous"));
     assert.ok(runs[0].sections.some((section) => section.fileName === "03-risk-and-bug-report.md"));
 
     const listFrame = renderReportsMenuFrame(runs, {
@@ -84,6 +87,10 @@ test("report browser lists report runs and renders sections", async () => {
       scroll: 0
     }, { columns: 100, rows: 24, color: false });
     assert.match(sectionFrame, /Full Report/);
+    assert.match(sectionFrame, /Findings/);
+    assert.match(sectionFrame, /Evidence Refs/);
+    assert.match(sectionFrame, /Compare Previous Run/);
+    assert.match(sectionFrame, /severity all \| status all/);
     assert.match(sectionFrame, /Full Report: combined \| \d+ line\(s\) \| total 2m 5s/);
     assert.match(sectionFrame, /Summary: index\.md \| 4 line\(s\) \| generation 0m 5s/);
     assert.match(sectionFrame, /Evidence Pack: 00-inventory\.md \| 4 line\(s\) \| generation 0m 4s/);
@@ -98,6 +105,19 @@ test("report browser lists report runs and renders sections", async () => {
     }, { columns: 100, rows: 24, color: false });
     assert.match(viewerFrame, /# Summary/);
     assert.match(viewerFrame, /Newer report/);
+
+    const findingsIndex = runs[0].sections.findIndex((section) => section.id === "findings");
+    const filteredFrame = renderReportsMenuFrame(runs, {
+      screen: "viewer",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      severityFilter: "high",
+      statusFilter: "open",
+      searchQuery: "fixture"
+    }, { columns: 100, rows: 24, color: false });
+    assert.match(filteredFrame, /HIGH: Fixture finding/);
+    assert.match(filteredFrame, /severity high \| status open/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

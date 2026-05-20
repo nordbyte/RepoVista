@@ -35,7 +35,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista show <finding-id>", name: "show", help: "Show one persisted finding with evidence and lifecycle history" },
   { usage: "repovista triage <finding-id|--all> --status <status> [--note <text>]", name: "triage", help: "Update the lifecycle status of one finding" },
   { usage: "repovista revalidate <finding-id|--all> [--provider-revalidate]", name: "revalidate", help: "Re-check finding evidence against the current checkout" },
-  { usage: "repovista issue <finding-id> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing]", name: "issue", help: "Create or update a GitHub issue for one finding through gh" },
+  { usage: "repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues]", name: "issue", help: "Create, update, or sync GitHub issues for findings through gh" },
   { usage: "repovista fix <finding-id[,finding-id...]> [--dry-run] [--check <command>]", name: "fix", help: "Create an isolated patch attempt for one or more findings" },
   { usage: "repovista patches [patch-id] [--json] [--dry-run]", name: "patches", help: "List or preview RepoVista patch attempts" },
   { usage: "repovista rollback <patch-id> [--dry-run]", name: "rollback", help: "Reverse a recorded RepoVista patch diff" },

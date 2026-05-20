@@ -11,6 +11,14 @@ const STATUS_KEYS: Record<string, FindingStatus> = {
   u: "uncertain"
 };
 
+export interface FindingsMenuState {
+  cursor: number;
+  detail: boolean;
+  board: boolean;
+  scroll: number;
+  severityFilter: "all" | StructuredFinding["severity"];
+}
+
 export async function runFindingsMenu(
   options: AuditOptions,
   input = process.stdin as ReadStream,
@@ -26,7 +34,9 @@ export async function runFindingsMenu(
   const state = {
     cursor: 0,
     detail: false,
-    scroll: 0
+    board: false,
+    scroll: 0,
+    severityFilter: "all" as const
   };
   let dirty = false;
 
@@ -58,29 +68,43 @@ export async function runFindingsMenu(
 
 export function renderFindingsMenuFrame(
   findings: StructuredFinding[],
-  state: { cursor: number; detail: boolean; scroll: number },
+  state: FindingsMenuState,
   options: { columns: number; rows: number; color: boolean }
 ): string {
-  const finding = findings[state.cursor];
+  const visibleFindings = filterFindings(findings, state);
+  const finding = visibleFindings[state.cursor];
+  if (state.board) {
+    return renderTuiTextFrame({
+      title: "RepoVista Findings",
+      help: "b returns to list | s filters severity | q exits",
+      sectionTitle: `Triage board / severity ${state.severityFilter}`,
+      lines: triageBoardLines(filterFindings(findings, state)),
+      scroll: state.scroll,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      footer: `${filterFindings(findings, state).length}/${findings.length} finding(s)`
+    });
+  }
   if (state.detail && finding) {
     return renderTuiTextFrame({
       title: "RepoVista Findings",
-      help: "Up/Down scroll | Enter/Esc returns | o/f/p/w/u sets status | q exits",
+      help: "Up/Down scroll | Enter/Esc returns | o/f/p/w/u sets status | b board | q exits",
       sectionTitle: `${finding.id} / ${finding.status ?? "open"}`,
       lines: findingDetailLines(finding),
       scroll: state.scroll,
       columns: options.columns,
       rows: options.rows,
       color: options.color,
-      footer: `${state.cursor + 1}/${findings.length}`
+      footer: `${state.cursor + 1}/${visibleFindings.length} | ${findings.length} total`
     });
   }
 
   return renderTuiListFrame({
     title: "RepoVista Findings",
-    help: "Up/Down move | Enter opens detail | o/f/p/w/u sets status | q exits",
+    help: "Up/Down move | Enter opens detail | o/f/p/w/u sets status | b board | s severity | q exits",
     sectionTitle: "Persisted findings",
-    items: findings.map(formatFindingItem),
+    items: visibleFindings.map(formatFindingItem),
     cursor: state.cursor,
     columns: options.columns,
     rows: options.rows,
@@ -91,7 +115,7 @@ export function renderFindingsMenuFrame(
 
 function handleFindingsMenuKey(
   findings: StructuredFinding[],
-  state: { cursor: number; detail: boolean; scroll: number },
+  state: FindingsMenuState,
   key: TuiKey,
   now: Date,
   rows: number,
@@ -101,8 +125,27 @@ function handleFindingsMenuKey(
   if ((key.ctrl && key.name === "c") || key.name === "q") {
     return false;
   }
+  if (key.name === "b") {
+    state.board = !state.board;
+    state.detail = false;
+    state.scroll = 0;
+    state.cursor = clampCursor(state.cursor, filterFindings(findings, state).length);
+    return false;
+  }
+  if (key.name === "s" && !state.detail) {
+    state.severityFilter = nextSeverityFilter(state.severityFilter);
+    state.cursor = clampCursor(state.cursor, filterFindings(findings, state).length);
+    state.scroll = 0;
+    return false;
+  }
+  if (state.board) {
+    return handleBoardScroll(findings, state, key, rows, columns, color);
+  }
   if (key.name && STATUS_KEYS[key.name]) {
-    const finding = findings[state.cursor];
+    const finding = filterFindings(findings, state)[state.cursor];
+    if (!finding) {
+      return false;
+    }
     const status = STATUS_KEYS[key.name];
     finding.status = status;
     finding.updatedAt = now.toISOString();
@@ -119,7 +162,7 @@ function handleFindingsMenuKey(
     return true;
   }
   if (state.detail) {
-    const finding = findings[state.cursor];
+    const finding = filterFindings(findings, state)[state.cursor];
     const lineCount = finding ? wrappedLineCount(findingDetailLines(finding), columns, color) : 0;
     const page = Math.max(4, rows - 8);
     const maxScroll = Math.max(0, lineCount - page);
@@ -142,9 +185,9 @@ function handleFindingsMenuKey(
     return false;
   }
   if (key.name === "up") {
-    state.cursor = wrapIndex(state.cursor - 1, findings.length);
+    state.cursor = wrapIndex(state.cursor - 1, filterFindings(findings, state).length);
   } else if (key.name === "down") {
-    state.cursor = wrapIndex(state.cursor + 1, findings.length);
+    state.cursor = wrapIndex(state.cursor + 1, filterFindings(findings, state).length);
   } else if (key.name === "return" || key.name === "enter" || key.name === "right") {
     state.detail = true;
     state.scroll = 0;
@@ -153,7 +196,9 @@ function handleFindingsMenuKey(
 }
 
 function formatFindingItem(finding: StructuredFinding): string {
-  return `${finding.severity.toUpperCase().padEnd(8)} ${(finding.status ?? "open").padEnd(14)} ${finding.id} ${finding.title}`;
+  const owner = finding.owner ? ` owner:${finding.owner}` : "";
+  const sla = finding.sla?.overdue ? " SLA:overdue" : finding.sla ? ` SLA:${finding.sla.dueAt.slice(0, 10)}` : "";
+  return `${finding.severity.toUpperCase().padEnd(8)} ${(finding.status ?? "open").padEnd(14)} ${finding.id} ${finding.title}${owner}${sla}`;
 }
 
 function findingDetailLines(finding: StructuredFinding): string[] {
@@ -163,6 +208,10 @@ function findingDetailLines(finding: StructuredFinding): string[] {
     `Severity: ${finding.severity}`,
     `Status: ${finding.status ?? "open"}`,
     `Category: ${finding.category ?? "n/a"}`,
+    `Owner: ${finding.owner ?? "n/a"}`,
+    `Labels: ${finding.labels?.join(", ") || "n/a"}`,
+    `SLA: ${finding.sla ? `${finding.sla.dueAt}${finding.sla.overdue ? " (overdue)" : ""}` : "n/a"}`,
+    `Issue: ${finding.issue?.url ?? "n/a"}`,
     `Paths: ${finding.paths.join(", ") || "n/a"}`,
     "",
     `Evidence: ${finding.evidence ?? "n/a"}`,
@@ -171,6 +220,86 @@ function findingDetailLines(finding: StructuredFinding): string[] {
     "",
     `Rationale: ${finding.problemRationale ?? "n/a"}`
   ];
+}
+
+function triageBoardLines(findings: StructuredFinding[]): string[] {
+  const statuses: FindingStatus[] = ["open", "uncertain", "fixed", "false-positive", "wont-fix"];
+  const lines = ["# Triage Board", ""];
+  for (const status of statuses) {
+    const group = findings.filter((finding) => (finding.status ?? "open") === status).sort(compareBoardFindings);
+    lines.push(`## ${status} (${group.length})`, "");
+    if (!group.length) {
+      lines.push("- n/a", "");
+      continue;
+    }
+    for (const finding of group) {
+      const owner = finding.owner ? ` | owner ${finding.owner}` : "";
+      const labels = finding.labels?.length ? ` | labels ${finding.labels.join(", ")}` : "";
+      const sla = finding.sla ? ` | SLA ${finding.sla.dueAt.slice(0, 10)}${finding.sla.overdue ? " overdue" : ""}` : "";
+      lines.push(`- ${finding.severity.toUpperCase()} ${finding.id}: ${finding.title}${owner}${labels}${sla}`);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+
+function filterFindings(findings: StructuredFinding[], state: FindingsMenuState): StructuredFinding[] {
+  return findings.filter((finding) => state.severityFilter === "all" || finding.severity === state.severityFilter);
+}
+
+function nextSeverityFilter(current: FindingsMenuState["severityFilter"]): FindingsMenuState["severityFilter"] {
+  const values: FindingsMenuState["severityFilter"][] = ["all", "critical", "high", "medium", "low", "unknown"];
+  return values[(values.indexOf(current) + 1) % values.length];
+}
+
+function handleBoardScroll(
+  findings: StructuredFinding[],
+  state: FindingsMenuState,
+  key: TuiKey,
+  rows: number,
+  columns: number,
+  color: boolean
+): boolean {
+  const lineCount = wrappedLineCount(triageBoardLines(filterFindings(findings, state)), columns, color);
+  const page = Math.max(4, rows - 8);
+  const maxScroll = Math.max(0, lineCount - page);
+  if (key.name === "up") {
+    state.scroll = Math.max(0, state.scroll - 1);
+  } else if (key.name === "down") {
+    state.scroll = Math.min(maxScroll, state.scroll + 1);
+  } else if (key.name === "pageup") {
+    state.scroll = Math.max(0, state.scroll - page);
+  } else if (key.name === "pagedown" || key.name === "space") {
+    state.scroll = Math.min(maxScroll, state.scroll + page);
+  } else if (key.name === "home") {
+    state.scroll = 0;
+  } else if (key.name === "end") {
+    state.scroll = maxScroll;
+  }
+  return false;
+}
+
+function compareBoardFindings(left: StructuredFinding, right: StructuredFinding): number {
+  return severityRank(right.severity) - severityRank(left.severity) ||
+    Number(Boolean(right.sla?.overdue)) - Number(Boolean(left.sla?.overdue)) ||
+    left.title.localeCompare(right.title);
+}
+
+function severityRank(value: StructuredFinding["severity"]): number {
+  return {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+    unknown: 0
+  }[value] ?? 0;
+}
+
+function clampCursor(cursor: number, length: number): number {
+  if (length <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(0, cursor), length - 1);
 }
 
 function wrapIndex(index: number, length: number): number {

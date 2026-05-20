@@ -36,9 +36,9 @@ Each audit writes a timestamped run directory under the selected output root:
     logs/
 ```
 
-`index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, evidence checks, phase-quality diagnostics, suppressed findings, and artifact links.
+`index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, collapsible findings, evidence snippets, full Markdown report sections, previous-run comparison, phase-quality diagnostics, suppressed findings, and artifact download links.
 
-Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report or each generated section. Successful interactive audits open this same browser on the newly created run instead of ending at the run-directory message. The report list is sorted by run creation time with the newest run first and shows the total run duration after the exit code. Section lists show line count and generation duration where metadata is available. The report viewer highlights Markdown headings and bold spans in color-capable terminals, and Markdown tables are rendered with aligned columns. In the run list, Space marks or unmarks report runs for deletion, and `d` opens a confirmation screen before the marked run directories are removed.
+Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report, generated finding/evidence views, each Markdown section, or a direct comparison with the previous run. Successful interactive audits open this same browser on the newly created run instead of ending at the run-directory message. The report list is sorted by run creation time with the newest run first and shows the total run duration after the exit code. Section lists show line count and generation duration where metadata is available. The report viewer highlights Markdown headings and bold spans in color-capable terminals, renders Markdown tables with aligned columns, supports `/` search, `n` next match, `f` severity filter, `t` status filter, `e` evidence refs, and `c` compare. In the run list, Space marks or unmarks report runs for deletion, and `d` opens a confirmation screen before the marked run directories are removed.
 
 ## Main Files
 
@@ -57,7 +57,7 @@ Use `repovista reports` to browse completed runs in the terminal, select a run, 
 | `prompt-manifest.json` | Prompt context manifest, file hashes, inclusion reasons, omissions, diff scope, and token estimates. |
 | `findings.json` | Active structured findings. |
 | `features.json` | Run-specific semantic feature map. |
-| `report.html` | Browser dashboard with finding filters, evidence quality, phase quality, suppressed findings, and artifact links when exported. |
+| `report.html` | Browser dashboard with finding filters, collapsible findings, evidence snippets, full Markdown sections, previous-run comparison, evidence quality, phase quality, suppressed findings, and artifact links when exported. |
 | `findings.jsonl` | Finding export for line-oriented processing. |
 | `findings.sarif` | SARIF export for security tooling. |
 | `github-annotations.json` | GitHub annotation export. |
@@ -91,7 +91,7 @@ Repair attempts are visible in progress output when they start. Each attempt is 
 
 Risk findings use stable ids and include:
 
-- `id`, `title`, `severity`, `category`, `status`, and stable signature.
+- `id`, `title`, `severity`, `category`, `status`, owner, labels, SLA, issue link, and stable signature.
 - Affected paths.
 - Evidence text and structured evidence references.
 - Recommendation, rationale, reproduction, suggested regression test, and minimum fix scope.
@@ -113,7 +113,16 @@ For providers with native schema support, RepoVista requests provider-native JSO
 | `.repovista/cache/` | Scan and phase reuse metadata. |
 | `.repovista/baseline.json` | Accepted suppressions. |
 
-Findings, features, cache, and other internal state use a shared versioned state layer that can read legacy files and apply schema migration logic.
+Findings, features, cache, and other internal state use a shared versioned state layer that can read legacy files and apply schema migration logic. The cache records global scan reuse plus phase, feature, and shard fingerprints, so unchanged successful phase artifacts or shard reports can be reused when compatible even if unrelated files changed.
+
+## Workspace Matrix
+
+`repovista audit --workspace-matrix` detects package workspaces, runs a normal audit for each selected workspace, and writes an aggregate run under `.repovista/workspace-matrix-<timestamp>/` with:
+
+- `index.md` for a human-readable matrix table.
+- `workspace-matrix.json` for machine-readable workspace status, report paths, exit codes, and finding counts.
+
+Use `--workspace <name-or-path>` with `--workspace-matrix` to restrict the matrix to one detected workspace.
 
 ## Compare Output
 

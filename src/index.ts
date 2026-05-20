@@ -75,6 +75,7 @@ export { assertSettingsMenuRegistryCoverage, renderSettingsMenuFrame, renderSett
 export { findingSignature, stableFindingId, stableId } from "./stable-id.js";
 export { checkbox, colorize, renderTuiListFrame, renderTuiTerminalFrame, renderTuiTextFrame, runTuiSession, shouldUseColor, wrappedLineCount } from "./tui.js";
 export { detectWorkspaces, resolveWorkspaceScope, workspaceIncludes } from "./workspaces.js";
+export { runWorkspaceMatrix } from "./workspace-matrix.js";
 export type {
   AuditCacheMeta,
   AuditMeta,

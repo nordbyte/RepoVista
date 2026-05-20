@@ -1,4 +1,5 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { reportPath } from "./reports.js";
 import type {
   AuditMeta,
@@ -22,6 +23,7 @@ export interface FindingExportContext {
   evidence?: EvidencePack;
   structuredReports?: StructuredPhaseReport[];
   suppressedFindings?: StructuredFinding[];
+  paths?: RunPaths;
 }
 
 export async function writeFindingExports(
@@ -45,7 +47,7 @@ export async function writeFindingExports(
 
   if (uniqueFormats.has("html")) {
     outputs.htmlReport = reportPath(paths.runDir, "report.html");
-    await writeFile(outputs.htmlReport, renderHtml(findings, context), "utf8");
+    await writeFile(outputs.htmlReport, await renderHtml(findings, { ...context, paths }), "utf8");
   }
 
   if (uniqueFormats.has("github")) {
@@ -169,12 +171,24 @@ function findingReferences(finding: StructuredFinding): FindingEvidenceReference
   return finding.paths.map((path) => ({ path }));
 }
 
+function evidenceSnippetId(reference: FindingEvidenceReference): string {
+  return `evidence-${reference.path}-${reference.startLine ?? 1}-${reference.endLine ?? reference.startLine ?? 1}`
+    .replace(/[^A-Za-z0-9_-]/g, "-");
+}
+
+function findingCompareKey(finding: StructuredFinding): string {
+  return finding.signature ?? `${finding.severity}|${finding.title}|${finding.paths.join(",")}`.toLowerCase();
+}
+
 function ruleId(finding: StructuredFinding): string {
   return `repovista/${finding.signature ?? finding.id}`.replace(/[^A-Za-z0-9_.:/-]/g, "_");
 }
 
-function renderHtml(findings: StructuredFinding[], context: FindingExportContext): string {
+async function renderHtml(findings: StructuredFinding[], context: FindingExportContext): Promise<string> {
   const meta = context.meta;
+  const markdownSections = await loadMarkdownSections(context.paths?.runDir);
+  const evidenceSnippets = await loadEvidenceSnippets(findings, meta?.projectRoot);
+  const compareSummary = await loadPreviousRunComparison(context.paths, findings);
   const severities = ["all", "critical", "high", "medium", "low", "unknown"];
   const statuses = ["all", ...Array.from(new Set(findings.map((finding) => finding.status ?? "open"))).sort()];
   const features = ["all", ...Array.from(new Set(findings.map((finding) => finding.featureId).filter((value): value is string => Boolean(value)))).sort()];
@@ -184,14 +198,7 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
 <td>${escapeHtml(String(report.evidenceReferences.length))}</td>
 <td>${escapeHtml(String(report.recommendations.length))}</td>
 </tr>`).join("\n");
-  const rows = findings.map((finding) => `<tr class="finding-row" data-severity="${escapeHtml(finding.severity)}" data-status="${escapeHtml(finding.status ?? "open")}" data-feature="${escapeHtml(finding.featureId ?? "")}" data-search="${escapeHtml(searchTextForFinding(finding))}">
-<td>${escapeHtml(finding.severity)}</td>
-<td>${escapeHtml(finding.status ?? "open")}</td>
-<td>${escapeHtml(finding.title)}</td>
-<td>${escapeHtml(finding.paths.join(", ") || "n/a")}</td>
-<td>${renderEvidenceLinks(finding)}</td>
-<td>${escapeHtml(finding.recommendation ?? "")}</td>
-</tr>`).join("\n");
+  const findingCards = findings.map((finding) => renderFindingCard(finding, evidenceSnippets)).join("\n");
   const proposals = (context.structuredReports ?? [])
     .flatMap((report) => report.proposals ?? [])
     .map((proposal) => `<li><strong>${escapeHtml(proposal.title)}</strong><br>${escapeHtml(proposal.description)}<br><small>${escapeHtml(proposal.priority)} priority, ${escapeHtml(proposal.effort)} effort, ${escapeHtml(proposal.confidence)} confidence</small></li>`)
@@ -228,8 +235,14 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
 </tr>`).join("\n");
   const outputLinks = Object.entries(meta?.outputs ?? {})
     .filter(([, value]) => typeof value === "string")
-    .map(([label, value]) => `<li><strong>${escapeHtml(label)}</strong>: <code>${escapeHtml(String(value))}</code></li>`)
+    .map(([label, value]) => `<li><strong>${escapeHtml(label)}</strong>: ${renderArtifactLink(String(value), label)}</li>`)
     .join("\n");
+  const generatedLinks = context.paths ? renderGeneratedArtifactLinks(context.paths) : "";
+  const markdownSectionHtml = markdownSections.map((section) => `<details class="report-section" open>
+    <summary>${escapeHtml(section.title)}</summary>
+    <div class="markdown-section">${renderMarkdown(section.content)}</div>
+  </details>`).join("\n");
+  const compareHtml = compareSummary ? renderCompareSummary(compareSummary) : "<p class=\"muted\">No previous report run was available for comparison.</p>";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -250,6 +263,18 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
     th, td { border: 1px solid #d4d4d4; padding: .5rem; vertical-align: top; }
     th { background: #f5f5f5; text-align: left; }
     section { margin-top: 1rem; overflow-x: auto; }
+    details { border: 1px solid #d4d4d4; border-radius: 6px; background: #fff; margin: .75rem 0; padding: .75rem; }
+    details summary { cursor: pointer; font-weight: 700; }
+    .finding-card[data-severity="critical"] { border-left: 5px solid #991b1b; }
+    .finding-card[data-severity="high"] { border-left: 5px solid #dc2626; }
+    .finding-card[data-severity="medium"] { border-left: 5px solid #d97706; }
+    .finding-card[data-severity="low"] { border-left: 5px solid #059669; }
+    .finding-meta { display: flex; flex-wrap: wrap; gap: .45rem; margin: .6rem 0; }
+    .pill { border: 1px solid #d4d4d4; border-radius: 999px; padding: .15rem .5rem; background: #f8fafc; font-size: .85rem; }
+    .snippet { background: #111827; color: #f9fafb; padding: .75rem; overflow-x: auto; border-radius: 6px; }
+    .report-section { padding: 0; }
+    .report-section summary { padding: .75rem; }
+    .markdown-section { padding: 0 .9rem .9rem; }
     code { overflow-wrap: anywhere; }
     li { margin-bottom: .75rem; }
     .muted { color: #666; }
@@ -291,10 +316,15 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
     <label>Feature <select id="feature-filter">${features.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("")}</select></label>
   </div>
   <p class="muted" id="finding-count">${findings.length} finding(s)</p>
-  <table>
-    <thead><tr><th>Severity</th><th>Status</th><th>Title</th><th>Paths</th><th>Evidence</th><th>Recommendation</th></tr></thead>
-    <tbody>${rows || "<tr><td colspan=\"6\">No findings</td></tr>"}</tbody>
-  </table>
+  <div id="finding-cards">${findingCards || "<p>No findings</p>"}</div>
+  </section>
+  <section>
+  <h2>Report Sections</h2>
+  ${markdownSectionHtml || "<p class=\"muted\">No Markdown report sections recorded.</p>"}
+  </section>
+  <section>
+  <h2>Report Comparison</h2>
+  ${compareHtml}
   </section>
   <div class="split">
   <section>
@@ -340,7 +370,7 @@ function renderHtml(findings: StructuredFinding[], context: FindingExportContext
   </section>
   <section>
   <h2>Artifacts</h2>
-  <ul>${outputLinks || "<li>No artifact paths recorded.</li>"}</ul>
+  <ul>${generatedLinks}${outputLinks || ""}${generatedLinks || outputLinks ? "" : "<li>No artifact paths recorded.</li>"}</ul>
   </section>
   </main>
   <script>
@@ -378,14 +408,258 @@ function countBy<T>(values: T[], key: (value: T) => string): Record<string, numb
   }, {});
 }
 
+interface HtmlMarkdownSection {
+  title: string;
+  fileName: string;
+  content: string;
+}
+
+interface HtmlEvidenceSnippet {
+  id: string;
+  label: string;
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  code: string;
+}
+
+interface HtmlCompareSummary {
+  previousRunId: string;
+  added: StructuredFinding[];
+  resolved: StructuredFinding[];
+  persisting: number;
+}
+
+async function loadMarkdownSections(runDir: string | undefined): Promise<HtmlMarkdownSection[]> {
+  if (!runDir) {
+    return [];
+  }
+  const definitions = [
+    ["index.md", "Summary"],
+    ["00-inventory.md", "Evidence Pack"],
+    ["01-architecture-report.md", "Architecture"],
+    ["02-code-quality-report.md", "Code Quality"],
+    ["03-risk-and-bug-report.md", "Risk and Bug"],
+    ["04-feature-roadmap.md", "Feature Roadmap"]
+  ] as const;
+  const sections: HtmlMarkdownSection[] = [];
+  for (const [fileName, title] of definitions) {
+    try {
+      sections.push({ fileName, title, content: await readFile(path.join(runDir, fileName), "utf8") });
+    } catch {
+      // Optional report sections are omitted when a run was partial.
+    }
+  }
+  return sections;
+}
+
+async function loadEvidenceSnippets(findings: StructuredFinding[], projectRoot: string | undefined): Promise<Map<string, HtmlEvidenceSnippet>> {
+  const snippets = new Map<string, HtmlEvidenceSnippet>();
+  if (!projectRoot) {
+    return snippets;
+  }
+  for (const finding of findings) {
+    for (const reference of findingReferences(finding)) {
+      const key = evidenceSnippetId(reference);
+      if (snippets.has(key)) {
+        continue;
+      }
+      const snippet = await readEvidenceSnippet(projectRoot, reference);
+      if (snippet) {
+        snippets.set(key, snippet);
+      }
+    }
+  }
+  return snippets;
+}
+
+async function readEvidenceSnippet(projectRoot: string, reference: FindingEvidenceReference): Promise<HtmlEvidenceSnippet | undefined> {
+  const filePath = path.resolve(projectRoot, reference.path);
+  const relative = path.relative(projectRoot, filePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return undefined;
+  }
+  try {
+    const lines = (await readFile(filePath, "utf8")).split(/\r?\n/);
+    const start = Math.max(1, reference.startLine ?? 1);
+    const end = Math.min(lines.length, Math.max(start, reference.endLine ?? start + 6));
+    const code = lines.slice(start - 1, end).map((line, index) => `${String(start + index).padStart(4, " ")} | ${line}`).join("\n");
+    return {
+      id: evidenceSnippetId(reference),
+      label: `${reference.path}${reference.startLine ? `:${reference.startLine}` : ""}`,
+      path: reference.path,
+      startLine: reference.startLine,
+      endLine: reference.endLine,
+      code
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadPreviousRunComparison(paths: RunPaths | undefined, currentFindings: StructuredFinding[]): Promise<HtmlCompareSummary | undefined> {
+  if (!paths) {
+    return undefined;
+  }
+  let entries;
+  try {
+    entries = await readdir(paths.outRoot, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && entry.name !== paths.runId && /^20\d{2}-/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  const previousRunId = candidates.find((name) => name < paths.runId) ?? candidates[0];
+  if (!previousRunId) {
+    return undefined;
+  }
+  try {
+    const previousFindings = JSON.parse(await readFile(path.join(paths.outRoot, previousRunId, "findings.json"), "utf8")) as StructuredFinding[];
+    const previousByKey = new Map(previousFindings.map((finding) => [findingCompareKey(finding), finding]));
+    const currentByKey = new Map(currentFindings.map((finding) => [findingCompareKey(finding), finding]));
+    return {
+      previousRunId,
+      added: currentFindings.filter((finding) => !previousByKey.has(findingCompareKey(finding))),
+      resolved: previousFindings.filter((finding) => !currentByKey.has(findingCompareKey(finding))),
+      persisting: currentFindings.filter((finding) => previousByKey.has(findingCompareKey(finding))).length
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function renderFindingCard(finding: StructuredFinding, snippets: Map<string, HtmlEvidenceSnippet>): string {
+  const refs = findingReferences(finding);
+  const snippetHtml = refs
+    .map((reference) => snippets.get(evidenceSnippetId(reference)))
+    .filter((snippet): snippet is HtmlEvidenceSnippet => Boolean(snippet))
+    .map((snippet) => `<h4 id="${escapeHtml(snippet.id)}">${escapeHtml(snippet.label)}</h4><pre class="snippet"><code>${escapeHtml(snippet.code)}</code></pre>`)
+    .join("\n");
+  return `<details class="finding-card finding-row" data-severity="${escapeHtml(finding.severity)}" data-status="${escapeHtml(finding.status ?? "open")}" data-feature="${escapeHtml(finding.featureId ?? "")}" data-search="${escapeHtml(searchTextForFinding(finding))}">
+<summary>${escapeHtml(finding.severity.toUpperCase())}: ${escapeHtml(finding.title)}</summary>
+<div class="finding-meta">
+  <span class="pill">${escapeHtml(finding.status ?? "open")}</span>
+  <span class="pill">${escapeHtml(finding.category ?? "uncategorized")}</span>
+  <span class="pill">owner: ${escapeHtml(finding.owner ?? "n/a")}</span>
+  <span class="pill">labels: ${escapeHtml(finding.labels?.join(", ") || "n/a")}</span>
+  <span class="pill">SLA: ${escapeHtml(finding.sla ? `${finding.sla.dueAt}${finding.sla.overdue ? " overdue" : ""}` : "n/a")}</span>
+</div>
+<p><strong>Paths:</strong> ${escapeHtml(finding.paths.join(", ") || "n/a")}</p>
+<p><strong>Evidence:</strong> ${escapeHtml(finding.evidence ?? "n/a")}</p>
+<p><strong>Recommendation:</strong> ${escapeHtml(finding.recommendation ?? "n/a")}</p>
+<p><strong>Issue:</strong> ${finding.issue?.url ? `<a href="${escapeHtml(finding.issue.url)}">${escapeHtml(finding.issue.url)}</a>` : "n/a"}</p>
+<p><strong>Evidence refs:</strong><br>${renderEvidenceLinks(finding)}</p>
+${snippetHtml || "<p class=\"muted\">No local evidence snippet available.</p>"}
+</details>`;
+}
+
+function renderCompareSummary(summary: HtmlCompareSummary): string {
+  return `<div class="scoreboard">
+    <div><strong>Previous run</strong><br>${escapeHtml(summary.previousRunId)}</div>
+    <div><strong>Added</strong><br>${summary.added.length}</div>
+    <div><strong>Resolved</strong><br>${summary.resolved.length}</div>
+    <div><strong>Persisting</strong><br>${summary.persisting}</div>
+  </div>
+  <details><summary>Added findings</summary>${renderCompactFindingList(summary.added)}</details>
+  <details><summary>Resolved findings</summary>${renderCompactFindingList(summary.resolved)}</details>`;
+}
+
+function renderCompactFindingList(findings: StructuredFinding[]): string {
+  return findings.length
+    ? `<ul>${findings.map((finding) => `<li>${escapeHtml(finding.severity.toUpperCase())}: ${escapeHtml(finding.title)} <code>${escapeHtml(finding.paths.join(", ") || "n/a")}</code></li>`).join("")}</ul>`
+    : "<p class=\"muted\">None.</p>";
+}
+
+function renderArtifactLink(filePath: string, label: string): string {
+  const href = path.basename(filePath);
+  return `<a href="${escapeHtml(href)}" download>${escapeHtml(path.basename(filePath) || label)}</a> <code>${escapeHtml(filePath)}</code>`;
+}
+
+function renderGeneratedArtifactLinks(paths: RunPaths): string {
+  return [
+    "index.md",
+    "report.json",
+    "summary.json",
+    "findings.json",
+    "findings.jsonl",
+    "findings.sarif",
+    "structured-reports.json",
+    "prompt-manifest.json"
+  ].map((fileName) => `<li><strong>${escapeHtml(fileName)}</strong>: <a href="${escapeHtml(fileName)}" download>${escapeHtml(fileName)}</a></li>`).join("\n");
+}
+
+function renderMarkdown(markdown: string): string {
+  const lines = markdown.split(/\r?\n/);
+  const html: string[] = [];
+  let inCode = false;
+  let codeLines: string[] = [];
+  let inList = false;
+  const closeList = () => {
+    if (inList) {
+      html.push("</ul>");
+      inList = false;
+    }
+  };
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      if (inCode) {
+        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        codeLines = [];
+        inCode = false;
+      } else {
+        closeList();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(line);
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading) {
+      closeList();
+      const level = Math.min(6, heading[1].length + 1);
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const list = /^\s*[-*]\s+(.+)$/.exec(line);
+    if (list) {
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(list[1])}</li>`);
+      continue;
+    }
+    if (!line.trim()) {
+      closeList();
+      continue;
+    }
+    closeList();
+    html.push(`<p>${renderInlineMarkdown(line)}</p>`);
+  }
+  if (inCode) {
+    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+  }
+  closeList();
+  return html.join("\n");
+}
+
+function renderInlineMarkdown(value: string): string {
+  return escapeHtml(value).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
 function renderEvidenceLinks(finding: StructuredFinding): string {
   const references = findingReferences(finding);
   if (!references.length) {
     return "n/a";
   }
   return references.map((reference) => {
-    const line = reference.startLine ? `#L${reference.startLine}` : "";
-    return `<a href="${escapeHtml(reference.path)}${line}">${escapeHtml(reference.path)}${reference.startLine ? `:${reference.startLine}` : ""}</a>`;
+    const label = `${reference.path}${reference.startLine ? `:${reference.startLine}` : ""}`;
+    return `<a href="#${escapeHtml(evidenceSnippetId(reference))}" title="${escapeHtml(label)}">${escapeHtml(label)}</a>`;
   }).join("<br>");
 }
 
@@ -395,6 +669,8 @@ function searchTextForFinding(finding: StructuredFinding): string {
     finding.severity,
     finding.status,
     finding.category,
+    finding.owner,
+    finding.labels?.join(" "),
     finding.paths.join(" "),
     finding.evidence,
     finding.recommendation,

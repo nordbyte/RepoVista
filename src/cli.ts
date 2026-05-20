@@ -32,6 +32,7 @@ import { runCleanLocksCommand } from "./feature-state.js";
 import { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
 import { applySettingsToDefaults, loadSettings } from "./settings-config.js";
+import { runWorkspaceMatrix } from "./workspace-matrix.js";
 import type { AuditOptions } from "./types.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -191,6 +192,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runOpenPrCommand(optionsWithSettings.options));
       return 0;
     }
+    if (optionsWithSettings.options.workspaceMatrix) {
+      const abortController = new AbortController();
+      const onInterrupt = (signal: NodeJS.Signals) => {
+        if (!abortController.signal.aborted) {
+          abortController.abort(new Error(`Cancelled by ${signal}.`));
+        }
+      };
+      process.once("SIGINT", onInterrupt);
+      process.once("SIGTERM", onInterrupt);
+      try {
+        const result = await runWorkspaceMatrix(optionsWithSettings.options, {
+          version,
+          abortSignal: abortController.signal
+        });
+        process.stdout.write(`RepoVista workspace matrix completed: ${result.runDir}\n`);
+        return result.exitCode;
+      } finally {
+        process.off("SIGINT", onInterrupt);
+        process.off("SIGTERM", onInterrupt);
+      }
+    }
+
     const abortController = new AbortController();
     const progress = createAuditProgressController(optionsWithSettings.options, abortController);
     const onInterrupt = (signal: NodeJS.Signals) => {

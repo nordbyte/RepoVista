@@ -276,12 +276,21 @@ test("audit profiles, workspaces, issue metadata, and incremental mode parse", (
     "--workspace",
     "packages/api",
     "--all-workspaces",
+    "--workspace-matrix",
     "--incremental",
     "--label",
     "repovista",
     "--assignee",
     "octocat",
-    "--update-existing"
+    "--update-existing",
+    "--sync-issues",
+    "--reopen-issues",
+    "--owner-rule",
+    "packages/api/**=team-api",
+    "--label-rule",
+    "packages/api/**=area-api",
+    "--sla-days",
+    "14"
   ]);
 
   assert.equal(parsed.options.auditProfile, "release-readiness");
@@ -289,10 +298,17 @@ test("audit profiles, workspaces, issue metadata, and incremental mode parse", (
   assert.equal(parsed.options.promptFile, "review.md");
   assert.equal(parsed.options.workspace, "packages/api");
   assert.equal(parsed.options.allWorkspaces, true);
+  assert.equal(parsed.options.workspaceMatrix, true);
   assert.equal(parsed.options.incremental, true);
   assert.deepEqual(parsed.options.issueLabels, ["repovista"]);
   assert.deepEqual(parsed.options.issueAssignees, ["octocat"]);
   assert.equal(parsed.options.issueUpdateExisting, true);
+  assert.equal(parsed.options.issueSync, true);
+  assert.equal(parsed.options.issueReopen, true);
+  assert.deepEqual(parsed.options.ownerRules, ["packages/api/**=team-api"]);
+  assert.deepEqual(parsed.options.labelRules, ["packages/api/**=area-api"]);
+  assert.equal(parsed.options.slaDays, 14);
+  assert.throws(() => parseCliArgs(["audit", "--owner-rule", "broken"]), /path-glob=value/);
 });
 
 test("explicit no-run-checks wins over audit profile defaults", () => {

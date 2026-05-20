@@ -6,7 +6,7 @@ import { createAuditSettingsSummary, createEffectiveAuditSettings } from "./audi
 import { prepareAuditSnapshot, type PreparedAuditSnapshot } from "./audit-snapshot.js";
 import { writeStructuredOutputs } from "./audit-outputs.js";
 import { applyBaselineToFindings } from "./baseline.js";
-import { projectScanFingerprint, updateAuditCache } from "./cache.js";
+import { projectScanFingerprint, updateAuditCache, type FeatureCacheEntry, type PhaseCacheEntry, type ShardCacheEntry } from "./cache.js";
 import { maybeRunDeepRiskReview } from "./deep-review.js";
 import { AuditCancelledError, PreflightError } from "./errors.js";
 import { collectEvidence, type CommandRunner, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
@@ -25,7 +25,7 @@ import { Logger, type AuditProviderProgress, type LoggerSink } from "./logger.js
 import { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport } from "./phase-schema.js";
 import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
 import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PhaseDefinition, type PromptContext } from "./prompts.js";
-import { canParallelizePhase, runParallelPhase, runSinglePhase } from "./phase-runner.js";
+import { canParallelizePhase, runParallelPhase, runSinglePhase, type ReusableShardReport } from "./phase-runner.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
 import { createParallelExecutionMeta, createProjectMap, loadProjectMap, saveProjectMap } from "./project-map.js";
 import { scanProject } from "./project-scan.js";
@@ -232,6 +232,20 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       promptManifestFingerprint,
       effectiveModel
     }));
+    const selectedPhases = expandSelectedPhases(options.phases ?? []);
+    const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
+    const parallel = await resolveParallelMeta(outputProjectRoot, options, logger, {
+      ...featureMap,
+      projectRoot: outputProjectRoot
+    });
+    meta.parallel = parallel;
+    const phaseFingerprints = buildPhaseCacheEntries(projectScan.files, options, {
+      reuseKey,
+      promptManifestFingerprint,
+      effectiveModel
+    });
+    const featureFingerprints = buildFeatureCacheEntries(projectScan.files, featureMap.features);
+    const shardFingerprints = buildShardCacheEntries(projectScan.files, parallel);
     const scanFingerprint = projectScanFingerprint(projectScan.files, {
       reuseKey,
       providerVersion: evidence.aiProvider.version,
@@ -253,6 +267,9 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       phaseSchemaVersion: PHASE_SCHEMA_VERSION,
       qualityGateVersion: QUALITY_GATES_VERSION,
       fileCount: projectScan.files.length,
+      phaseFingerprints,
+      featureFingerprints,
+      shardFingerprints,
       enabled: Boolean(options.incremental),
       now
     });
@@ -261,17 +278,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     } else if (meta.cache.enabled && meta.cache.mismatchReasons?.length) {
       logger.info(`Incremental cache not reused: ${meta.cache.mismatchReasons.join("; ")}.`);
     }
+    const phaseReuseHits = meta.cache.phaseReuse?.filter((entry) => entry.hit).length ?? 0;
+    const shardReuseHits = meta.cache.shardReuse?.filter((entry) => entry.hit).length ?? 0;
+    if (meta.cache.enabled && !meta.cache.hit && (phaseReuseHits || shardReuseHits)) {
+      logger.info(`Incremental fine-grained reuse available: ${phaseReuseHits} phase(s), ${shardReuseHits} shard(s).`);
+    }
     const incrementalReports = meta.cache.enabled && meta.cache.hit && meta.cache.previousRunDir
       ? await loadReusableReportsFromRun(meta.cache.previousRunDir)
-      : {};
-
-    const selectedPhases = expandSelectedPhases(options.phases ?? []);
-    const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
-    const parallel = await resolveParallelMeta(outputProjectRoot, options, logger, {
-      ...featureMap,
-      projectRoot: outputProjectRoot
-    });
-    meta.parallel = parallel;
+      : await loadReusableReportsFromCache(meta.cache);
+    const incrementalShardReports = reusableShardReportsFromCache(meta.cache);
     const providerConcurrency = resolveProviderConcurrency(options, parallel);
     if (providerConcurrency > 1) {
       logger.info(`Provider concurrency budget: ${providerConcurrency} session(s) shared by phases and shards.`);
@@ -294,6 +309,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       diffScope,
       featureMap,
       incrementalReports,
+      incrementalShardReports,
       selectedPhases,
       parallel,
       phaseConcurrency: resolvePhaseConcurrency(providerConcurrency),
@@ -385,6 +401,7 @@ interface PhaseDagInput {
   diffScope?: DiffScope;
   featureMap: Awaited<ReturnType<typeof createProjectMap>>;
   incrementalReports: Record<string, string>;
+  incrementalShardReports: Record<string, Record<string, ReusableShardReport>>;
   selectedPhases: Set<string> | undefined;
   parallel?: ParallelExecutionMeta;
   phaseConcurrency: number;
@@ -519,7 +536,8 @@ async function runPhaseWithLifecycle(
           abortSignal: input.abortSignal,
           resume: Boolean(input.options.resumeDir),
           status,
-          previousStatus
+          previousStatus,
+          reusableShards: input.incrementalShardReports[phase.id]
         })
       : await runSinglePhase({
           phase,
@@ -975,6 +993,65 @@ async function loadReusableReportsFromRun(runDir: string): Promise<Record<string
   return reports;
 }
 
+async function loadReusableReportsFromCache(cache: AuditMeta["cache"] | undefined): Promise<Record<string, string>> {
+  const reports: Record<string, string> = {};
+  if (!cache?.enabled || !cache.phaseReuse?.length) {
+    return reports;
+  }
+  const previousMetaByRun = new Map<string, Awaited<ReturnType<typeof readPreviousMeta>>>();
+  const previousManifestByRun = new Map<string, Awaited<ReturnType<typeof readPreviousPromptManifest>>>();
+  for (const reuse of cache.phaseReuse) {
+    if (!reuse.hit || !reuse.previousRunDir) {
+      continue;
+    }
+    try {
+      if (!previousMetaByRun.has(reuse.previousRunDir)) {
+        previousMetaByRun.set(reuse.previousRunDir, await readPreviousMeta(reuse.previousRunDir));
+      }
+      if (!previousManifestByRun.has(reuse.previousRunDir)) {
+        previousManifestByRun.set(reuse.previousRunDir, await readPreviousPromptManifest(reuse.previousRunDir));
+      }
+      const content = await readReport(reportPath(reuse.previousRunDir, reuse.reportFile));
+      const previousStatus = findPreviousPhaseStatus(previousMetaByRun.get(reuse.previousRunDir), reuse.phaseId);
+      const manifestPhase = previousManifestByRun.get(reuse.previousRunDir)?.phases?.find((item) =>
+        item.phaseId === reuse.phaseId && item.reportFile === reuse.reportFile
+      );
+      const quality = validateReportQuality(reuse.phaseId, content);
+      if (
+        previousStatus?.status === "success" &&
+        previousStatus.qualityPassed !== false &&
+        manifestPhase &&
+        isReusablePhaseReport(reuse.phaseId, content) &&
+        quality.passed
+      ) {
+        reports[reuse.reportFile] = content;
+      }
+    } catch {
+      // Cache entries are advisory; unusable phase reports are recomputed.
+    }
+  }
+  return reports;
+}
+
+function reusableShardReportsFromCache(cache: AuditMeta["cache"] | undefined): Record<string, Record<string, ReusableShardReport>> {
+  const reports: Record<string, Record<string, ReusableShardReport>> = {};
+  if (!cache?.enabled || !cache.shardReuse?.length) {
+    return reports;
+  }
+  for (const reuse of cache.shardReuse) {
+    if (!reuse.hit || !reuse.previousRunDir) {
+      continue;
+    }
+    reports[reuse.phaseId] ??= {};
+    reports[reuse.phaseId][reuse.shardId] = {
+      previousRunDir: reuse.previousRunDir,
+      reportFile: reuse.reportFile,
+      previousRunId: reuse.previousRunId
+    };
+  }
+  return reports;
+}
+
 async function readPreviousPromptManifest(runDir: string): Promise<{ phases?: Array<{ phaseId?: string; reportFile?: string }> } | undefined> {
   try {
     return JSON.parse(await readFile(reportPath(runDir, "prompt-manifest.json"), "utf8")) as { phases?: Array<{ phaseId?: string; reportFile?: string }> };
@@ -1125,6 +1202,120 @@ function auditCacheContext(
     since: options.since ?? null,
     diffRef: diffScope?.ref ?? null,
     diffFiles: diffScope?.fileStatuses?.map(cacheDiffFile) ?? diffScope?.changedFiles.map((path) => ({ path, status: "unknown" }))
+  };
+}
+
+function buildPhaseCacheEntries(
+  files: ProjectFileSummary[],
+  options: AuditOptions,
+  context: { reuseKey: string; promptManifestFingerprint: string; effectiveModel?: string }
+): PhaseCacheEntry[] {
+  return ANALYSIS_PHASES.map((phase) => ({
+    phaseId: phase.id,
+    reportFile: phase.reportFile,
+    fingerprint: stableCacheFingerprint({
+      cacheKind: "phase",
+      phaseId: phase.id,
+      files: phaseScopedFiles(phase.id, files).map(cacheFileForReuse),
+      options: phaseCacheOptions(options, phase.id),
+      reuseKey: context.reuseKey,
+      promptManifestFingerprint: context.promptManifestFingerprint,
+      effectiveModel: context.effectiveModel ?? null
+    })
+  }));
+}
+
+function buildFeatureCacheEntries(files: ProjectFileSummary[], features: Array<{ id: string; paths?: string[]; ownedFiles?: string[]; contextFiles?: string[]; tests?: string[] }>): FeatureCacheEntry[] {
+  return features.map((feature) => {
+    const paths = "paths" in feature ? [
+      ...(feature.paths ?? []),
+      ...(feature.ownedFiles ?? []),
+      ...(feature.contextFiles ?? []),
+      ...(feature.tests ?? [])
+    ] : [];
+    return {
+      featureId: feature.id,
+      fingerprint: stableCacheFingerprint({
+        cacheKind: "feature",
+        featureId: feature.id,
+        paths: Array.from(new Set(paths)).sort(),
+        files: filesForPathPrefixes(files, paths).map(cacheFileForReuse)
+      })
+    };
+  });
+}
+
+function buildShardCacheEntries(files: ProjectFileSummary[], parallel: ParallelExecutionMeta | undefined): ShardCacheEntry[] {
+  if (!parallel?.shards?.length) {
+    return [];
+  }
+  return ANALYSIS_PHASES
+    .filter((phase) => canParallelizePhase(phase))
+    .flatMap((phase) => parallel.shards.map((shard) => ({
+      phaseId: phase.id,
+      shardId: shard.id,
+      reportFile: `shards/${phase.id}/${shard.id}.md`,
+      fingerprint: stableCacheFingerprint({
+        cacheKind: "shard",
+        phaseId: phase.id,
+        shardId: shard.id,
+        paths: shard.paths,
+        files: filesForPathPrefixes(files, shard.paths).map(cacheFileForReuse)
+      })
+    })));
+}
+
+function phaseScopedFiles(phaseId: string, files: ProjectFileSummary[]): ProjectFileSummary[] {
+  if (phaseId === "summary" || phaseId === "architecture" || phaseId === "feature-roadmap") {
+    return files;
+  }
+  if (phaseId === "risk-and-bug") {
+    return files.filter((file) => /(^|\/)(src|app|lib|server|api|routes|controllers|services|middleware|auth|security|config|scripts|test|tests|spec|__tests__)(\/|$)|\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|rb|php|cs|cpp|c|h|sql|yaml|yml|toml|json)$/i.test(file.relativePath));
+  }
+  if (phaseId === "code-quality") {
+    return files.filter((file) => !/\.(md|markdown|png|jpg|jpeg|gif|webp|svg|ico|lock)$/i.test(file.relativePath));
+  }
+  return files;
+}
+
+function filesForPathPrefixes(files: ProjectFileSummary[], prefixes: string[]): ProjectFileSummary[] {
+  const normalized = prefixes.map((prefix) => prefix.replace(/\/+$/g, "")).filter(Boolean);
+  if (!normalized.length) {
+    return files;
+  }
+  return files.filter((file) => normalized.some((prefix) =>
+    file.relativePath === prefix ||
+    file.relativePath.startsWith(`${prefix}/`) ||
+    prefix.startsWith(`${file.relativePath}/`)
+  ));
+}
+
+function cacheFileForReuse(file: ProjectFileSummary): Record<string, unknown> {
+  return {
+    path: file.relativePath,
+    size: file.size,
+    sha256: file.sha256 ?? null,
+    mtimeMs: file.sha256 ? undefined : file.mtimeMs,
+    language: file.language
+  };
+}
+
+function phaseCacheOptions(options: AuditOptions, phaseId: string): Record<string, unknown> {
+  return {
+    phaseId,
+    language: options.language,
+    provider: options.provider ?? "codex",
+    model: options.model ?? null,
+    profile: options.profile ?? null,
+    reasoning: options.reasoning ?? null,
+    fastMode: Boolean(options.fastMode),
+    reviewMode: options.reviewMode ?? "default",
+    auditProfile: options.auditProfile ?? null,
+    strictReports: Boolean(options.strictReports),
+    repairReports: Boolean(options.repairReports),
+    deepReview: Boolean(options.deepReview),
+    promptFile: options.promptFile ?? null,
+    phases: options.phases
   };
 }
 

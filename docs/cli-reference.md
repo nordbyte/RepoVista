@@ -25,7 +25,7 @@ repovista next [--status <status>]
 repovista show <finding-id>
 repovista triage <finding-id|--all> --status <status> [--note <text>]
 repovista revalidate <finding-id|--all> [--provider-revalidate]
-repovista issue <finding-id> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing]
+repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues]
 repovista fix <finding-id[,finding-id...]> [--dry-run] [--check <command>] [--no-isolate]
 repovista patches [patch-id] [--json] [--dry-run]
 repovista rollback <patch-id> [--dry-run]
@@ -64,7 +64,7 @@ repovista version
 | `show` | Show one finding with evidence and lifecycle history. |
 | `triage` | Update one finding or all findings. |
 | `revalidate` | Re-check finding evidence against the current checkout. |
-| `issue` | Create or update a GitHub issue with `gh`. |
+| `issue` | Create, update, or sync GitHub issues with `gh`. |
 | `fix` | Create an isolated patch attempt for one or more findings. |
 | `patches` | List, show, or preview patch attempts. |
 | `rollback` | Reverse a recorded patch diff with `git apply -R`. |
@@ -90,7 +90,8 @@ repovista version
 | `--prompt-file <path>` | Append additional read-only reviewer guidance. |
 | `--workspace <name-or-path>` | Focus one detected workspace. |
 | `--all-workspaces` | Record all detected workspaces. |
-| `--incremental` | Enable scan-cache metadata and reusable phase checks, default on. |
+| `--workspace-matrix` | Run one audit per detected workspace and write `.repovista/workspace-matrix-*/index.md` plus `workspace-matrix.json`. |
+| `--incremental` | Enable scan-cache metadata and reusable phase, feature, and shard checks, default on. |
 | `--model <name>` | Override provider model. |
 | `--profile <name>` | Use a provider profile, currently Codex profile for Codex. |
 | `--reasoning <effort>` | Override reasoning effort, default `xhigh`. |
@@ -141,6 +142,11 @@ Phase ids are `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`,
 | `--label <name>` | GitHub issue label, repeatable. |
 | `--assignee <login>` | GitHub issue assignee, repeatable. |
 | `--update-existing` | Update a matching GitHub issue instead of creating a duplicate. |
+| `--sync-issues` | Sync selected findings to GitHub issues and persist issue links. |
+| `--reopen-issues` | Reopen linked GitHub issues when open findings reappear. |
+| `--owner-rule <glob=owner>` | Assign a finding owner when an affected path matches the glob, repeatable. |
+| `--label-rule <glob=label>` | Add a finding label when an affected path matches the glob, repeatable. |
+| `--sla-days <n>` | Store a finding SLA due date this many days after first detection. |
 | `--patch <id>` | Patch attempt id. |
 | `--branch <name>` | Branch for `open-pr`. |
 | `--title <text>` | Pull request title. |

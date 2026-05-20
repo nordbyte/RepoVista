@@ -5,6 +5,7 @@ import { RepoVistaError } from "./errors.js";
 export interface TuiKey {
   name?: string;
   ctrl?: boolean;
+  sequence?: string;
 }
 
 export interface TuiSessionControls {
@@ -136,9 +137,9 @@ export async function runTuiSession<T>(options: TuiSessionOptions<T>): Promise<T
       isFinishing: () => finishing
     };
 
-    const onKeypress = (_value: string, key: TuiKey) => {
+    const onKeypress = (value: string, key: TuiKey) => {
       void (async () => {
-        await options.onKey(key, controls);
+        await options.onKey({ ...key, sequence: value }, controls);
         if (!finishing) {
           requestRender();
         }
