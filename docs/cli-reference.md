@@ -75,7 +75,7 @@ repovista version
 |---|---|
 | `--provider <name>` | Provider: `codex`, `claude`, `gemini`, `opencode`, `aider`, or a loaded plugin. |
 | `--allow-repo-provider-plugin` | Allow execution of provider plugins declared by the current repository. |
-| `--parallel <mode>` | `off`, `auto`, or `1`-`5` threads, default `auto`. |
+| `--parallel <mode>` | `off`, `auto`, or `1`-`5` shared provider sessions for phase and shard parallelism, default `auto`. |
 | `--no-parallel` | Disable a saved parallel default. |
 | `--out <dir>` | Output directory, default `.repovista`. |
 | `--resume <run-dir>` | Resume or complete an existing run directory. |

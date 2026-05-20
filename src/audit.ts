@@ -16,7 +16,7 @@ import { createProjectInventory } from "./inventory.js";
 import { Logger, type LoggerSink } from "./logger.js";
 import { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport } from "./phase-schema.js";
 import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
-import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PromptContext } from "./prompts.js";
+import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PhaseDefinition, type PromptContext } from "./prompts.js";
 import { canParallelizePhase, runParallelPhase, runSinglePhase } from "./phase-runner.js";
 import { runPreflight, type PreflightDependencies } from "./preflight.js";
 import { createParallelExecutionMeta, createProjectMap, loadProjectMap, saveProjectMap } from "./project-map.js";
@@ -58,6 +58,9 @@ import type {
   EvidencePack,
   ParallelExecutionMeta,
   PhaseReportStatus,
+  ProjectFileSummary,
+  PromptManifest,
+  ProviderRunRequest,
   ProviderRunResult,
   RunPaths,
   StructuredFinding
@@ -80,6 +83,8 @@ export interface AuditResult {
   meta: AuditMeta;
   exitCode: number;
 }
+
+type RunPhaseFunction = typeof runProviderPhase;
 
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
   const runStartedAtMs = Date.now();
@@ -238,132 +243,38 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
     const parallel = await resolveParallelMeta(projectRoot, options, logger, featureMap);
     meta.parallel = parallel;
-    let detailPhaseRan = false;
-
-    for (const phase of ANALYSIS_PHASES) {
-      throwIfCancelled(abortSignal);
-      const status = phaseStatus(meta.phases, phase);
-      const previousStatus = findPreviousPhaseStatus(previousMeta, phase.id);
-      if (!options.resumeDir && !selectedPhases && incrementalReports[phase.reportFile]) {
-        const phaseReportPath = reportPath(paths.runDir, phase.reportFile);
-        await writeMarkdownReport(phaseReportPath, incrementalReports[phase.reportFile]);
-        previousReports[phase.reportFile] = incrementalReports[phase.reportFile];
-        await markSkippedOrPreserved(status, phase, paths, previousReports);
-        status.durationMs ??= 0;
-        recordReportDuration(meta, phase.reportFile, status.durationMs);
-        logger.info(`Incremental cache reused ${phase.reportFile}.`);
-        continue;
-      }
-      const shouldRun = await shouldRunPhase(phase, status, paths, options, selectedPhases, detailPhaseRan);
-      if (!shouldRun) {
-        await markSkippedOrPreserved(status, phase, paths, previousReports);
-        recordReportDuration(meta, phase.reportFile, status.durationMs);
-        continue;
-      }
-
-      logger.step(`${phase.title}`);
-      status.status = "pending";
-      status.error = undefined;
-      status.repairAttempts = undefined;
-
-      const phaseReportPath = reportPath(paths.runDir, phase.reportFile);
-      const preservedReport = await reusableReportForPreservation(phase.id, phaseReportPath, previousReports[phase.reportFile]);
-      const context: PromptContext = {
-        language: options.language,
-        projectRoot,
-        reportFolderName: reportFolderName(options.outDir),
-        inventoryMarkdown: inventory.markdown,
-        previousReports,
-        since: diffScope,
-        features: featureMap.features,
-        reviewMode: options.reviewMode ?? "default",
-        additionalGuidance: promptGuidance.content
-      };
-      const prompt = phase.buildPrompt(context);
-      await addPromptManifestPhase(promptManifest, {
-        phaseId: phase.id,
-        reportFile: phase.reportFile,
-        prompt,
-        inventoryPath,
-        previousReports,
-        promptFilePath: promptGuidance.path,
-        featureMapPath: featuresPath,
-        projectFiles: projectScan.files,
-        omittedProjectFileCount: projectScan.omittedFileCount
-      });
-      let result = parallel && parallel.effectiveParallelism > 1 && canParallelizePhase(phase)
-        ? await runParallelPhase({
-            phase,
-            prompt,
-            context,
-            projectRoot,
-            paths,
-            options,
-            parallel,
-            runPhase,
-            spawnAdapter: dependencies.spawnAdapter,
-            abortSignal,
-            resume: Boolean(options.resumeDir),
-            status,
-            previousStatus
-          })
-        : await runSinglePhase({
-            phase,
-            prompt,
-            projectRoot,
-            phaseReportPath,
-            paths,
-            options,
-            runPhase,
-            spawnAdapter: dependencies.spawnAdapter,
-            abortSignal
-          });
-      throwIfCancelled(abortSignal);
-      result = await maybeRepairPhaseReport({
-        phase,
-        originalPrompt: prompt,
-        result,
-        projectRoot,
-        paths,
-        options,
-        runPhase,
-        spawnAdapter: dependencies.spawnAdapter,
-        abortSignal,
-        onRepairAttempt: ({ attempt, phaseTitle, warnings }) => {
-          logger.step(phaseTitle);
-          logger.warn(`Repair attempt ${attempt} triggered by: ${warnings.join("; ")}`);
-        }
-      });
-      throwIfCancelled(abortSignal);
-      result = await maybeRunDeepRiskReview({
-        phase,
-        basePrompt: prompt,
-        context,
-        projectRoot,
-        paths,
-        options,
-        projectMap: featureMap,
-        result,
-        status,
-        runPhase,
-        spawnAdapter: dependencies.spawnAdapter,
-        abortSignal
-      });
-      throwIfCancelled(abortSignal);
-      result = await preservePreviousReportIfRetryFailed({
-        phaseId: phase.id,
-        result,
-        previousReport: preservedReport,
-        reportPath: phaseReportPath
-      });
-
-      await updatePhaseStatus(status, phase, result, options.strictReports);
-      recordReportDuration(meta, phase.reportFile, status.durationMs);
-      previousReports[phase.reportFile] = await safeReadReport(phaseReportPath, phase.title);
-      if (phase.id !== "summary" && result.success) {
-        detailPhaseRan = true;
-      }
+    const providerConcurrency = resolveProviderConcurrency(options, parallel);
+    if (providerConcurrency > 1) {
+      logger.info(`Provider concurrency budget: ${providerConcurrency} session(s) shared by phases and shards.`);
     }
+    await runPhaseDag({
+      projectRoot,
+      inventoryMarkdown: inventory.markdown,
+      inventoryPath,
+      featuresPath,
+      paths,
+      options,
+      previousReports,
+      previousMeta,
+      meta,
+      promptManifest,
+      promptFilePath: promptGuidance.path,
+      promptGuidance: promptGuidance.content,
+      projectFiles: projectScan.files,
+      omittedProjectFileCount: projectScan.omittedFileCount,
+      diffScope,
+      featureMap,
+      incrementalReports,
+      selectedPhases,
+      parallel,
+      phaseConcurrency: resolvePhaseConcurrency(providerConcurrency),
+      runPhase: limitRunPhaseConcurrency(runPhase, providerConcurrency),
+      spawnAdapter: dependencies.spawnAdapter,
+      abortSignal,
+      logger,
+      recordReportDuration
+    });
+    sortPromptManifestPhases(promptManifest);
 
     throwIfCancelled(abortSignal);
     const extractedFindings = await assignFindingsToFeatures(
@@ -420,6 +331,313 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   };
 }
 
+interface PhaseDagInput {
+  projectRoot: string;
+  inventoryMarkdown: string;
+  inventoryPath: string;
+  featuresPath: string;
+  paths: RunPaths;
+  options: AuditOptions;
+  previousReports: Record<string, string>;
+  previousMeta?: AuditMeta;
+  meta: AuditMeta;
+  promptManifest: PromptManifest;
+  promptFilePath?: string;
+  promptGuidance?: string;
+  projectFiles: ProjectFileSummary[];
+  omittedProjectFileCount: number;
+  diffScope?: DiffScope;
+  featureMap: Awaited<ReturnType<typeof createProjectMap>>;
+  incrementalReports: Record<string, string>;
+  selectedPhases: Set<string> | undefined;
+  parallel?: ParallelExecutionMeta;
+  phaseConcurrency: number;
+  runPhase: RunPhaseFunction;
+  spawnAdapter?: SpawnAdapter;
+  abortSignal?: AbortSignal;
+  logger: Logger;
+  recordReportDuration(meta: AuditMeta, reportFile: string, durationMs: number | undefined): void;
+}
+
+async function runPhaseDag(input: PhaseDagInput): Promise<void> {
+  const pending = new Set(ANALYSIS_PHASES.map((phase) => phase.id));
+  const completed = new Set<string>();
+  const running = new Map<string, Promise<void>>();
+  const knownPhaseIds = new Set(ANALYSIS_PHASES.map((phase) => phase.id));
+  const state = { detailPhaseRan: false };
+
+  while (pending.size || running.size) {
+    throwIfCancelled(input.abortSignal);
+    let started = false;
+
+    for (const phase of ANALYSIS_PHASES) {
+      if (running.size >= input.phaseConcurrency) {
+        break;
+      }
+      if (!pending.has(phase.id) || !phaseDependenciesComplete(phase, completed, knownPhaseIds)) {
+        continue;
+      }
+      pending.delete(phase.id);
+      const task = runPhaseWithLifecycle(phase, input, state)
+        .then(() => {
+          completed.add(phase.id);
+        })
+        .finally(() => {
+          running.delete(phase.id);
+        });
+      running.set(phase.id, task);
+      started = true;
+    }
+
+    if (!running.size) {
+      if (pending.size) {
+        throw new PreflightError(`Could not resolve RepoVista phase dependencies: ${Array.from(pending).join(", ")}.`);
+      }
+      return;
+    }
+
+    try {
+      await Promise.race(running.values());
+    } catch (error) {
+      await Promise.allSettled(running.values());
+      throw error;
+    }
+
+    if (!started) {
+      continue;
+    }
+  }
+}
+
+async function runPhaseWithLifecycle(
+  phase: PhaseDefinition,
+  input: PhaseDagInput,
+  state: { detailPhaseRan: boolean }
+): Promise<void> {
+  throwIfCancelled(input.abortSignal);
+  const status = phaseStatus(input.meta.phases, phase);
+  const previousStatus = findPreviousPhaseStatus(input.previousMeta, phase.id);
+  if (!input.options.resumeDir && !input.selectedPhases && input.incrementalReports[phase.reportFile]) {
+    const phaseReportPath = reportPath(input.paths.runDir, phase.reportFile);
+    await writeMarkdownReport(phaseReportPath, input.incrementalReports[phase.reportFile]);
+    input.previousReports[phase.reportFile] = input.incrementalReports[phase.reportFile];
+    await markSkippedOrPreserved(status, phase, input.paths, input.previousReports);
+    status.durationMs ??= 0;
+    input.recordReportDuration(input.meta, phase.reportFile, status.durationMs);
+    input.logger.info(`Incremental cache reused ${phase.reportFile}.`);
+    return;
+  }
+
+  const shouldRun = await shouldRunPhase(phase, status, input.paths, input.options, input.selectedPhases, state.detailPhaseRan);
+  if (!shouldRun) {
+    await markSkippedOrPreserved(status, phase, input.paths, input.previousReports);
+    input.recordReportDuration(input.meta, phase.reportFile, status.durationMs);
+    return;
+  }
+
+  input.logger.phaseStarted({ id: phase.id, title: phase.title });
+  try {
+    status.status = "pending";
+    status.error = undefined;
+    status.repairAttempts = undefined;
+
+    const phaseReportPath = reportPath(input.paths.runDir, phase.reportFile);
+    const preservedReport = await reusableReportForPreservation(phase.id, phaseReportPath, input.previousReports[phase.reportFile]);
+    const previousReportsSnapshot = { ...input.previousReports };
+    const context: PromptContext = {
+      language: input.options.language,
+      projectRoot: input.projectRoot,
+      reportFolderName: reportFolderName(input.options.outDir),
+      inventoryMarkdown: input.inventoryMarkdown,
+      previousReports: previousReportsSnapshot,
+      since: input.diffScope,
+      features: input.featureMap.features,
+      reviewMode: input.options.reviewMode ?? "default",
+      additionalGuidance: input.promptGuidance
+    };
+    const prompt = phase.buildPrompt(context);
+    await addPromptManifestPhase(input.promptManifest, {
+      phaseId: phase.id,
+      reportFile: phase.reportFile,
+      prompt,
+      inventoryPath: input.inventoryPath,
+      previousReports: previousReportsSnapshot,
+      promptFilePath: input.promptFilePath,
+      featureMapPath: input.featuresPath,
+      projectFiles: input.projectFiles,
+      omittedProjectFileCount: input.omittedProjectFileCount
+    });
+    let result = input.parallel && input.parallel.effectiveParallelism > 1 && canParallelizePhase(phase)
+      ? await runParallelPhase({
+          phase,
+          prompt,
+          context,
+          projectRoot: input.projectRoot,
+          paths: input.paths,
+          options: input.options,
+          parallel: input.parallel,
+          runPhase: input.runPhase,
+          spawnAdapter: input.spawnAdapter,
+          abortSignal: input.abortSignal,
+          resume: Boolean(input.options.resumeDir),
+          status,
+          previousStatus
+        })
+      : await runSinglePhase({
+          phase,
+          prompt,
+          projectRoot: input.projectRoot,
+          phaseReportPath,
+          paths: input.paths,
+          options: input.options,
+          runPhase: input.runPhase,
+          spawnAdapter: input.spawnAdapter,
+          abortSignal: input.abortSignal
+        });
+    throwIfCancelled(input.abortSignal);
+    result = await maybeRepairPhaseReport({
+      phase,
+      originalPrompt: prompt,
+      result,
+      projectRoot: input.projectRoot,
+      paths: input.paths,
+      options: input.options,
+      runPhase: input.runPhase,
+      spawnAdapter: input.spawnAdapter,
+      abortSignal: input.abortSignal,
+      onRepairAttempt: ({ attempt, phaseTitle, warnings }) => {
+        input.logger.step(phaseTitle);
+        input.logger.warn(`Repair attempt ${attempt} triggered by: ${warnings.join("; ")}`);
+      }
+    });
+    throwIfCancelled(input.abortSignal);
+    result = await maybeRunDeepRiskReview({
+      phase,
+      basePrompt: prompt,
+      context,
+      projectRoot: input.projectRoot,
+      paths: input.paths,
+      options: input.options,
+      projectMap: input.featureMap,
+      result,
+      status,
+      runPhase: input.runPhase,
+      spawnAdapter: input.spawnAdapter,
+      abortSignal: input.abortSignal
+    });
+    throwIfCancelled(input.abortSignal);
+    result = await preservePreviousReportIfRetryFailed({
+      phaseId: phase.id,
+      result,
+      previousReport: preservedReport,
+      reportPath: phaseReportPath
+    });
+
+    await updatePhaseStatus(status, phase, result, input.options.strictReports);
+    input.recordReportDuration(input.meta, phase.reportFile, status.durationMs);
+    input.previousReports[phase.reportFile] = await safeReadReport(phaseReportPath, phase.title);
+    if (phase.id !== "summary" && result.success) {
+      state.detailPhaseRan = true;
+    }
+    const finalPhaseStatus = input.meta.phases.find((item) => item.id === phase.id)?.status;
+    input.logger.phaseFinished({
+      id: phase.id,
+      title: phase.title,
+      status: finalPhaseStatus === "success" ? "done" : "failed",
+      error: finalPhaseStatus === "failed" ? status.error : undefined
+    });
+  } catch (error) {
+    input.logger.phaseFinished({
+      id: phase.id,
+      title: phase.title,
+      status: isAuditCancelled(error, input.abortSignal) ? "cancelled" : "failed",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
+}
+
+function phaseDependenciesComplete(
+  phase: PhaseDefinition,
+  completed: Set<string>,
+  knownPhaseIds: Set<string>
+): boolean {
+  return phase.dependencies.every((dependency) => !knownPhaseIds.has(dependency) || completed.has(dependency));
+}
+
+function resolveProviderConcurrency(options: AuditOptions, parallel: ParallelExecutionMeta | undefined): number {
+  const mode = options.parallel ?? "off";
+  if (mode === "off") {
+    return 1;
+  }
+  if (typeof mode === "number") {
+    return Math.max(1, Math.min(5, Math.floor(mode)));
+  }
+  return Math.max(2, Math.min(5, parallel?.effectiveParallelism ?? 2));
+}
+
+function resolvePhaseConcurrency(providerConcurrency: number): number {
+  return providerConcurrency > 1 ? 2 : 1;
+}
+
+function limitRunPhaseConcurrency(runPhase: RunPhaseFunction, concurrency: number): RunPhaseFunction {
+  const maxConcurrency = Math.max(1, Math.floor(concurrency));
+  let active = 0;
+  const queue: Array<{ enter: () => void; abort?: () => void }> = [];
+
+  const acquire = (signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AuditCancelledError(abortReason(signal)));
+      return;
+    }
+    let entry: { enter: () => void; abort?: () => void };
+    const onAbort = () => {
+      const index = queue.indexOf(entry);
+      if (index >= 0) {
+        queue.splice(index, 1);
+      }
+      reject(new AuditCancelledError(signal ? abortReason(signal) : "RepoVista audit was cancelled."));
+    };
+    const enter = () => {
+      signal?.removeEventListener("abort", onAbort);
+      active += 1;
+      resolve();
+    };
+    if (active < maxConcurrency) {
+      enter();
+      return;
+    }
+    entry = { enter, abort: onAbort };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    queue.push(entry);
+  });
+
+  const release = () => {
+    active = Math.max(0, active - 1);
+    const next = queue.shift();
+    if (next) {
+      next.enter();
+    }
+  };
+
+  return async (request: ProviderRunRequest, spawnAdapter?: SpawnAdapter): Promise<ProviderRunResult> => {
+    await acquire(request.abortSignal);
+    try {
+      return await runPhase(request, spawnAdapter);
+    } finally {
+      release();
+    }
+  };
+}
+
+function sortPromptManifestPhases(manifest: PromptManifest): void {
+  const order = new Map(ANALYSIS_PHASES.map((phase, index) => [phase.id, index]));
+  manifest.phases.sort((left, right) =>
+    (order.get(left.phaseId) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.phaseId) ?? Number.MAX_SAFE_INTEGER) ||
+    left.phaseId.localeCompare(right.phaseId)
+  );
+}
+
 async function resolveParallelMeta(
   projectRoot: string,
   options: AuditOptions,
@@ -444,10 +662,10 @@ async function resolveParallelMeta(
     logger.warn(warning);
   }
   if (meta.effectiveParallelism <= 1) {
-    logger.warn("Parallel mode was requested, but RepoVista found only one useful shard. Continuing sequentially.");
+    logger.warn("Parallel mode was requested, but RepoVista found only one useful shard. Shard parallelism will use one shard; independent phases can still share the provider concurrency budget.");
   }
   if (meta.effectiveParallelism > 1) {
-    logger.info(`Parallel mode: ${meta.effectiveParallelism} provider sessions for shardable phases.`);
+    logger.info(`Shard parallelism: ${meta.effectiveParallelism} provider session(s) for shardable phases.`);
   }
   return meta;
 }

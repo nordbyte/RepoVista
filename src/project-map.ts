@@ -68,7 +68,7 @@ export async function createProjectMap(
     warnings.push(`Project scan was truncated after ${projectScan.maxFiles} files.`);
   }
   if (recommendedParallelism > 1) {
-    warnings.push(`RepoVista recommends ${recommendedParallelism} parallel threads for this repository shape.`);
+    warnings.push(`RepoVista recommends ${recommendedParallelism} parallel provider sessions for this repository shape.`);
   }
   warnings.push(...workspaceDetection.warnings);
 
@@ -165,7 +165,7 @@ export function createParallelExecutionMeta(
     effectiveParallelism,
     shards,
     warnings: effectiveParallelism < requested
-      ? [`Requested ${requested} threads, but only ${effectiveParallelism} useful shard(s) were found.`]
+      ? [`Requested ${requested} provider sessions, but only ${effectiveParallelism} useful shard(s) were found.`]
       : []
   };
 }
@@ -203,8 +203,8 @@ export function renderProjectPlan(map: ProjectMap, mode: ParallelMode = "auto"):
 Project root: ${map.projectRoot}
 Project map: ${projectMapPath(map.projectRoot, map.outDir)}
 Files: ${map.fileCount}
-Recommended threads: ${map.recommendedParallelism}
-Planned threads: ${meta.effectiveParallelism}
+Recommended provider sessions: ${map.recommendedParallelism}
+Planned provider sessions: ${meta.effectiveParallelism}
 
 Languages:
 ${languageLines}
@@ -218,7 +218,7 @@ ${areaLines}
 Semantic features:
 ${featureLines}
 
-Thread assignments:
+Provider-session assignments:
 ${shardLines}
 `;
 }

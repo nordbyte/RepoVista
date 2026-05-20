@@ -1,6 +1,8 @@
 export interface LoggerSink {
   readonly handlesOutput?: boolean;
   auditSettings?(summary: AuditSettingsSummary): void;
+  phaseStarted?(phase: AuditPhaseProgress): void;
+  phaseFinished?(phase: AuditPhaseProgress): void;
   info?(message: string): void;
   step?(message: string): void;
   warn?(message: string): void;
@@ -10,6 +12,13 @@ export interface LoggerSink {
 export interface AuditSettingsSummary {
   title: string;
   lines: string[];
+}
+
+export interface AuditPhaseProgress {
+  id: string;
+  title: string;
+  status?: "running" | "done" | "failed" | "cancelled" | "skipped";
+  error?: string;
 }
 
 export class Logger {
@@ -32,6 +41,21 @@ export class Logger {
   step(message: string): void {
     this.sink?.step?.(message);
     this.info(`-> ${message}`);
+  }
+
+  phaseStarted(phase: AuditPhaseProgress): void {
+    this.sink?.phaseStarted?.({ ...phase, status: "running" });
+    if (this.progressEnabled && !this.sink?.handlesOutput) {
+      process.stderr.write(`-> ${phase.title}\n`);
+    }
+  }
+
+  phaseFinished(phase: AuditPhaseProgress): void {
+    this.sink?.phaseFinished?.(phase);
+    if (this.progressEnabled && !this.sink?.handlesOutput) {
+      const status = phase.status ? ` (${phase.status})` : "";
+      process.stderr.write(`<- ${phase.title}${status}${phase.error ? `: ${phase.error}` : ""}\n`);
+    }
   }
 
   warn(message: string): void {

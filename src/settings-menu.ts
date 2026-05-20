@@ -743,7 +743,7 @@ function formatSeconds(seconds: number): string {
 }
 
 function formatParallel(parallel: ParallelMode): string {
-  return typeof parallel === "number" ? `${parallel} threads` : parallel;
+  return typeof parallel === "number" ? `${parallel} provider sessions` : parallel;
 }
 
 function formatParallelOption(parallel: ParallelMode): string {
@@ -753,7 +753,7 @@ function formatParallelOption(parallel: ParallelMode): string {
   if (parallel === "auto") {
     return "auto (use RepoVista's project map recommendation)";
   }
-  return `${parallel} threads (fixed parallel provider sessions)`;
+  return `${parallel} provider sessions (shared by phases and shards)`;
 }
 
 function formatSandbox(sandbox: SandboxMode): string {

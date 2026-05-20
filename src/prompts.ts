@@ -30,6 +30,9 @@ export interface PhaseDefinition {
   id: string;
   title: string;
   reportFile: string;
+  dependencies: string[];
+  previousReports?: string[];
+  optionalPreviousReports?: string[];
   buildPrompt(context: PromptContext): string;
 }
 
@@ -43,30 +46,49 @@ export const ANALYSIS_PHASES: PhaseDefinition[] = [
     id: "architecture",
     title: "Architecture Analysis",
     reportFile: "01-architecture-report.md",
+    dependencies: [],
     buildPrompt: buildArchitecturePrompt
   },
   {
     id: "code-quality",
     title: "Code Quality Analysis",
     reportFile: "02-code-quality-report.md",
+    dependencies: ["architecture"],
+    previousReports: ["01-architecture-report.md"],
     buildPrompt: buildCodeQualityPrompt
   },
   {
     id: "risk-and-bug",
     title: "Risk, Bug, and Security Analysis",
     reportFile: "03-risk-and-bug-report.md",
+    dependencies: ["architecture"],
+    previousReports: ["01-architecture-report.md"],
+    optionalPreviousReports: ["02-code-quality-report.md"],
     buildPrompt: buildRiskPrompt
   },
   {
     id: "feature-roadmap",
     title: "Feature and Improvement Roadmap",
     reportFile: "04-feature-roadmap.md",
+    dependencies: ["code-quality", "risk-and-bug"],
+    previousReports: [
+      "01-architecture-report.md",
+      "02-code-quality-report.md",
+      "03-risk-and-bug-report.md"
+    ],
     buildPrompt: buildRoadmapPrompt
   },
   {
     id: "summary",
     title: "Executive Summary",
     reportFile: "index.md",
+    dependencies: ["code-quality", "risk-and-bug", "feature-roadmap"],
+    previousReports: [
+      "01-architecture-report.md",
+      "02-code-quality-report.md",
+      "03-risk-and-bug-report.md",
+      "04-feature-roadmap.md"
+    ],
     buildPrompt: buildSummaryPrompt
   }
 ];
@@ -179,7 +201,8 @@ function buildRiskPrompt(context: PromptContext): string {
 
 Previous findings:
 
-${renderPrevious(context, ["01-architecture-report.md", "02-code-quality-report.md"], "risk-and-bug")}
+${renderPrevious(context, ["01-architecture-report.md"], "risk-and-bug")}
+${renderOptionalPrevious(context, ["02-code-quality-report.md"], "risk-and-bug")}
 
 Task: Identify potential bugs, security risks, and robust failure modes. Stay defensive; do not provide exploit instructions against real external targets.
 
@@ -411,6 +434,14 @@ function renderPrevious(context: PromptContext, reportFiles: string[], targetPha
     return `## ${fileName}\n\n${summarizePreviousReport(fileName, content, targetPhase)}`;
   });
   return sections.join("\n\n");
+}
+
+function renderOptionalPrevious(context: PromptContext, reportFiles: string[], targetPhase: string): string {
+  const availableReports = reportFiles.filter((fileName) => Boolean(context.previousReports[fileName]));
+  if (!availableReports.length) {
+    return "";
+  }
+  return `\nOptional previous findings already available:\n\n${renderPrevious(context, availableReports, targetPhase)}`;
 }
 
 function summarizePreviousReport(fileName: string, content: string, targetPhase: string): string {

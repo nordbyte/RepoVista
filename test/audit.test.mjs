@@ -289,6 +289,84 @@ test("audit can split shardable phases across parallel provider sessions", async
   }
 });
 
+test("audit runs code quality and risk in parallel after architecture", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-phase-dag-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+    const events = [];
+    const activeDetailPhases = new Set();
+    let overlapped = false;
+    let riskPrompt = "";
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: "auto",
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture", "code-quality", "risk-and-bug"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      repairReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCommand: async (command, args) => ({
+        command: [command, ...args].join(" "),
+        exitCode: command === "git" && args[0] === "rev-parse" ? 1 : 0,
+        durationMs: 1,
+        timedOut: false,
+        stdout: command === "codex" ? "codex-cli 0.130.0\n" : "ok\n"
+      }),
+      runProvider: async (request) => {
+        events.push(`${request.phaseId}:start`);
+        if (request.phaseId === "risk-and-bug") {
+          riskPrompt = request.prompt;
+        }
+        if (request.phaseId === "code-quality" || request.phaseId === "risk-and-bug") {
+          overlapped ||= activeDetailPhases.size > 0;
+          activeDetailPhases.add(request.phaseId);
+        }
+        await new Promise((resolve) => setTimeout(resolve, request.phaseId === "architecture" ? 5 : 30));
+        activeDetailPhases.delete(request.phaseId);
+        events.push(`${request.phaseId}:end`);
+        await writeFile(request.reportPath, completeMockReport(request.phaseId, request.phaseTitle), "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 30,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(overlapped);
+    assert.ok(events.indexOf("architecture:end") < events.indexOf("code-quality:start"));
+    assert.ok(events.indexOf("architecture:end") < events.indexOf("risk-and-bug:start"));
+    assert.match(riskPrompt, /01-architecture-report\.md/);
+    assert.doesNotMatch(riskPrompt, /02-code-quality-report\.md\n\nNot yet available or failed/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("parallel resume reuses completed shard reports before synthesis", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-parallel-resume-"));
   try {

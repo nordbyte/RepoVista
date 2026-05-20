@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { DEFAULT_OPTIONS, checkProjectMapFreshness, initializeProjectMap, loadFeatureRecords, loadProjectMap, renderProjectPlan, runPlanCommand } from "../dist/index.js";
 
-test("project initialization writes a map with thread recommendations", async () => {
+test("project initialization writes a map with provider-session recommendations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-project-map-"));
   try {
     await mkdir(path.join(root, "src", "cli"), { recursive: true });
@@ -52,7 +52,7 @@ test("project initialization writes a map with thread recommendations", async ()
     const records = await loadFeatureRecords(root, ".repovista");
     assert.equal(records.length, map.features.length);
     assert.equal(records.every((feature) => feature.status === "pending"), true);
-    assert.match(plan, /Thread assignments/);
+    assert.match(plan, /Provider-session assignments/);
     assert.match(plan, /Semantic features/);
     assert.ok(await readFile(mapPath, "utf8"));
 

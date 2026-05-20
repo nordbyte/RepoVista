@@ -24,7 +24,7 @@ export interface OptionRegistryEntry {
 export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("provider", "codex", value("provider", "Report provider: codex, claude, gemini, opencode, aider, or a loaded plugin (default: codex)"), setting("provider", "enum", "Default report provider"), "provider"),
   entry("allowRepoProviderPlugin", undefined, flag("allow-repo-provider-plugin", "Allow execution of provider plugins declared in this repository")),
-  entry("parallel", "auto", value("parallel", "Parallel audit mode: off, auto, or 1-5 threads (default: auto)"), setting("parallel", "enum", "Default parallel execution mode"), "parallel"),
+  entry("parallel", "auto", value("parallel", "Parallel provider-session budget for phases and shards: off, auto, or 1-5 (default: auto)"), setting("parallel", "enum", "Default shared parallel provider-session budget"), "parallel"),
   entry("refresh", false, flag("refresh", "Refresh cached project metadata for commands that support it")),
   entry("parallel", undefined, flag("no-parallel", "Disable saved parallel default")),
   entry("outDir", ".repovista", value("out", "Report output directory (default: .repovista)"), setting("outDir", "string", "Default report output directory"), "outDir"),

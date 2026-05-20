@@ -1,12 +1,13 @@
 import readline from "node:readline";
 import type { ReadStream, WriteStream } from "node:tty";
 import { colorize, renderTuiTerminalFrame, shouldUseColor, TUI_ANSI } from "./tui.js";
-import type { AuditSettingsSummary, LoggerSink } from "./logger.js";
+import type { AuditPhaseProgress, AuditSettingsSummary, LoggerSink } from "./logger.js";
 import type { AuditOptions } from "./types.js";
 
-type ProgressStepStatus = "running" | "done" | "failed" | "cancelled";
+type ProgressStepStatus = "running" | "done" | "failed" | "cancelled" | "skipped";
 
 interface ProgressStep {
+  id?: string;
   label: string;
   startedAt: number;
   endedAt?: number;
@@ -76,9 +77,7 @@ class TerminalAuditProgressController implements AuditProgressController {
     if (!this.running) {
       return;
     }
-    if (this.currentStep()) {
-      this.finishCurrentStep(result.exitCode === 130 ? "cancelled" : result.exitCode === 0 ? "done" : "failed");
-    }
+    this.finishRunningSteps(result.exitCode === 130 ? "cancelled" : result.exitCode === 0 ? "done" : "failed");
     this.status = "finished";
     if (result.error) {
       this.pushMessage(`Error: ${result.error}`);
@@ -106,13 +105,52 @@ class TerminalAuditProgressController implements AuditProgressController {
   }
 
   step(message: string): void {
-    this.finishCurrentStep("done");
+    this.finishCurrentLinearStep("done");
     this.steps.push({
       label: message,
       startedAt: Date.now(),
       status: "running"
     });
     this.render();
+  }
+
+  phaseStarted(phase: AuditPhaseProgress): void {
+    const existing = this.steps.find((step) => step.id === phase.id);
+    if (existing) {
+      existing.label = phase.title;
+      existing.status = "running";
+      existing.endedAt = undefined;
+    } else {
+      this.steps.push({
+        id: phase.id,
+        label: phase.title,
+        startedAt: Date.now(),
+        status: "running"
+      });
+    }
+    this.render();
+  }
+
+  phaseFinished(phase: AuditPhaseProgress): void {
+    const step = this.steps.find((item) => item.id === phase.id);
+    if (!step) {
+      this.steps.push({
+        id: phase.id,
+        label: phase.title,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+        status: phase.status ?? "done"
+      });
+      this.render();
+      return;
+    }
+    step.status = phase.status ?? "done";
+    step.endedAt = Date.now();
+    if (phase.error) {
+      this.pushMessage(`${phase.title}: ${phase.error}`);
+    } else {
+      this.render();
+    }
   }
 
   warn(message: string): void {
@@ -139,17 +177,23 @@ class TerminalAuditProgressController implements AuditProgressController {
     this.render();
   }
 
-  private finishCurrentStep(status: ProgressStepStatus): void {
-    const current = this.currentStep();
-    if (!current || current.status !== "running") {
+  private finishCurrentLinearStep(status: ProgressStepStatus): void {
+    const current = [...this.steps].reverse().find((step) => !step.id && step.status === "running");
+    if (!current) {
       return;
     }
     current.status = status;
     current.endedAt = Date.now();
   }
 
-  private currentStep(): ProgressStep | undefined {
-    return this.steps[this.steps.length - 1];
+  private finishRunningSteps(status: ProgressStepStatus): void {
+    const now = Date.now();
+    for (const step of this.steps) {
+      if (step.status === "running") {
+        step.status = status;
+        step.endedAt = now;
+      }
+    }
   }
 
   private pushMessage(message: string): void {
@@ -238,6 +282,8 @@ function statusIcon(status: ProgressStepStatus): string {
       return "[fail]";
     case "cancelled":
       return "[cancel]";
+    case "skipped":
+      return "[skip]";
     case "running":
       return "[run]";
   }

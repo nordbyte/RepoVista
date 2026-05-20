@@ -51,14 +51,14 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `exportFormats` | `sarif`, `html`, `jsonl` |
 | `fastMode`, `deepReview`, `json`, `keepLogs`, `ci`, `failOnCritical` | `false` |
 
-`parallel=auto` creates `.repovista/project-map.json` during the first audit if the project has not been initialized yet. Saved settings only need to be changed when a repository needs different provider, model, workspace, check, export, or runtime behavior.
+`parallel=auto` creates `.repovista/project-map.json` during the first audit if the project has not been initialized yet. The parallel value is a shared provider-session budget for both phase-level parallelism and shard-level map/reduce work. Saved settings only need to be changed when a repository needs different provider, model, workspace, check, export, or runtime behavior.
 
 ## Supported Settings
 
 | Setting | Type | Purpose |
 |---|---|---|
 | `provider` | enum | Default provider. |
-| `parallel` | enum/number | Default parallel mode: `off`, `auto`, or `1`-`5`. |
+| `parallel` | enum/number | Default shared provider-session budget: `off`, `auto`, or `1`-`5`. |
 | `model` | string | Default provider model. |
 | `profile` | string | Default provider profile. |
 | `reasoning` | string | Default reasoning effort. |

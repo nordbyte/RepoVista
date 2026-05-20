@@ -8,7 +8,7 @@
 4. Scan project files and collect inventory.
 5. Collect the evidence pack.
 6. Build prompt manifests and phase prompts.
-7. Run provider phases, optionally with parallel shards.
+7. Run provider phases through the phase dependency graph, with a shared provider concurrency budget for parallel phases and shards.
 8. Validate quality gates and optionally repair reports.
 9. Extract structured phase reports and findings.
 10. Write Markdown, JSON, HTML, SARIF, JSONL, GitHub annotations, metadata, and persistent state.
@@ -61,18 +61,19 @@
 - Security and trust boundaries.
 - Application core.
 
-The map stores recommended thread count and default shard assignments for parallel audits and deep review.
+The map stores the recommended provider-session count and default shard assignments for parallel audits and deep review.
 
 ## Parallel Execution
 
-Parallel mode uses a map/reduce structure:
+Parallel mode uses a shared provider concurrency budget across two layers:
 
-- Map: one provider session per shard writes a partial report.
+- Phase DAG: Architecture runs first, then Code Quality and Risk/Bug can run in parallel. Feature Roadmap waits for Code Quality and Risk/Bug, and Summary waits for the completed detail reports.
+- Map: one provider session per shard writes a partial report when a phase is shardable.
 - Reduce: a synthesis phase merges successful shard reports.
 - Summary: final summary remains single-threaded because it depends on completed detail phases.
 
-Parallel mode requires an initialized project map. Resume can reuse shard artifacts only when previous metadata marks them successful and usable.
+The same `--parallel` budget limits all provider sessions, so parallel phases and shard workers do not multiply into unbounded provider processes. Parallel mode creates or uses `.repovista/project-map.json` for shard planning. Resume can reuse shard artifacts only when previous metadata marks them successful and usable.
 
 ## Prompt Context
 
-RepoVista avoids blindly embedding full old reports. Previous reports are summarized into phase-specific evidence-oriented excerpts. The prompt manifest records included files, omitted files, hashes where available, inclusion reasons, truncation reasons, semantic features, diff scope, and approximate token counts.
+RepoVista avoids blindly embedding full old reports. Previous reports are summarized into phase-specific evidence-oriented excerpts. Risk/Bug requires Architecture context but treats Code Quality as optional enrichment so both phases can run after Architecture completes. The prompt manifest records included files, omitted files, hashes where available, inclusion reasons, truncation reasons, semantic features, diff scope, and approximate token counts.
