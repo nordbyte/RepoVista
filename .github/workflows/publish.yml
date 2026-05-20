@@ -78,7 +78,20 @@ jobs:
       - name: Build package assets
         run: npm run build
 
+      - name: Verify npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN is required to publish to npmjs.com."
+            exit 1
+          fi
+          npm whoami --registry=https://registry.npmjs.org
+
       - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           package_name="$(node -p "require('./package.json').name")"
@@ -89,7 +102,7 @@ jobs:
             exit 0
           fi
 
-          npm publish --registry=https://registry.npmjs.org
+          npm publish --access public --provenance --registry=https://registry.npmjs.org
 
   github-packages:
     name: GitHub Packages
