@@ -46,6 +46,10 @@ test("review command reports weak evidence and PR comment body", async () => {
         },
         git: {}
       },
+      repositoryDrift: {
+        detected: true,
+        warnings: ["Repository changed during audit: commit aaa -> bbb. Revalidate findings before acting on them."]
+      },
       findingCounts: {
         critical: 0,
         high: 1,
@@ -97,6 +101,7 @@ test("review command reports weak evidence and PR comment body", async () => {
     assert.match(markdown, /Artifact Health/);
     assert.match(markdown, /Repair attempts: 1/);
     assert.match(markdown, /quote does not match line range/);
+    assert.match(markdown, /Repository changed during audit/);
 
     const dryRun = await runPrCommentCommand({ outDir: ".repovista", reportRunDir: ".repovista/run", dryRun: true }, root);
     assert.match(dryRun, /RepoVista PR comment dry run/);

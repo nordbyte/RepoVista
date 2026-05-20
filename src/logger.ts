@@ -3,6 +3,10 @@ export interface LoggerSink {
   auditSettings?(summary: AuditSettingsSummary): void;
   phaseStarted?(phase: AuditPhaseProgress): void;
   phaseFinished?(phase: AuditPhaseProgress): void;
+  providerQueued?(provider: AuditProviderProgress): void;
+  providerStarted?(provider: AuditProviderProgress): void;
+  providerEvent?(event: AuditProviderEvent): void;
+  providerFinished?(provider: AuditProviderProgress): void;
   info?(message: string): void;
   step?(message: string): void;
   warn?(message: string): void;
@@ -19,6 +23,28 @@ export interface AuditPhaseProgress {
   title: string;
   status?: "running" | "done" | "failed" | "cancelled" | "skipped";
   error?: string;
+}
+
+export interface AuditProviderProgress {
+  id: string;
+  title: string;
+  parentPhaseId: string;
+  kind: "phase" | "shard" | "synthesis" | "repair" | "deep-review";
+  status?: "queued" | "running" | "done" | "failed" | "cancelled";
+  durationMs?: number;
+  error?: string;
+}
+
+export interface AuditProviderEvent {
+  providerId: string;
+  parentPhaseId: string;
+  type: "spawned" | "output" | "closed";
+  at: string;
+  pid?: number;
+  stream?: "stdout" | "stderr";
+  bytes?: number;
+  exitCode?: number | null;
+  signal?: string | null;
 }
 
 export class Logger {
@@ -55,6 +81,32 @@ export class Logger {
     if (this.progressEnabled && !this.sink?.handlesOutput) {
       const status = phase.status ? ` (${phase.status})` : "";
       process.stderr.write(`<- ${phase.title}${status}${phase.error ? `: ${phase.error}` : ""}\n`);
+    }
+  }
+
+  providerQueued(provider: AuditProviderProgress): void {
+    this.sink?.providerQueued?.({ ...provider, status: "queued" });
+    if (this.progressEnabled && !this.sink?.handlesOutput) {
+      process.stderr.write(`.. ${provider.title} queued\n`);
+    }
+  }
+
+  providerStarted(provider: AuditProviderProgress): void {
+    this.sink?.providerStarted?.({ ...provider, status: "running" });
+    if (this.progressEnabled && !this.sink?.handlesOutput) {
+      process.stderr.write(`=> ${provider.title}\n`);
+    }
+  }
+
+  providerEvent(event: AuditProviderEvent): void {
+    this.sink?.providerEvent?.(event);
+  }
+
+  providerFinished(provider: AuditProviderProgress): void {
+    this.sink?.providerFinished?.(provider);
+    if (this.progressEnabled && !this.sink?.handlesOutput) {
+      const status = provider.status ? ` (${provider.status})` : "";
+      process.stderr.write(`<= ${provider.title}${status}${provider.error ? `: ${provider.error}` : ""}\n`);
     }
   }
 

@@ -75,7 +75,8 @@ export function createAuditSettingsSummary(settings: EffectiveAuditSettings): Au
   return {
     title: "Applied audit settings",
     lines: [
-      `Provider: ${settings.providerDisplayName} (${settings.providerId}) | model: ${settings.model} | reasoning: ${settings.reasoning} | fast mode: ${onOff(settings.fastMode)} | profile: ${settings.providerProfile}`,
+      `Provider: ${settings.providerDisplayName} (${settings.providerId}) | executable: ${settings.providerExecutable}`,
+      `Model: ${settings.model} | reasoning: ${settings.reasoning} | fast mode: ${onOff(settings.fastMode)} | profile: ${settings.providerProfile} | sandbox: ${settings.sandbox}`,
       `Report: audit profile: ${settings.auditProfile} | review: ${settings.reviewMode} | phases: ${settings.phases} | parallel: ${settings.parallel}`,
       `Scope: ${settings.scope}`,
       `Quality: checks: ${settings.runChecks} | strict gates: ${onOff(settings.strictReports)} | repair: ${settings.repairReports} | deep review: ${onOff(settings.deepReview)} | incremental: ${onOff(settings.incremental)}`,

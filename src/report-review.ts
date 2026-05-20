@@ -521,6 +521,9 @@ function weakEvidenceFindings(findings: StructuredFinding[]): ReviewedRun["weakE
 
 async function staleWarnings(projectRoot: string, meta: AuditMeta | undefined): Promise<string[]> {
   const warnings: string[] = [];
+  if (meta?.repositoryDrift?.warnings?.length) {
+    warnings.push(...meta.repositoryDrift.warnings);
+  }
   if (!meta?.evidence?.git.commit) {
     return warnings;
   }
@@ -532,7 +535,10 @@ async function staleWarnings(projectRoot: string, meta: AuditMeta | undefined): 
     });
     const current = stdout.trim();
     if (current && current !== meta.evidence.git.commit) {
-      warnings.push(`Run was created for commit ${meta.evidence.git.commit}, current checkout is ${current}. Revalidate findings before acting on them.`);
+      const warning = `Run was created for commit ${meta.evidence.git.commit}, current checkout is ${current}. Revalidate findings before acting on them.`;
+      if (!warnings.includes(warning)) {
+        warnings.push(warning);
+      }
     }
   } catch {
     // Git drift is an advisory signal only.

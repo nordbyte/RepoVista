@@ -58,6 +58,7 @@ export async function writeStructuredOutputs(
     options: meta.options,
     ai: meta.ai,
     workspace: meta.workspace,
+    repositoryDrift: meta.repositoryDrift,
     cache: meta.cache,
     evidence,
     phases: meta.phases,
@@ -80,6 +81,7 @@ export async function writeStructuredOutputs(
     ai: meta.ai,
     codex: meta.codex,
     parallel: meta.parallel,
+    repositoryDrift: meta.repositoryDrift,
     since: promptManifest.since,
     evidence: {
       git: evidence.git,
@@ -124,6 +126,7 @@ function buildRunAnalytics(meta: AuditMeta, promptManifest: PromptManifest): Run
     id: phase.id,
     status: phase.status,
     durationMs: phase.durationMs ?? 0,
+    totalDurationMs: phase.totalDurationMs,
     promptTokens: promptTokensByPhase.get(phase.id) ?? 0,
     reportFile: phase.reportFile
   }));

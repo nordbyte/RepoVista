@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_OPTIONS, hasCriticalFindings, initializeProjectMap, projectScanFingerprint, runAudit } from "../dist/index.js";
+import { DEFAULT_OPTIONS, hasCriticalFindings, initializeProjectMap, projectScanFingerprint, runAudit, runProcess } from "../dist/index.js";
 
 test("audit creates the full report structure with mocked Codex phases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-"));
@@ -85,7 +85,8 @@ test("audit creates the full report structure with mocked Codex phases", async (
 
     assert.equal(auditSettings.length, 1);
     const settingsText = [auditSettings[0].title, ...auditSettings[0].lines].join("\n");
-    assert.match(settingsText, /Provider: Codex CLI \(codex\).*model: gpt-test-default.*reasoning: xhigh.*fast mode: off/);
+    assert.match(settingsText, /Provider: Codex CLI \(codex\).*executable: codex/);
+    assert.match(settingsText, /Model: gpt-test-default.*reasoning: xhigh.*fast mode: off.*sandbox: read-only/);
     assert.match(settingsText, /Report: audit profile: full audit.*review: general risk and quality.*phases: all phases/);
     assert.match(settingsText, /Quality: checks: off.*strict gates: off.*repair: off/);
     assert.doesNotMatch(settingsText, /configured default|model default/i);
@@ -284,6 +285,104 @@ test("audit can split shardable phases across parallel provider sessions", async
     assert.ok(seen.some((phaseId) => phaseId === "architecture-synthesis"));
     assert.equal(result.meta.parallel.effectiveParallelism, 2);
     assert.equal(result.meta.phases.find((phase) => phase.id === "architecture").shards.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("audit records repository drift when the target checkout changes during a run", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-drift-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+    await git(root, ["init"]);
+    await git(root, ["config", "user.email", "test@example.com"]);
+    await git(root, ["config", "user.name", "RepoVista Test"]);
+    await git(root, ["add", "."]);
+    await git(root, ["commit", "-m", "initial"]);
+
+    const warnings = [];
+    let mutated = false;
+    const result = await runAudit({
+      command: "audit",
+      provider: "codex",
+      parallel: "off",
+      outDir: ".repovista",
+      sandbox: "read-only",
+      language: "English",
+      json: false,
+      includes: [],
+      ignores: [],
+      phases: ["architecture"],
+      runChecks: false,
+      checkCommands: [],
+      checkTimeoutSeconds: 60,
+      phaseTimeoutSeconds: 60,
+      strictReports: false,
+      repairReports: false,
+      ci: false,
+      failOnCritical: false,
+      progress: false,
+      keepLogs: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      loggerSink: {
+        warn: (message) => warnings.push(message)
+      },
+      runCommand: async (command, args, options) => {
+        if (command === "git") {
+          const result = await runProcess(command, args, {
+            cwd: options.cwd,
+            shell: options.shell,
+            timeoutMs: options.timeoutSeconds * 1000,
+            stdoutLimit: 1024 * 1024,
+            stderrLimit: 1024 * 1024
+          });
+          return {
+            command: result.renderedCommand,
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            timedOut: result.timedOut,
+            stdout: result.stdout.trim() || undefined,
+            stderr: result.stderr.trim() || undefined,
+            error: result.error
+          };
+        }
+        return {
+          command: [command, ...args].join(" "),
+          exitCode: 0,
+          durationMs: 1,
+          timedOut: false,
+          stdout: command === "codex" ? "codex-cli 0.130.0\n" : "10.0.0\n"
+        };
+      },
+      runProvider: async (request) => {
+        if (!mutated) {
+          mutated = true;
+          await writeFile(path.join(root, "src", "index.ts"), "export const value = 2;\n", "utf8");
+          await git(root, ["add", "src/index.ts"]);
+          await git(root, ["commit", "-m", "change during audit"]);
+        }
+        await writeFile(request.reportPath, completeMockReport(request.phaseId, request.phaseTitle), "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 5,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.meta.repositoryDrift.detected, true);
+    assert.match(result.meta.repositoryDrift.warnings.join("\n"), /Repository changed during audit/);
+    assert.match(result.meta.repositoryDrift.warnings.join("\n"), /commit/);
+    assert.ok(warnings.some((warning) => /Repository changed during audit/.test(warning)));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1283,4 +1382,15 @@ ${JSON.stringify({
   }, null, 2)}
 <!-- repovista-findings:end -->
 `;
+}
+
+async function git(cwd, args) {
+  const result = await runProcess("git", args, {
+    cwd,
+    timeoutMs: 30_000,
+    stdoutLimit: 1024 * 1024,
+    stderrLimit: 1024 * 1024
+  });
+  assert.equal(result.exitCode, 0, `git ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
+  return result;
 }

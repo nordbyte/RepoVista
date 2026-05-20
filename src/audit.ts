@@ -8,12 +8,19 @@ import { applyBaselineToFindings } from "./baseline.js";
 import { projectScanFingerprint, updateAuditCache } from "./cache.js";
 import { maybeRunDeepRiskReview } from "./deep-review.js";
 import { AuditCancelledError, PreflightError } from "./errors.js";
-import { collectEvidence, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
+import { collectEvidence, type CommandRunner, type EvidenceDependencies, hasFailedChecks } from "./evidence.js";
 import { validateFindingsEvidence } from "./evidence-validation.js";
 import { assignFindingsToFeatures, syncFeatureRecords, updateFeatureRecordsFromFindings } from "./feature-state.js";
 import { extractFindings } from "./findings.js";
+import {
+  collectRepositoryGitSnapshot,
+  createInitialRepositoryDriftState,
+  detectRepositoryDrift,
+  gitSnapshotFromEvidence,
+  primaryRepositoryDriftWarning
+} from "./git-drift.js";
 import { createProjectInventory } from "./inventory.js";
-import { Logger, type LoggerSink } from "./logger.js";
+import { Logger, type AuditProviderProgress, type LoggerSink } from "./logger.js";
 import { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport } from "./phase-schema.js";
 import { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
 import { ANALYSIS_PHASES, PROMPT_CONTEXT_VERSION, type PhaseDefinition, type PromptContext } from "./prompts.js";
@@ -119,6 +126,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   logger.auditSettings(createAuditSettingsSummary(effectiveSettings));
   const previousReports: Record<string, string> = {};
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
+  let repositoryDriftMonitor: RepositoryDriftMonitor | undefined;
 
   try {
     throwIfCancelled(abortSignal);
@@ -138,6 +146,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     const evidence = await collectEvidence(projectRoot, options, dependencies);
     throwIfCancelled(abortSignal);
     meta.evidence = evidence;
+    meta.repositoryDrift = createInitialRepositoryDriftState(gitSnapshotFromEvidence(evidence, undefined, [options.outDir]));
+    repositoryDriftMonitor = startRepositoryDriftMonitor(projectRoot, meta, logger, dependencies.runCommand);
     if (hasFailedChecks(evidence)) {
       logger.warn("One or more local check commands failed. The report will include the check output.");
     }
@@ -268,11 +278,14 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       selectedPhases,
       parallel,
       phaseConcurrency: resolvePhaseConcurrency(providerConcurrency),
-      runPhase: limitRunPhaseConcurrency(runPhase, providerConcurrency),
+      runPhase: limitRunPhaseConcurrency(runPhase, providerConcurrency, logger),
       spawnAdapter: dependencies.spawnAdapter,
       abortSignal,
       logger,
-      recordReportDuration
+      recordReportDuration,
+      checkRepositoryDrift: async () => {
+        await repositoryDriftMonitor?.checkNow();
+      }
     });
     sortPromptManifestPhases(promptManifest);
 
@@ -314,6 +327,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       throw error;
     }
   } finally {
+    await repositoryDriftMonitor?.checkNow();
+    repositoryDriftMonitor?.stop();
     completeRunTiming(meta, runStartedAtMs);
     await writeMeta(paths.runDir, meta);
   }
@@ -357,6 +372,7 @@ interface PhaseDagInput {
   abortSignal?: AbortSignal;
   logger: Logger;
   recordReportDuration(meta: AuditMeta, reportFile: string, durationMs: number | undefined): void;
+  checkRepositoryDrift?: () => Promise<void>;
 }
 
 async function runPhaseDag(input: PhaseDagInput): Promise<void> {
@@ -435,6 +451,7 @@ async function runPhaseWithLifecycle(
     return;
   }
 
+  const phaseStartedAtMs = Date.now();
   input.logger.phaseStarted({ id: phase.id, title: phase.title });
   try {
     status.status = "pending";
@@ -534,6 +551,7 @@ async function runPhaseWithLifecycle(
     });
 
     await updatePhaseStatus(status, phase, result, input.options.strictReports);
+    status.totalDurationMs = Math.max(status.durationMs ?? 0, Date.now() - phaseStartedAtMs);
     input.recordReportDuration(input.meta, phase.reportFile, status.durationMs);
     input.previousReports[phase.reportFile] = await safeReadReport(phaseReportPath, phase.title);
     if (phase.id !== "summary" && result.success) {
@@ -546,7 +564,9 @@ async function runPhaseWithLifecycle(
       status: finalPhaseStatus === "success" ? "done" : "failed",
       error: finalPhaseStatus === "failed" ? status.error : undefined
     });
+    await input.checkRepositoryDrift?.();
   } catch (error) {
+    status.totalDurationMs = Math.max(status.durationMs ?? 0, Date.now() - phaseStartedAtMs);
     input.logger.phaseFinished({
       id: phase.id,
       title: phase.title,
@@ -580,7 +600,70 @@ function resolvePhaseConcurrency(providerConcurrency: number): number {
   return providerConcurrency > 1 ? 2 : 1;
 }
 
-function limitRunPhaseConcurrency(runPhase: RunPhaseFunction, concurrency: number): RunPhaseFunction {
+interface RepositoryDriftMonitor {
+  checkNow(): Promise<void>;
+  stop(): void;
+}
+
+function startRepositoryDriftMonitor(
+  projectRoot: string,
+  meta: AuditMeta,
+  logger: Logger,
+  runCommand?: CommandRunner
+): RepositoryDriftMonitor | undefined {
+  const initial = meta.repositoryDrift?.initial;
+  if (!initial?.available) {
+    return undefined;
+  }
+  let stopped = false;
+  let checking = false;
+  let inFlight: Promise<void> | undefined;
+  let lastWarning = primaryRepositoryDriftWarning(meta.repositoryDrift);
+
+  const checkNow = async () => {
+    if (stopped) {
+      return;
+    }
+    if (checking) {
+      await inFlight;
+      return;
+    }
+    checking = true;
+    inFlight = (async () => {
+      try {
+        const current = await collectRepositoryGitSnapshot(projectRoot, runCommand, undefined, [meta.options.outDir]);
+        const next = detectRepositoryDrift(initial, current, meta.repositoryDrift);
+        meta.repositoryDrift = next;
+        const warning = primaryRepositoryDriftWarning(next);
+        if (warning && warning !== lastWarning) {
+          lastWarning = warning;
+          logger.warn(warning);
+        }
+      } catch {
+        // Repository drift is advisory; never fail an audit because the signal could not be refreshed.
+      } finally {
+        checking = false;
+        inFlight = undefined;
+      }
+    })();
+    await inFlight;
+  };
+
+  const timer = setInterval(() => {
+    void checkNow();
+  }, 10_000);
+  timer.unref();
+
+  return {
+    checkNow,
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    }
+  };
+}
+
+function limitRunPhaseConcurrency(runPhase: RunPhaseFunction, concurrency: number, logger: Logger): RunPhaseFunction {
   const maxConcurrency = Math.max(1, Math.floor(concurrency));
   let active = 0;
   const queue: Array<{ enter: () => void; abort?: () => void }> = [];
@@ -621,13 +704,77 @@ function limitRunPhaseConcurrency(runPhase: RunPhaseFunction, concurrency: numbe
   };
 
   return async (request: ProviderRunRequest, spawnAdapter?: SpawnAdapter): Promise<ProviderRunResult> => {
+    const progress = providerProgressForRequest(request);
+    logger.providerQueued(progress);
     await acquire(request.abortSignal);
     try {
-      return await runPhase(request, spawnAdapter);
+      logger.providerStarted(progress);
+      const result = await runPhase({
+        ...request,
+        onProgress: (event) => {
+          request.onProgress?.(event);
+          logger.providerEvent({
+            providerId: event.phaseId,
+            parentPhaseId: progress.parentPhaseId,
+            type: event.kind,
+            at: event.at,
+            pid: event.kind === "spawned" ? event.pid : undefined,
+            stream: event.kind === "output" ? event.stream : undefined,
+            bytes: event.kind === "output" ? event.bytes : undefined,
+            exitCode: event.kind === "closed" ? event.exitCode : undefined,
+            signal: event.kind === "closed" ? event.signal : undefined
+          });
+        }
+      }, spawnAdapter);
+      logger.providerFinished({
+        ...progress,
+        status: result.success ? "done" : request.abortSignal?.aborted ? "cancelled" : "failed",
+        durationMs: result.durationMs,
+        error: result.error
+      });
+      return result;
+    } catch (error) {
+      logger.providerFinished({
+        ...progress,
+        status: request.abortSignal?.aborted ? "cancelled" : "failed",
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     } finally {
       release();
     }
   };
+}
+
+function providerProgressForRequest(request: ProviderRunRequest): AuditProviderProgress {
+  const parentPhaseId = parentPhaseIdForProviderRun(request.phaseId);
+  return {
+    id: request.phaseId,
+    title: request.phaseTitle,
+    parentPhaseId,
+    kind: providerRunKind(request.phaseId, parentPhaseId)
+  };
+}
+
+function parentPhaseIdForProviderRun(phaseId: string): string {
+  const phaseIds = ANALYSIS_PHASES.map((phase) => phase.id).sort((left, right) => right.length - left.length);
+  return phaseIds.find((id) => phaseId === id || phaseId.startsWith(`${id}-`)) ?? phaseId;
+}
+
+function providerRunKind(phaseId: string, parentPhaseId: string): AuditProviderProgress["kind"] {
+  if (phaseId.includes("-repair-")) {
+    return "repair";
+  }
+  if (phaseId.includes("-deep-")) {
+    return "deep-review";
+  }
+  if (phaseId === `${parentPhaseId}-synthesis`) {
+    return "synthesis";
+  }
+  if (phaseId.startsWith(`${parentPhaseId}-thread-`)) {
+    return "shard";
+  }
+  return "phase";
 }
 
 function sortPromptManifestPhases(manifest: PromptManifest): void {

@@ -1,10 +1,11 @@
 import readline from "node:readline";
 import type { ReadStream, WriteStream } from "node:tty";
 import { colorize, renderTuiTerminalFrame, shouldUseColor, TUI_ANSI } from "./tui.js";
-import type { AuditPhaseProgress, AuditSettingsSummary, LoggerSink } from "./logger.js";
+import type { AuditPhaseProgress, AuditProviderEvent, AuditProviderProgress, AuditSettingsSummary, LoggerSink } from "./logger.js";
 import type { AuditOptions } from "./types.js";
 
-type ProgressStepStatus = "running" | "done" | "failed" | "cancelled" | "skipped";
+type ProgressStepStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "skipped";
+type ProviderStepStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 interface ProgressStep {
   id?: string;
@@ -12,6 +13,23 @@ interface ProgressStep {
   startedAt: number;
   endedAt?: number;
   status: ProgressStepStatus;
+  providers?: Map<string, ProviderStep>;
+}
+
+interface ProviderStep {
+  id: string;
+  title: string;
+  parentPhaseId: string;
+  kind: AuditProviderProgress["kind"];
+  status: ProviderStepStatus;
+  queuedAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  durationMs?: number;
+  pid?: number;
+  lastOutputAt?: number;
+  outputBytes: number;
+  error?: string;
 }
 
 export interface AuditProgressController extends LoggerSink {
@@ -21,7 +39,7 @@ export interface AuditProgressController extends LoggerSink {
 }
 
 const REFRESH_MS = 1000;
-const MAX_MESSAGES = 6;
+const MAX_MESSAGES = 8;
 
 export function createAuditProgressController(
   options: AuditOptions,
@@ -121,16 +139,19 @@ class TerminalAuditProgressController implements AuditProgressController {
     const existing = this.steps.find((step) => step.id === phase.id);
     if (existing) {
       existing.label = phase.title;
-      existing.status = "running";
+      existing.status = "queued";
       existing.endedAt = undefined;
+      existing.providers?.clear();
     } else {
       this.steps.push({
         id: phase.id,
         label: phase.title,
         startedAt: Date.now(),
-        status: "running"
+        status: "queued",
+        providers: new Map()
       });
     }
+    this.pushMessage(`${phase.title} queued.`);
     this.render();
   }
 
@@ -152,7 +173,63 @@ class TerminalAuditProgressController implements AuditProgressController {
     if (phase.error) {
       this.pushMessage(`${phase.title}: ${phase.error}`);
     } else {
+      this.pushMessage(`${phase.title} ${phase.status ?? "done"}.`);
       this.render();
+    }
+  }
+
+  providerQueued(provider: AuditProviderProgress): void {
+    const step = this.stepForProvider(provider);
+    const item = this.providerForProgress(step, provider);
+    item.status = "queued";
+    item.queuedAt = Date.now();
+    this.pushMessage(`${provider.title} waiting for provider slot.`);
+  }
+
+  providerStarted(provider: AuditProviderProgress): void {
+    const step = this.stepForProvider(provider);
+    const item = this.providerForProgress(step, provider);
+    const now = Date.now();
+    item.status = "running";
+    item.startedAt = now;
+    item.endedAt = undefined;
+    step.status = "running";
+    this.pushMessage(`${provider.title} started.`);
+  }
+
+  providerEvent(event: AuditProviderEvent): void {
+    const step = this.steps.find((item) => item.id === event.parentPhaseId);
+    const provider = step?.providers?.get(event.providerId);
+    if (!step || !provider) {
+      return;
+    }
+    const at = Date.parse(event.at);
+    const timestamp = Number.isFinite(at) ? at : Date.now();
+    if (event.type === "spawned") {
+      provider.pid = event.pid;
+      provider.startedAt ??= timestamp;
+      provider.status = "running";
+      step.status = "running";
+    } else if (event.type === "output") {
+      provider.lastOutputAt = timestamp;
+      provider.outputBytes += event.bytes ?? 0;
+    } else if (event.type === "closed") {
+      provider.endedAt = timestamp;
+    }
+    this.render();
+  }
+
+  providerFinished(provider: AuditProviderProgress): void {
+    const step = this.stepForProvider(provider);
+    const item = this.providerForProgress(step, provider);
+    item.status = provider.status ?? "done";
+    item.endedAt = Date.now();
+    item.durationMs = provider.durationMs;
+    item.error = provider.error;
+    if (provider.error) {
+      this.pushMessage(`${provider.title} ${item.status}: ${provider.error}`);
+    } else {
+      this.pushMessage(`${provider.title} ${item.status}.`);
     }
   }
 
@@ -192,11 +269,47 @@ class TerminalAuditProgressController implements AuditProgressController {
   private finishRunningSteps(status: ProgressStepStatus): void {
     const now = Date.now();
     for (const step of this.steps) {
-      if (step.status === "running") {
+      if (step.status === "running" || step.status === "queued") {
         step.status = status;
         step.endedAt = now;
       }
     }
+  }
+
+  private stepForProvider(provider: AuditProviderProgress): ProgressStep {
+    let step = this.steps.find((item) => item.id === provider.parentPhaseId);
+    if (!step) {
+      step = {
+        id: provider.parentPhaseId,
+        label: provider.parentPhaseId,
+        startedAt: Date.now(),
+        status: "queued",
+        providers: new Map()
+      };
+      this.steps.push(step);
+    }
+    step.providers ??= new Map();
+    return step;
+  }
+
+  private providerForProgress(step: ProgressStep, provider: AuditProviderProgress): ProviderStep {
+    step.providers ??= new Map();
+    let item = step.providers.get(provider.id);
+    if (!item) {
+      item = {
+        id: provider.id,
+        title: provider.title,
+        parentPhaseId: provider.parentPhaseId,
+        kind: provider.kind,
+        status: provider.status ?? "queued",
+        queuedAt: Date.now(),
+        outputBytes: 0
+      };
+      step.providers.set(provider.id, item);
+    }
+    item.title = provider.title;
+    item.kind = provider.kind;
+    return item;
   }
 
   private pushMessage(message: string): void {
@@ -225,7 +338,7 @@ class TerminalAuditProgressController implements AuditProgressController {
     if (this.auditSettingsSummary) {
       lines.push(colorize(this.auditSettingsSummary.title, TUI_ANSI.cyan, this.color));
       for (const line of this.auditSettingsSummary.lines) {
-        lines.push(truncate(line, columns));
+        lines.push(...wrapPlainLine(line, columns));
       }
       lines.push("");
     }
@@ -242,7 +355,7 @@ class TerminalAuditProgressController implements AuditProgressController {
       lines.push("");
       lines.push(colorize("Recent events", TUI_ANSI.cyan, this.color));
       for (const message of this.messages.slice(-MAX_MESSAGES)) {
-        lines.push(truncate(`- ${message}`, columns));
+        lines.push(...wrapPlainLine(`- ${message}`, columns));
       }
     }
     while (lines.length < rows - 2) {
@@ -279,7 +392,8 @@ class TerminalAuditProgressController implements AuditProgressController {
 
 function renderStepLine(step: ProgressStep, columns: number, useColor: boolean): string {
   const icon = statusIcon(step.status);
-  const plain = truncate(`${icon} ${step.label} | ${formatElapsed((step.endedAt ?? Date.now()) - step.startedAt)}`, columns);
+  const detail = providerSummary(step);
+  const plain = truncate(`${icon} ${step.label} | ${formatElapsed((step.endedAt ?? Date.now()) - step.startedAt)}${detail ? ` | ${detail}` : ""}`, columns);
   if (!plain.startsWith(icon)) {
     return plain;
   }
@@ -296,6 +410,8 @@ function statusIcon(status: ProgressStepStatus): string {
       return "[cancel]";
     case "skipped":
       return "[skip]";
+    case "queued":
+      return "[wait]";
     case "running":
       return "[run]";
   }
@@ -310,9 +426,77 @@ function statusIconStyle(status: ProgressStepStatus): string {
       return TUI_ANSI.red;
     case "running":
       return TUI_ANSI.orange;
+    case "queued":
+      return TUI_ANSI.yellow;
     case "skipped":
       return TUI_ANSI.gray;
   }
+}
+
+function providerSummary(step: ProgressStep): string {
+  const providers = Array.from(step.providers?.values() ?? []);
+  if (!providers.length) {
+    return step.status === "queued" ? "waiting for provider work" : "";
+  }
+  const parts: string[] = [];
+  const shards = providers.filter((provider) => provider.kind === "shard");
+  if (shards.length) {
+    const done = shards.filter((provider) => provider.status === "done").length;
+    const failed = shards.filter((provider) => provider.status === "failed" || provider.status === "cancelled").length;
+    const running = shards.filter((provider) => provider.status === "running").length;
+    const queued = shards.filter((provider) => provider.status === "queued").length;
+    parts.push(`shards ${done}/${shards.length} done${failed ? `, ${failed} failed` : ""}${running ? `, ${running} running` : ""}${queued ? `, ${queued} queued` : ""}`);
+  }
+  const synthesis = latestProviderOfKind(providers, "synthesis");
+  if (synthesis) {
+    parts.push(`synthesis ${providerStatusLabel(synthesis)}`);
+  }
+  const repair = latestProviderOfKind(providers, "repair");
+  if (repair) {
+    parts.push(`repair ${providerStatusLabel(repair)}`);
+  }
+  const deepReview = providers.filter((provider) => provider.kind === "deep-review");
+  if (deepReview.length) {
+    const done = deepReview.filter((provider) => provider.status === "done").length;
+    const running = deepReview.filter((provider) => provider.status === "running").length;
+    parts.push(`deep review ${done}/${deepReview.length} done${running ? `, ${running} running` : ""}`);
+  }
+  const phaseProvider = latestProviderOfKind(providers, "phase");
+  if (phaseProvider && !shards.length && !synthesis) {
+    parts.push(`provider ${providerStatusLabel(phaseProvider)}`);
+  }
+  const runningProviders = providers.filter((provider) => provider.status === "running");
+  if (runningProviders.length) {
+    const pids = runningProviders.map((provider) => provider.pid).filter((pid): pid is number => typeof pid === "number");
+    if (pids.length) {
+      parts.push(`pid ${pids.join(",")}`);
+    }
+    const lastOutputAt = Math.max(...runningProviders.map((provider) => provider.lastOutputAt ?? 0));
+    if (lastOutputAt > 0) {
+      const idleMs = Date.now() - lastOutputAt;
+      parts.push(`last output ${formatElapsedShort(idleMs)} ago${idleMs >= 60_000 ? ", waiting for model response" : ""}`);
+    } else {
+      parts.push("waiting for provider output");
+    }
+  }
+  return parts.join(" | ");
+}
+
+function latestProviderOfKind(providers: ProviderStep[], kind: ProviderStep["kind"]): ProviderStep | undefined {
+  return providers.filter((provider) => provider.kind === kind).at(-1);
+}
+
+function providerStatusLabel(provider: ProviderStep): string {
+  if (provider.status === "running" && provider.startedAt) {
+    return `running ${formatElapsed(Date.now() - provider.startedAt)}`;
+  }
+  if (provider.status === "queued") {
+    return "queued";
+  }
+  if ((provider.status === "done" || provider.status === "failed" || provider.status === "cancelled") && provider.durationMs !== undefined) {
+    return `${provider.status} ${formatElapsed(provider.durationMs)}`;
+  }
+  return provider.status;
 }
 
 function formatElapsed(durationMs: number): string {
@@ -322,6 +506,43 @@ function formatElapsed(durationMs: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+function formatElapsedShort(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 function truncate(value: string, columns: number): string {
   return value.length <= columns ? value : `${value.slice(0, Math.max(0, columns - 4))}...`;
+}
+
+function wrapPlainLine(value: string, columns: number): string[] {
+  const max = Math.max(20, columns);
+  if (value.length <= max) {
+    return [value];
+  }
+  const lines: string[] = [];
+  let remaining = value;
+  while (remaining.length > max) {
+    const breakpoint = remaining.lastIndexOf(" | ", max);
+    const splitAt = breakpoint > 8 ? breakpoint + 3 : wordBreakpoint(remaining, max);
+    lines.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = `  ${remaining.slice(splitAt).trimStart()}`;
+  }
+  if (remaining.trim()) {
+    lines.push(remaining);
+  }
+  return lines;
+}
+
+function wordBreakpoint(value: string, max: number): number {
+  if (value.length <= max) {
+    return value.length;
+  }
+  const index = value.lastIndexOf(" ", max);
+  return index > 8 ? index : max;
 }

@@ -137,6 +137,7 @@ export interface PhaseReportStatus {
   reportFile: string;
   status: "pending" | "success" | "failed" | "skipped";
   durationMs?: number;
+  totalDurationMs?: number;
   error?: string;
   qualityPassed?: boolean;
   qualityWarnings?: string[];
@@ -419,7 +420,26 @@ export interface AuditMeta {
     structuredReportsJson?: string;
   };
   analytics?: RunAnalytics;
+  repositoryDrift?: RepositoryDriftState;
   exitCode: number;
+}
+
+export interface RepositoryGitSnapshot {
+  available: boolean;
+  capturedAt: string;
+  branch?: string;
+  commit?: string;
+  dirty?: boolean;
+  statusShort?: string[];
+  error?: string;
+}
+
+export interface RepositoryDriftState {
+  initial?: RepositoryGitSnapshot;
+  current?: RepositoryGitSnapshot;
+  detected: boolean;
+  detectedAt?: string;
+  warnings: string[];
 }
 
 export interface RunAnalytics {
@@ -437,6 +457,7 @@ export interface RunAnalytics {
     id: string;
     status: string;
     durationMs: number;
+    totalDurationMs?: number;
     promptTokens: number;
     reportFile: string;
   }>;
@@ -655,8 +676,31 @@ export interface ProviderRunRequest {
   outputSchemaPath?: string;
   structuredOutputPath?: string;
   promptFilePath?: string;
+  onProgress?: (event: ProviderRunProgressEvent) => void;
   abortSignal?: AbortSignal;
 }
+
+export type ProviderRunProgressEvent =
+  | {
+      kind: "spawned";
+      phaseId: string;
+      at: string;
+      pid?: number;
+    }
+  | {
+      kind: "output";
+      phaseId: string;
+      at: string;
+      stream: "stdout" | "stderr";
+      bytes: number;
+    }
+  | {
+      kind: "closed";
+      phaseId: string;
+      at: string;
+      exitCode?: number | null;
+      signal?: string | null;
+    };
 
 export interface ProviderRunResult {
   phaseId: string;

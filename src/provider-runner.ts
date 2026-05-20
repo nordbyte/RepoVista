@@ -233,6 +233,12 @@ export async function runProviderPhase(
         detached: useProcessGroup
       });
       diagnostics.pid = child.pid;
+      request.onProgress?.({
+        kind: "spawned",
+        phaseId: providerRequest.phaseId,
+        at: new Date().toISOString(),
+        pid: child.pid
+      });
       if (cancellationRequested) {
         terminateChild("interrupt");
       }
@@ -254,6 +260,13 @@ export async function runProviderPhase(
     child.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       writeMasked(stdoutLog, stdoutMasker.push(text));
+      request.onProgress?.({
+        kind: "output",
+        phaseId: providerRequest.phaseId,
+        at: new Date().toISOString(),
+        stream: "stdout",
+        bytes: chunk.length
+      });
       if (provider.outputMode === "stdout") {
         stdoutOutput += text;
       }
@@ -263,6 +276,13 @@ export async function runProviderPhase(
     child.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       writeMasked(stderrLog, stderrMasker.push(text));
+      request.onProgress?.({
+        kind: "output",
+        phaseId: providerRequest.phaseId,
+        at: new Date().toISOString(),
+        stream: "stderr",
+        bytes: chunk.length
+      });
       stderrText = appendBounded(stderrText, text);
     });
 
@@ -280,6 +300,13 @@ export async function runProviderPhase(
         }
         diagnostics.exitCode = code;
         diagnostics.signal = signal;
+        request.onProgress?.({
+          kind: "closed",
+          phaseId: providerRequest.phaseId,
+          at: new Date().toISOString(),
+          exitCode: code,
+          signal
+        });
 
         if (timedOut || interrupted) {
           const message = timedOut

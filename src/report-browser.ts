@@ -43,6 +43,7 @@ export interface ReportSection {
   fileName?: string;
   content: string;
   durationMs?: number;
+  phaseTotalDurationMs?: number;
 }
 
 export type ReportBrowserScreen = "runs" | "sections" | "viewer" | "confirm-delete";
@@ -365,6 +366,7 @@ async function loadReportRun(runDir: string, fallbackRunId: string, options: Rep
 
 async function loadReportSections(runDir: string, meta: AuditMeta | undefined, runDuration: number | undefined): Promise<ReportSection[]> {
   const durations = reportDurationByFile(meta);
+  const phaseDurations = phaseTotalDurationByFile(meta);
   const loadedSections = await Promise.all(REPORT_SECTION_FILES.map(async (definition): Promise<ReportSection | undefined> => {
     const content = await readText(path.join(runDir, definition.fileName));
     return content === undefined ? undefined : {
@@ -372,7 +374,8 @@ async function loadReportSections(runDir: string, meta: AuditMeta | undefined, r
       title: definition.title,
       fileName: definition.fileName,
       content,
-      durationMs: durations.get(definition.fileName)
+      durationMs: durations.get(definition.fileName),
+      phaseTotalDurationMs: phaseDurations.get(definition.fileName)
     };
   }));
   const sections = loadedSections.filter((section): section is ReportSection => Boolean(section));
@@ -430,7 +433,7 @@ function formatRunItem(run: ReportRunSummary, marked: boolean): string {
   const model = `model: ${run.model ?? "default"}`;
   const reasoning = `reasoning: ${run.reasoning ?? "default"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
-  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | ${formatDuration(run.durationMs)}`;
+  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | total ${formatDuration(run.durationMs)}`;
 }
 
 function formatDeleteItem(run: ReportRunSummary): string {
@@ -439,7 +442,10 @@ function formatDeleteItem(run: ReportRunSummary): string {
 
 function formatSectionItem(section: ReportSection): string {
   const lines = section.content.split(/\r?\n/).length;
-  return `${section.title}: ${section.fileName ?? "combined"} | ${lines} line(s) | ${formatDuration(section.durationMs)}`;
+  const duration = section.id === "full"
+    ? `total ${formatDuration(section.durationMs)}`
+    : sectionDurationLabel(section);
+  return `${section.title}: ${section.fileName ?? "combined"} | ${lines} line(s) | ${duration}`;
 }
 
 function cleanModelLabel(value: string | undefined, providerDisplayName: string | undefined): string | undefined {
@@ -484,6 +490,16 @@ function reportDurationByFile(meta: AuditMeta | undefined): Map<string, number> 
   return durations;
 }
 
+function phaseTotalDurationByFile(meta: AuditMeta | undefined): Map<string, number> {
+  const durations = new Map<string, number>();
+  for (const phase of meta?.phases ?? []) {
+    if (isUsableDuration(phase.totalDurationMs)) {
+      durations.set(phase.reportFile, phase.totalDurationMs);
+    }
+  }
+  return durations;
+}
+
 function runDurationMs(meta: AuditMeta | undefined): number | undefined {
   if (isUsableDuration(meta?.durationMs)) {
     return meta.durationMs;
@@ -520,6 +536,18 @@ function formatDuration(durationMs: number | undefined): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
+}
+
+function sectionDurationLabel(section: ReportSection): string {
+  const generation = `generation ${formatDuration(section.durationMs)}`;
+  if (!isUsableDuration(section.phaseTotalDurationMs)) {
+    return generation;
+  }
+  const generationMs = section.durationMs;
+  if (isUsableDuration(generationMs) && Math.abs(section.phaseTotalDurationMs - generationMs) < 1000) {
+    return generation;
+  }
+  return `${generation} | phase total ${formatDuration(section.phaseTotalDurationMs)}`;
 }
 
 function compactRunTime(value: string): string {

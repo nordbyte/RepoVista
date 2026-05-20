@@ -50,7 +50,7 @@ test("report browser lists report runs and renders sections", async () => {
     assert.match(listFrame, /model: gpt-resolved-default/);
     assert.match(listFrame, /model: gpt-5\.5/);
     assert.match(listFrame, /reasoning: xhigh/);
-    assert.match(listFrame, /exit 0 \| 2m 5s/);
+    assert.match(listFrame, /exit 0 \| total 2m 5s/);
     assert.match(listFrame, /\[ \] 2026-05-19 10:00/);
     assert.match(listFrame, /2026-05-19T10-00-00-000Z/);
     assert.doesNotMatch(listFrame, /model: default/);
@@ -84,11 +84,11 @@ test("report browser lists report runs and renders sections", async () => {
       scroll: 0
     }, { columns: 100, rows: 24, color: false });
     assert.match(sectionFrame, /Full Report/);
-    assert.match(sectionFrame, /Full Report: combined \| \d+ line\(s\) \| 2m 5s/);
-    assert.match(sectionFrame, /Summary: index\.md \| 4 line\(s\) \| 0m 5s/);
-    assert.match(sectionFrame, /Evidence Pack: 00-inventory\.md \| 4 line\(s\) \| 0m 4s/);
+    assert.match(sectionFrame, /Full Report: combined \| \d+ line\(s\) \| total 2m 5s/);
+    assert.match(sectionFrame, /Summary: index\.md \| 4 line\(s\) \| generation 0m 5s/);
+    assert.match(sectionFrame, /Evidence Pack: 00-inventory\.md \| 4 line\(s\) \| generation 0m 4s/);
     assert.match(sectionFrame, /Risk and Bug/);
-    assert.match(sectionFrame, /Risk and Bug: 03-risk-and-bug-report\.md \| 4 line\(s\) \| 0m 45s/);
+    assert.match(sectionFrame, /Risk and Bug: 03-risk-and-bug-report\.md \| 4 line\(s\) \| generation 0m 45s \| phase total 1m 10s/);
 
     const viewerFrame = renderReportsMenuFrame(runs, {
       screen: "viewer",
@@ -240,7 +240,8 @@ async function writeRun(runDir, input) {
         title: "Risk, Bug, and Security Analysis",
         reportFile: "03-risk-and-bug-report.md",
         status: "success",
-        durationMs: input.riskDurationMs
+        durationMs: input.riskDurationMs,
+        totalDurationMs: input.riskTotalDurationMs ?? 70000
       }
     ],
     exitCode: 0
