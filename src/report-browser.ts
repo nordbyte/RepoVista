@@ -46,6 +46,7 @@ export interface ReportSection {
 }
 
 export type ReportBrowserScreen = "runs" | "sections" | "viewer" | "confirm-delete";
+export type ReportBrowserInitialScreen = "runs" | "sections" | "viewer";
 
 export interface ReportBrowserState {
   screen: ReportBrowserScreen;
@@ -54,6 +55,12 @@ export interface ReportBrowserState {
   scroll: number;
   markedRunDirs?: Set<string>;
   notice?: string;
+}
+
+export interface ReportBrowserLaunchOptions {
+  initialRunDir?: string;
+  initialScreen?: ReportBrowserInitialScreen;
+  closeMessage?: string;
 }
 
 const REPORT_SECTION_FILES: Array<{ id: string; title: string; fileName: string }> = [
@@ -69,19 +76,15 @@ export async function runReportsMenu(
   options: AuditOptions,
   input = process.stdin as ReadStream,
   output = process.stdout as WriteStream,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  launchOptions: ReportBrowserLaunchOptions = {}
 ): Promise<string> {
   const runs = await listReportRuns(projectRoot, options.outDir);
   if (!runs.length) {
     return "No RepoVista report runs found.\n";
   }
 
-  const state: ReportBrowserState = {
-    screen: "runs",
-    runCursor: 0,
-    sectionCursor: 0,
-    scroll: 0
-  };
+  const state = createReportBrowserState(runs, launchOptions);
 
   return runTuiSession({
     input,
@@ -99,8 +102,25 @@ export async function runReportsMenu(
         controls.finish();
       }
     },
-    onFinish: () => "\nReport browser closed.\n"
+    onFinish: () => launchOptions.closeMessage ?? "\nReport browser closed.\n"
   });
+}
+
+export function createReportBrowserState(
+  runs: ReportRunSummary[],
+  options: ReportBrowserLaunchOptions = {}
+): ReportBrowserState {
+  const initialRunCursor = findInitialRunCursor(runs, options.initialRunDir);
+  const runCursor = initialRunCursor >= 0 ? initialRunCursor : 0;
+  const run = runs[runCursor];
+  const requestedScreen = initialRunCursor >= 0 ? options.initialScreen ?? "runs" : "runs";
+  const screen = run && run.sections.length ? requestedScreen : "runs";
+  return {
+    screen,
+    runCursor,
+    sectionCursor: 0,
+    scroll: 0
+  };
 }
 
 export async function listReportRuns(projectRoot: string, outDir: string, options: ReportRunListOptions = {}): Promise<ReportRunSummary[]> {
@@ -118,6 +138,14 @@ export async function listReportRuns(projectRoot: string, outDir: string, option
   return runs
     .filter((run): run is ReportRunSummary => Boolean(run))
     .sort((left, right) => creationTime(right) - creationTime(left) || right.runId.localeCompare(left.runId));
+}
+
+function findInitialRunCursor(runs: ReportRunSummary[], initialRunDir: string | undefined): number {
+  if (!initialRunDir) {
+    return -1;
+  }
+  const target = path.resolve(initialRunDir);
+  return runs.findIndex((run) => path.resolve(run.runDir) === target);
 }
 
 export function renderReportsMenuFrame(

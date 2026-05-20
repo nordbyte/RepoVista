@@ -68,7 +68,7 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("compareFailOnRegression", undefined, flag("fail-on-regression", "Exit with code 2 when compare detects new critical/high findings")),
   entry("ci", false, flag("ci", "CI mode without progress output"), setting("ci", "boolean", "Use CI output defaults"), "ci"),
   entry("failOnCritical", false, flag("fail-on-critical", "Exit with code 2 in CI when critical findings are detected"), setting("failOnCritical", "boolean", "Fail CI on critical findings"), "failOnCritical"),
-  entry("progress", true, flag("no-progress", "Disable the interactive progress TUI and reduce progress output"), setting("progress", "boolean", "Show progress output"), "progress"),
+  entry("progress", true, flag("no-progress", "Disable the interactive progress TUI, post-audit report browser, and reduce progress output"), setting("progress", "boolean", "Show progress TUI and post-audit browser"), "progress"),
   entry("keepLogs", false, flag("keep-logs", "Store technical provider logs"), setting("keepLogs", "boolean", "Keep technical provider logs"), "keepLogs"),
   entry("findingId", undefined, value("finding", "Finding id for show, triage, revalidate, issue, baseline, or suppress")),
   entry("findingRunId", undefined, value("run", "Run id or run directory for run-specific findings")),

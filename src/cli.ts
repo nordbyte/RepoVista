@@ -2,7 +2,8 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { runAudit } from "./audit.js";
+import type { ReadStream, WriteStream } from "node:tty";
+import { runAudit, type AuditResult } from "./audit.js";
 import { createAuditProgressController } from "./audit-progress.js";
 import { compareHasRegression, runCompareCommand } from "./compare.js";
 import { runBaselineCommand } from "./baseline.js";
@@ -31,6 +32,7 @@ import { runCleanLocksCommand } from "./feature-state.js";
 import { runSettingsGetCommand, runSettingsResetCommand, runSettingsSetCommand } from "./settings-commands.js";
 import { runSettingsMenu } from "./settings-menu.js";
 import { applySettingsToDefaults, loadSettings } from "./settings-config.js";
+import type { AuditOptions } from "./types.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
@@ -181,26 +183,38 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.once("SIGINT", onInterrupt);
     process.once("SIGTERM", onInterrupt);
     progress?.start();
+    let result: AuditResult | undefined;
     let runDir: string | undefined;
     let exitCode = 1;
     let errorMessage: string | undefined;
+    let openReportBrowser = false;
     try {
-      const result = await runAudit(optionsWithSettings.options, {
+      result = await runAudit(optionsWithSettings.options, {
         version,
         abortSignal: abortController.signal,
         loggerSink: progress
       });
       runDir = result.paths.runDir;
       exitCode = result.exitCode;
-      return result.exitCode;
+      openReportBrowser = shouldOpenPostAuditReportBrowser(optionsWithSettings.options, result);
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : String(error);
       throw error;
     } finally {
       process.off("SIGINT", onInterrupt);
       process.off("SIGTERM", onInterrupt);
-      progress?.finish({ exitCode, runDir, error: errorMessage });
+      progress?.finish({ exitCode, runDir, error: errorMessage, suppressSummary: openReportBrowser });
     }
+    if (openReportBrowser && runDir) {
+      process.stdout.write(await runReportsMenu(
+        optionsWithSettings.options,
+        process.stdin as ReadStream,
+        process.stdout as WriteStream,
+        process.cwd(),
+        { initialRunDir: runDir, initialScreen: "sections" }
+      ));
+    }
+    return exitCode;
   } catch (error) {
     if (error instanceof CliUsageError) {
       process.stderr.write(`Error: ${error.message}\n\n${renderHelp()}`);
@@ -216,6 +230,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stderr.write(`Unexpected error: ${message}\n`);
     return 1;
   }
+}
+
+function shouldOpenPostAuditReportBrowser(options: AuditOptions, result: AuditResult | undefined): boolean {
+  if (!result || result.exitCode !== 0 || options.ci || options.json || !options.progress) {
+    return false;
+  }
+  return Boolean(
+    process.stdin.isTTY &&
+    process.stdout.isTTY &&
+    typeof (process.stdin as ReadStream).setRawMode === "function"
+  );
 }
 
 function readPackageVersion(): string {

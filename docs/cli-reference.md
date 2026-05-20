@@ -116,7 +116,7 @@ repovista version
 | `--export <formats>` | `sarif`, `html`, `jsonl`, `github`; comma-separated, default `sarif,html,jsonl`. |
 | `--ci` | CI-friendly mode without progress output. |
 | `--fail-on-critical` | Exit `2` when critical findings are found in CI. |
-| `--no-progress` | Disable the interactive progress TUI and reduce progress output. |
+| `--no-progress` | Disable the interactive progress TUI, post-audit report browser, and reduce progress output. |
 | `--keep-logs` | Store technical provider logs. |
 
 Phase ids are `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`, and `summary`.

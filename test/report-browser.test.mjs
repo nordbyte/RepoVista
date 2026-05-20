@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { deleteMarkedReportRuns, listReportRuns, renderReportsMenuFrame } from "../dist/index.js";
+import { createReportBrowserState, deleteMarkedReportRuns, listReportRuns, renderReportsMenuFrame } from "../dist/index.js";
 
 test("report browser lists report runs and renders sections", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-report-browser-"));
@@ -132,6 +132,45 @@ test("report browser sorts report runs by creation time newest first", async () 
       scroll: 0
     }, { columns: 100, rows: 24, color: false });
     assert.match(listFrame, /\[ \] 2026-05-19 10:00/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("report browser can open on a selected completed audit run", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-report-selected-"));
+  try {
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    const outRoot = path.join(root, ".repovista");
+    await mkdir(outRoot, { recursive: true });
+    const newestRunDir = path.join(outRoot, "2026-05-20T10-00-00-000Z");
+    const selectedRunDir = path.join(outRoot, "2026-05-19T10-00-00-000Z");
+    await writeRun(newestRunDir, {
+      runId: "2026-05-20T10-00-00-000Z",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      completedAt: "2026-05-20T10:00:00.000Z",
+      title: "Newest report"
+    });
+    await writeRun(selectedRunDir, {
+      runId: "2026-05-19T10-00-00-000Z",
+      startedAt: "2026-05-19T10:00:00.000Z",
+      completedAt: "2026-05-19T10:00:00.000Z",
+      title: "Just completed audit"
+    });
+
+    const runs = await listReportRuns(root, ".repovista");
+    const state = createReportBrowserState(runs, {
+      initialRunDir: selectedRunDir,
+      initialScreen: "sections"
+    });
+
+    assert.equal(state.screen, "sections");
+    assert.equal(runs[state.runCursor].runDir, selectedRunDir);
+
+    const sectionFrame = renderReportsMenuFrame(runs, state, { columns: 100, rows: 24, color: false });
+    assert.match(sectionFrame, /2026-05-19T10-00-00-000Z sections/);
+    assert.match(sectionFrame, /Full Report/);
+    assert.match(sectionFrame, /Risk and Bug/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

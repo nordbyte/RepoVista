@@ -210,7 +210,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Export formats: ${formatArray(effectiveExportFormats(settings))}`,
     `JSON: ${effectiveBoolean(settings, "json") ? "on" : "off"}`,
     `Keep logs: ${effectiveBoolean(settings, "keepLogs") ? "on" : "off"}`,
-    `Progress output: ${effectiveBoolean(settings, "progress") ? "on" : "reduced"}`,
+    `Progress TUI and report browser: ${effectiveBoolean(settings, "progress") ? "on" : "off"}`,
     `CI mode: ${effectiveBoolean(settings, "ci") ? "on" : "off"}`,
     `Fail on critical: ${effectiveBoolean(settings, "failOnCritical") ? "on" : "off"}`
   ];
@@ -799,7 +799,7 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(effectiveExportFormats(settings))}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "json"), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "keepLogs"), "Keep technical logs") },
-  { id: "progress", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "progress"), "Progress TUI and output") },
+  { id: "progress", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "progress"), "Progress TUI and post-audit report browser") },
   { id: "ci", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "ci"), "CI mode (non-interactive output)") },
   { id: "failOnCritical", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnCritical"), "Fail on critical findings (CI exit 2)") },
   { id: "save", type: "command", label: () => "Save and exit" },

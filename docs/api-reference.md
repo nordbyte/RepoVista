@@ -249,7 +249,8 @@ Important types:
 | `renderSettingsTerminalFrame(frame)` | Render terminal frame with line clearing. |
 | `summarizeSettings(settings)` | Return settings summary lines. |
 | `listReportRuns(projectRoot, outDir)` | List completed report runs for the report browser. |
-| `runReportsMenu(options)` | Open the report browser TUI. |
+| `createReportBrowserState(runs, options?)` | Create a report-browser state, optionally focused on a specific run and screen. |
+| `runReportsMenu(options, input?, output?, projectRoot?, launchOptions?)` | Open the report browser TUI. |
 | `renderReportsMenuFrame(runs, state, options)` | Render the report browser TUI frame for tests/tools. |
 | `renderFindingsMenuFrame(findings, state, options)` | Render the findings TUI frame for tests/tools. |
 | `renderTuiListFrame(options)` | Render a shared TUI list frame. |

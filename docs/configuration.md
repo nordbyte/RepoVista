@@ -81,7 +81,7 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `exportFormats` | list | Default finding export formats. |
 | `json` | boolean | Keep JSON events and metadata. |
 | `keepLogs` | boolean | Keep technical logs. |
-| `progress` | boolean | Show the interactive audit progress TUI in terminals, with plain progress output as fallback. |
+| `progress` | boolean | Show the interactive audit progress TUI and post-audit report browser in terminals, with plain progress output as fallback. |
 | `ci` | boolean | CI defaults. |
 | `failOnCritical` | boolean | Fail CI on critical findings. |
 | `auditProfile` | enum | Built-in audit profile; unset means the default full audit. |

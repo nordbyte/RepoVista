@@ -17,7 +17,7 @@ interface ProgressStep {
 export interface AuditProgressController extends LoggerSink {
   readonly signal: AbortSignal;
   start(): void;
-  finish(result: { exitCode: number; runDir?: string; error?: string }): void;
+  finish(result: { exitCode: number; runDir?: string; error?: string; suppressSummary?: boolean }): void;
 }
 
 const REFRESH_MS = 1000;
@@ -73,7 +73,7 @@ class TerminalAuditProgressController implements AuditProgressController {
     this.timer.unref();
   }
 
-  finish(result: { exitCode: number; runDir?: string; error?: string }): void {
+  finish(result: { exitCode: number; runDir?: string; error?: string; suppressSummary?: boolean }): void {
     if (!this.running) {
       return;
     }
@@ -87,6 +87,9 @@ class TerminalAuditProgressController implements AuditProgressController {
     }
     this.render();
     this.cleanup();
+    if (result.suppressSummary) {
+      return;
+    }
     const summary = result.exitCode === 130
       ? "RepoVista audit cancelled."
       : result.exitCode === 0

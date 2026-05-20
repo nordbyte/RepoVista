@@ -38,7 +38,7 @@ Each audit writes a timestamped run directory under the selected output root:
 
 `index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, evidence checks, phase-quality diagnostics, suppressed findings, and artifact links.
 
-Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report or each generated section. The report list is sorted by run creation time with the newest run first and shows the total run duration after the exit code. Section lists show line count and generation duration where metadata is available. The report viewer highlights Markdown headings and bold spans in color-capable terminals, and Markdown tables are rendered with aligned columns. In the run list, Space marks or unmarks report runs for deletion, and `d` opens a confirmation screen before the marked run directories are removed.
+Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report or each generated section. Successful interactive audits open this same browser on the newly created run instead of ending at the run-directory message. The report list is sorted by run creation time with the newest run first and shows the total run duration after the exit code. Section lists show line count and generation duration where metadata is available. The report viewer highlights Markdown headings and bold spans in color-capable terminals, and Markdown tables are rendered with aligned columns. In the run list, Space marks or unmarks report runs for deletion, and `d` opens a confirmation screen before the marked run directories are removed.
 
 ## Main Files
 
