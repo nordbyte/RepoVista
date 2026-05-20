@@ -33,6 +33,7 @@ test("workspace matrix creates one report per workspace plus aggregate summary",
       cwd: root,
       version: "0.0.0-test",
       now: new Date("2026-05-20T10:00:00.000Z"),
+      commandExists: async () => true,
       runCommand: async (command, args) => {
         const rendered = [command, ...args].join(" ");
         if (rendered === "npm --version") return ok(rendered, "10.0.0\n");
