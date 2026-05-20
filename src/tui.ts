@@ -56,7 +56,9 @@ export const TUI_ANSI = {
   dim: "\x1b[2m",
   cyan: "\x1b[36m",
   green: "\x1b[32m",
+  red: "\x1b[31m",
   yellow: "\x1b[33m",
+  orange: "\x1b[38;5;208m",
   gray: "\x1b[90m",
   white: "\x1b[97m",
   bgCyan: "\x1b[46m"

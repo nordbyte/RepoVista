@@ -235,7 +235,7 @@ class TerminalAuditProgressController implements AuditProgressController {
       lines.push(colorize("  Waiting for the first audit step...", TUI_ANSI.dim, this.color));
     } else {
       for (const step of visibleSteps) {
-        lines.push(truncate(`${statusIcon(step.status)} ${step.label} | ${formatElapsed((step.endedAt ?? Date.now()) - step.startedAt)}`, columns));
+        lines.push(renderStepLine(step, columns, this.color));
       }
     }
     if (this.messages.length) {
@@ -277,6 +277,15 @@ class TerminalAuditProgressController implements AuditProgressController {
   }
 }
 
+function renderStepLine(step: ProgressStep, columns: number, useColor: boolean): string {
+  const icon = statusIcon(step.status);
+  const plain = truncate(`${icon} ${step.label} | ${formatElapsed((step.endedAt ?? Date.now()) - step.startedAt)}`, columns);
+  if (!plain.startsWith(icon)) {
+    return plain;
+  }
+  return `${colorize(icon, statusIconStyle(step.status), useColor)}${plain.slice(icon.length)}`;
+}
+
 function statusIcon(status: ProgressStepStatus): string {
   switch (status) {
     case "done":
@@ -289,6 +298,20 @@ function statusIcon(status: ProgressStepStatus): string {
       return "[skip]";
     case "running":
       return "[run]";
+  }
+}
+
+function statusIconStyle(status: ProgressStepStatus): string {
+  switch (status) {
+    case "done":
+      return TUI_ANSI.green;
+    case "failed":
+    case "cancelled":
+      return TUI_ANSI.red;
+    case "running":
+      return TUI_ANSI.orange;
+    case "skipped":
+      return TUI_ANSI.gray;
   }
 }
 
