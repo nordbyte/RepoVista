@@ -26,6 +26,8 @@ test("publish renders a dry-run GitHub issue from a GitHub source run", async ()
     assert.match(output, /repovista:finding:fnd_test/);
     assert.match(output, new RegExp(`blob/${SHA}/README\\.md#L2`));
     assert.match(output, /Labels: bug, triage/);
+    assert.match(output, /Hi,\n\nI found a potential issue in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
+    assert.match(output, /_Found with \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\)\._/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -121,7 +123,10 @@ test("publish creates a GitHub issue in the source repository and records the li
     assert.ok(createCall.args.includes("-R"));
     assert.ok(createCall.args.includes("creativeprofit22/contract-and-flow"));
     assert.ok(createCall.args.includes("--body"));
-    assert.match(createCall.args[createCall.args.indexOf("--body") + 1], /repovista:finding:fnd_test/);
+    const body = createCall.args[createCall.args.indexOf("--body") + 1];
+    assert.match(body, /Hi,\n\nI found a potential issue in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
+    assert.match(body, /repovista:finding:fnd_test/);
+    assert.match(body, /_Found with \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\)\._/);
 
     const findings = JSON.parse(await readFile(path.join(root, ".repovista", RUN_ID, "findings.json"), "utf8"));
     assert.equal(findings[0].issue.url, "https://github.com/creativeprofit22/contract-and-flow/issues/12");
@@ -233,6 +238,9 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     const prCall = calls.find((call) => call.command === "gh" && call.args[0] === "pr" && call.args[1] === "create");
     assert.ok(prCall);
     assert.equal(prCall.args[prCall.args.indexOf("--head") + 1], "tester:repovista/fix-fnd-test");
+    const prBody = prCall.args[prCall.args.indexOf("--body") + 1];
+    assert.match(prBody, /Hi,\n\nI opened this PR to address a RepoVista finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
+    assert.match(prBody, /_Found with \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\)\._/);
     const patchFiles = await readdir(path.join(root, ".repovista", "patches"));
     assert.ok(patchFiles.some((file) => file.endsWith(".json")));
     const findings = JSON.parse(await readFile(path.join(root, ".repovista", RUN_ID, "findings.json"), "utf8"));

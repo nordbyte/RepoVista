@@ -20,6 +20,7 @@ import type {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const REPOVISTA_REPOSITORY_URL = "https://github.com/nordbyte/RepoVista";
 
 export interface PublishDependencies {
   now?: Date;
@@ -575,7 +576,9 @@ function issueTitle(finding: StructuredFinding): string {
 }
 
 function renderIssueBody(finding: StructuredFinding, github: GithubPublishTarget, meta: AuditMeta): string {
-  return `## RepoVista Finding
+  return `${renderIssueIntro(finding, github)}
+
+## RepoVista Finding
 
 <!-- repovista:finding:${finding.id} -->
 
@@ -609,7 +612,29 @@ ${finding.recommendation ?? "n/a"}
 ## Suggested Regression Test
 
 ${finding.suggestedRegressionTest ?? "n/a"}
+
+${renderRepoVistaFooter()}
 `;
+}
+
+function renderIssueIntro(finding: StructuredFinding, github: GithubPublishTarget): string {
+  return `Hi,
+
+I found a potential issue in ${github.repository}: ${finding.title}. ${introProblemSummary(finding)}`;
+}
+
+function introProblemSummary(finding: StructuredFinding): string {
+  const text = nonEmptyString(finding.problemRationale) ?? nonEmptyString(finding.evidence) ?? nonEmptyString(finding.recommendation);
+  if (!text) {
+    return "The details below include the affected files, evidence, and a suggested fix.";
+  }
+  return firstSentence(text);
+}
+
+function firstSentence(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(.{1,280}?[.!?])(?:\s|$)/);
+  return match?.[1] ?? (trimmed.length > 280 ? `${trimmed.slice(0, 277).trimEnd()}...` : trimmed);
 }
 
 function renderEvidenceLinks(finding: StructuredFinding, github: GithubPublishTarget): string {
@@ -836,7 +861,9 @@ async function pushBranch(
 }
 
 function renderPatchPrBody(patch: PatchAttempt, github: GithubPublishTarget, meta: AuditMeta): string {
-  return `## RepoVista Patch Attempt
+  return `${renderPatchPrIntro(patch, github)}
+
+## RepoVista Patch Attempt
 
 <!-- repovista:patch:${patch.patchAttemptId} -->
 
@@ -868,7 +895,32 @@ ${patch.scopeGate ? [
 ## Validation
 
 ${patch.commandsRun.length ? patch.commandsRun.map((command) => `- ${command.command}: ${command.exitCode ?? "unknown"}${command.timedOut ? " (timed out)" : ""}`).join("\n") : "- No validation commands recorded."}
+
+${renderRepoVistaFooter()}
 `;
+}
+
+function renderPatchPrIntro(patch: PatchAttempt, github: GithubPublishTarget): string {
+  const summary = patchPlanSummary(patch);
+  return `Hi,
+
+I opened this PR to address a RepoVista finding in ${github.repository}: ${summary}. The implementation is intended to stay focused on the affected files and the evidence from the audit.`;
+}
+
+function patchPlanSummary(patch: PatchAttempt): string {
+  const findingLine = patch.plan.split(/\r?\n/).find((line) => line.startsWith("Finding: "));
+  const findingTitle = findingLine?.replace(/^Finding:\s+\S+\s+-\s+/, "").trim();
+  if (findingTitle) {
+    return findingTitle;
+  }
+  if (patch.findingIds.length === 1) {
+    return `finding ${patch.findingIds[0]}`;
+  }
+  return `${patch.findingIds.length} findings`;
+}
+
+function renderRepoVistaFooter(): string {
+  return `_Found with [RepoVista](${REPOVISTA_REPOSITORY_URL})._`;
 }
 
 async function runValidationCommands(
