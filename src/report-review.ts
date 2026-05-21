@@ -527,18 +527,20 @@ async function staleWarnings(projectRoot: string, meta: AuditMeta | undefined): 
   if (meta?.repositoryDrift?.warnings?.length) {
     warnings.push(...meta.repositoryDrift.warnings);
   }
-  if (!meta?.evidence?.git.commit) {
+  const expectedCommit = meta?.source?.commit ?? meta?.evidence?.git.commit;
+  if (!expectedCommit) {
     return warnings;
   }
+  const reviewRoot = await resolveReviewCheckoutRoot(projectRoot, meta);
   try {
     const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-      cwd: projectRoot,
+      cwd: reviewRoot,
       timeout: 10_000,
       maxBuffer: 1024 * 1024
     });
     const current = stdout.trim();
-    if (current && current !== meta.evidence.git.commit) {
-      const warning = `Run was created for commit ${meta.evidence.git.commit}, current checkout is ${current}. Revalidate findings before acting on them.`;
+    if (current && current !== expectedCommit) {
+      const warning = `Run was created for commit ${expectedCommit}, current source checkout is ${current}. Revalidate findings before acting on them.`;
       if (!warnings.includes(warning)) {
         warnings.push(warning);
       }
@@ -547,6 +549,25 @@ async function staleWarnings(projectRoot: string, meta: AuditMeta | undefined): 
     // Git drift is an advisory signal only.
   }
   return warnings;
+}
+
+async function resolveReviewCheckoutRoot(projectRoot: string, meta: AuditMeta | undefined): Promise<string> {
+  const candidates = [
+    meta?.source?.cloneDir,
+    meta?.projectRoot
+  ].filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    const absolute = path.isAbsolute(candidate) ? candidate : path.resolve(projectRoot, candidate);
+    try {
+      const current = await stat(absolute);
+      if (current.isDirectory()) {
+        return absolute;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return projectRoot;
 }
 
 function requireRunDir(options: AuditOptions): string {

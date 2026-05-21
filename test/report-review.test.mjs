@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { renderPrComment, reviewRunDirectory, runPrCommentCommand, runReviewCommand } from "../dist/index.js";
+
+const execFileAsync = promisify(execFile);
 
 test("review command reports weak evidence and PR comment body", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-review-"));
@@ -105,6 +109,67 @@ test("review command reports weak evidence and PR comment body", async () => {
 
     const dryRun = await runPrCommentCommand({ outDir: ".repovista", reportRunDir: ".repovista/run", dryRun: true }, root);
     assert.match(dryRun, /RepoVista PR comment dry run/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("review command checks GitHub-source staleness against the source clone", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-review-github-"));
+  try {
+    const runDir = path.join(root, ".repovista", "run");
+    const cloneDir = path.join(root, ".repovista", "sources", "github", "owner", "repo", "abc123");
+    await mkdir(runDir, { recursive: true });
+    await mkdir(cloneDir, { recursive: true });
+    await writeFile(path.join(cloneDir, "README.md"), "# fixture\n", "utf8");
+    await execFileAsync("git", ["init"], { cwd: cloneDir });
+    await execFileAsync("git", ["config", "user.email", "test@example.invalid"], { cwd: cloneDir });
+    await execFileAsync("git", ["config", "user.name", "RepoVista Test"], { cwd: cloneDir });
+    await execFileAsync("git", ["add", "."], { cwd: cloneDir });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: cloneDir });
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: cloneDir });
+    const sourceCommit = stdout.trim();
+
+    await writeFile(path.join(runDir, "meta.json"), JSON.stringify({
+      runId: "run",
+      projectRoot: cloneDir,
+      source: {
+        type: "github",
+        repository: "owner/repo",
+        owner: "owner",
+        repo: "repo",
+        url: "https://github.com/owner/repo.git",
+        commit: sourceCommit,
+        cloneDir,
+        fetchedAt: "2026-05-21T00:00:00.000Z"
+      },
+      options: {
+        exportFormats: []
+      },
+      ai: {
+        displayName: "Codex CLI",
+        model: "gpt-5.5",
+        reasoning: "xhigh"
+      },
+      evidence: {
+        git: {
+          commit: sourceCommit
+        },
+        checks: {
+          enabled: false,
+          commands: []
+        }
+      },
+      phases: []
+    }), "utf8");
+    await writeFile(path.join(runDir, "findings.json"), "[]", "utf8");
+    await writeFile(path.join(runDir, "structured-reports.json"), "[]", "utf8");
+    for (const file of ["01-architecture-report.md", "02-code-quality-report.md", "03-risk-and-bug-report.md", "04-feature-roadmap.md", "index.md"]) {
+      await writeFile(path.join(runDir, file), "# Fixture\n\nsrc/audit.ts\n", "utf8");
+    }
+
+    const reviewed = await reviewRunDirectory(root, ".repovista/run");
+    assert.deepEqual(reviewed.staleWarnings, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

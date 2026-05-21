@@ -472,6 +472,10 @@ function providerSummary(step: ProgressStep): string {
       parts.push(`pid ${pids.join(",")}`);
     }
     const lastOutputAt = Math.max(...runningProviders.map((provider) => provider.lastOutputAt ?? 0));
+    const outputBytes = runningProviders.reduce((sum, provider) => sum + provider.outputBytes, 0);
+    if (outputBytes > 0) {
+      parts.push(`log ${formatBytes(outputBytes)}`);
+    }
     if (lastOutputAt > 0) {
       const idleMs = Date.now() - lastOutputAt;
       parts.push(`last output ${formatElapsedShort(idleMs)} ago${idleMs >= 60_000 ? ", waiting for model response" : ""}`);
@@ -514,6 +518,16 @@ function formatElapsedShort(durationMs: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes}B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 102.4) / 10}KB`;
+  }
+  return `${Math.round(bytes / (1024 * 102.4)) / 10}MB`;
 }
 
 function truncate(value: string, columns: number): string {

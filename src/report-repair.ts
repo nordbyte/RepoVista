@@ -4,6 +4,8 @@ import { extractFindingsWithSource } from "./findings.js";
 import { type PhaseDefinition } from "./prompts.js";
 import { validateReportQuality } from "./quality-gates.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
+import { getReportProvider } from "./providers/index.js";
+import { schemaForPhase, structuredPromptForPhase } from "./provider-schema.js";
 import type { AuditOptions, PhaseRepairAttempt, ProviderRunResult, RunPaths } from "./types.js";
 
 type RunPhaseFunction = typeof runProviderPhase;
@@ -39,7 +41,7 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
     const currentReport = await safeRead(currentResult.reportPath);
     const warnings = await repairWarnings(input, currentReport);
     if (!warnings.length) {
-      return repairAttempts.length ? { ...currentResult, repairAttempts } : currentResult;
+      return repairAttempts.length ? repairedPhaseResult(input.result, currentResult, repairAttempts) : currentResult;
     }
 
     const repairPhaseId = `${input.phase.id}-repair-${attempt}`;
@@ -51,11 +53,12 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
       warnings
     });
 
+    const repairRequest = buildRepairRequest(input, repairPhaseId, repairPhaseTitle, currentReport, warnings);
     const repairResult = await input.runPhase({
       provider: input.options.provider ?? "codex",
       phaseId: repairPhaseId,
       phaseTitle: repairPhaseTitle,
-      prompt: buildRepairPrompt(input.phase, input.originalPrompt, currentReport, warnings),
+      prompt: repairRequest.prompt,
       projectRoot: input.projectRoot,
       reportPath: currentResult.reportPath,
       logsDir: input.paths.logsDir,
@@ -67,6 +70,8 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
       jsonEvents: input.options.json,
       keepLogs: input.options.keepLogs,
       timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+      outputSchema: repairRequest.outputSchema,
+      outputSchemaKind: repairRequest.outputSchemaKind,
       abortSignal: input.abortSignal
     }, input.spawnAdapter);
     const repairAttempt: PhaseRepairAttempt = {
@@ -85,11 +90,11 @@ export async function maybeRepairPhaseReport(input: RepairPhaseInput): Promise<P
     };
 
     if (!currentResult.success) {
-      return currentResult;
+      return repairedPhaseResult(input.result, currentResult, repairAttempts);
     }
   }
 
-  return currentResult;
+  return repairAttempts.length ? repairedPhaseResult(input.result, currentResult, repairAttempts) : currentResult;
 }
 
 async function repairWarnings(input: RepairPhaseInput, currentReport: string): Promise<string[]> {
@@ -139,6 +144,50 @@ Current report to repair:
 
 ${currentReport}
 `;
+}
+
+function buildRepairRequest(
+  input: RepairPhaseInput,
+  repairPhaseId: string,
+  repairPhaseTitle: string,
+  currentReport: string,
+  warnings: string[]
+): {
+  prompt: string;
+  outputSchema?: Record<string, unknown>;
+  outputSchemaKind?: "risk-report" | "phase-report";
+} {
+  const prompt = buildRepairPrompt(input.phase, input.originalPrompt, currentReport, warnings);
+  const provider = getReportProvider(input.options.provider ?? "codex");
+  const schema = schemaForPhase(input.phase.id);
+  if (!schema || !provider.capabilities.outputSchema) {
+    return { prompt };
+  }
+  return {
+    prompt: structuredPromptForPhase(input.phase.id, `${prompt}
+
+Repair output identity:
+- This is repair run ${repairPhaseId} (${repairPhaseTitle}), but the structured JSON "phaseId" must remain "${input.phase.id}".
+`),
+    outputSchema: schema.schema,
+    outputSchemaKind: schema.kind
+  };
+}
+
+function repairedPhaseResult(
+  originalResult: ProviderRunResult,
+  currentResult: ProviderRunResult,
+  repairAttempts: PhaseRepairAttempt[]
+): ProviderRunResult {
+  return {
+    ...originalResult,
+    success: currentResult.success,
+    reportPath: currentResult.reportPath,
+    exitCode: currentResult.success ? originalResult.exitCode : currentResult.exitCode,
+    error: currentResult.success ? originalResult.error : currentResult.error,
+    structuredOutputPath: currentResult.structuredOutputPath ?? originalResult.structuredOutputPath,
+    repairAttempts
+  };
 }
 
 async function safeRead(filePath: string): Promise<string> {

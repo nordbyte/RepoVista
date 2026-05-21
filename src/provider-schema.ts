@@ -5,9 +5,9 @@ const evidenceReferenceJsonSchema = {
   additionalProperties: false,
   required: ["path", "startLine", "endLine", "quote", "symbol"],
   properties: {
-    path: { type: "string" },
-    startLine: { type: ["number", "null"] },
-    endLine: { type: ["number", "null"] },
+    path: { type: "string", minLength: 1 },
+    startLine: { type: "number" },
+    endLine: { type: "number" },
     quote: { type: ["string", "null"] },
     symbol: { type: ["string", "null"] }
   }
@@ -37,22 +37,23 @@ const childFindingJsonSchema = {
     "parentTitle"
   ],
   properties: {
-    title: { type: "string" },
+    title: { type: "string", minLength: 1 },
     severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
-    category: { type: "string" },
+    category: { type: "string", minLength: 1 },
     status: { type: "string", enum: ["open", "fixed", "false-positive", "wont-fix", "uncertain"] },
-    signature: { type: "string" },
-    affectedPaths: { type: "array", items: { type: "string" } },
-    evidence: { type: "string" },
+    signature: { type: "string", minLength: 1 },
+    affectedPaths: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+    evidence: { type: "string", minLength: 1 },
     evidenceReferences: {
       type: "array",
+      minItems: 1,
       items: evidenceReferenceJsonSchema
     },
-    problemRationale: { type: "string" },
-    recommendedFix: { type: "string" },
-    reproduction: { type: "string" },
-    suggestedRegressionTest: { type: "string" },
-    minimumFixScope: { type: "string" },
+    problemRationale: { type: "string", minLength: 1 },
+    recommendedFix: { type: "string", minLength: 1 },
+    reproduction: { type: "string", minLength: 1 },
+    suggestedRegressionTest: { type: "string", minLength: 1 },
+    minimumFixScope: { type: "string", minLength: 1 },
     estimatedEffort: { type: "string", enum: ["small", "medium", "large"] },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
     findingType: { type: "string", enum: ["atomic"] },
@@ -107,22 +108,23 @@ export const riskReportJsonSchema: Record<string, unknown> = {
           "childFindings"
         ],
         properties: {
-          title: { type: "string" },
+          title: { type: "string", minLength: 1 },
           severity: { type: "string", enum: ["critical", "high", "medium", "low"] },
-          category: { type: "string" },
+          category: { type: "string", minLength: 1 },
           status: { type: "string", enum: ["open", "fixed", "false-positive", "wont-fix", "uncertain"] },
-          signature: { type: "string" },
-          affectedPaths: { type: "array", items: { type: "string" } },
-          evidence: { type: "string" },
+          signature: { type: "string", minLength: 1 },
+          affectedPaths: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+          evidence: { type: "string", minLength: 1 },
           evidenceReferences: {
             type: "array",
+            minItems: 1,
             items: evidenceReferenceJsonSchema
           },
-          problemRationale: { type: "string" },
-          recommendedFix: { type: "string" },
-          reproduction: { type: "string" },
-          suggestedRegressionTest: { type: "string" },
-          minimumFixScope: { type: "string" },
+          problemRationale: { type: "string", minLength: 1 },
+          recommendedFix: { type: "string", minLength: 1 },
+          reproduction: { type: "string", minLength: 1 },
+          suggestedRegressionTest: { type: "string", minLength: 1 },
+          minimumFixScope: { type: "string", minLength: 1 },
           estimatedEffort: { type: "string", enum: ["small", "medium", "large"] },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
           findingType: { type: "string", enum: ["atomic", "theme"] },
@@ -244,6 +246,8 @@ Additional structured-output rule:
 - The JSON must match RepoVista's provider-native risk-report schema.
 - Put all concrete risk findings in the "findings" array.
 - If no findings are supported by concrete evidence, return "findings": [] and explain the empty result in severitySummary and executiveSummary.
+- Every finding must have at least one affectedPaths item and at least one evidenceReferences item with path, startLine, and endLine.
+- Do not keep a finding if you cannot provide a concrete file and line range for it.
 - Every evidenceReferences item with a quote must use text copied exactly from the referenced path and startLine/endLine range.
 - Do not paraphrase, normalize, or invent quote text; if an exact substring is uncertain, omit quote and use the safest concrete line range.
 - Prefer short quotes that uniquely identify the evidence line and can be verified as a direct substring.

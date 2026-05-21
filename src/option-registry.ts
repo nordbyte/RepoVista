@@ -62,7 +62,7 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("strictReports", undefined, flag("no-strict-reports", "Disable saved strict report default")),
   entry("repairReports", true, flag("repair-reports", "Ask the provider to repair reports that miss quality gates (default: on)"), setting("repairReports", "boolean", "Repair reports that miss quality gates"), "repairReports"),
   entry("repairReports", undefined, flag("no-repair-reports", "Disable saved report repair default")),
-  entry("repairAttempts", 1, value("repair-attempts", "Maximum repair attempts per phase, 1-3 (default: 1)"), setting("repairAttempts", "number", "Maximum report repair attempts")),
+  entry("repairAttempts", 2, value("repair-attempts", "Maximum repair attempts per phase, 1-3 (default: 2)"), setting("repairAttempts", "number", "Maximum report repair attempts")),
   entry("deepReview", false, flag("deep-review", "Run additional feature-sliced risk review passes and merge their findings"), setting("deepReview", "boolean", "Run feature-sliced deep review passes"), "deepReview"),
   entry("deepReview", undefined, flag("no-deep-review", "Disable saved feature-sliced deep review default")),
   entry("snapshot", false, flag("snapshot", "Run provider analysis in a detached Git worktree snapshot"), setting("snapshot", "boolean", "Analyze a detached Git snapshot"), "snapshot"),

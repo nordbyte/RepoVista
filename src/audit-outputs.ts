@@ -131,10 +131,11 @@ function buildRunAnalytics(meta: AuditMeta, promptManifest: PromptManifest): Run
   const promptTokensByPhase = new Map(promptManifest.phases.map((phase) => [phase.phaseId, phase.approximateTokens]));
   const phases = meta.phases.map((phase) => {
     const telemetry = aggregatePhaseTelemetry(phase);
+    const durationMs = phase.totalDurationMs ?? phase.durationMs ?? 0;
     return {
       id: phase.id,
       status: phase.status,
-      durationMs: phase.durationMs ?? 0,
+      durationMs,
       totalDurationMs: phase.totalDurationMs,
       promptTokens: promptTokensByPhase.get(phase.id) ?? 0,
       actualInputTokens: telemetry.inputTokens,

@@ -255,7 +255,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     }));
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
-    const parallel = await resolveParallelMeta(projectRoot, outputProjectRoot, options, logger, featureMap);
+    const parallel = await resolveParallelMeta(projectRoot, outputProjectRoot, paths, options, logger, featureMap);
     meta.parallel = parallel;
     const phaseFingerprints = buildPhaseCacheEntries(projectScan.files, options, {
       reuseKey,
@@ -359,15 +359,16 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     const baseline = await applyBaselineToFindings(outputProjectRoot, options.outDir, validatedFindings, paths.runId, now);
     const findings = baseline.activeFindings;
     const suppressedFindings = baseline.suppressedFindings;
+    meta.findings = findings;
+    meta.suppressedFindings = suppressedFindings;
+    await repositoryDriftMonitor?.checkNow();
+    meta.exitCode = determineExitCode(options, meta, previousReports["03-risk-and-bug-report.md"], findings, evidence);
+    await appendRunQualityStatus(paths, meta, previousReports);
     const structuredReports = ANALYSIS_PHASES.map((phase) => extractStructuredPhaseReport(
       previousReports[phase.reportFile] ?? "",
       phase.id,
       phase.reportFile
     ));
-    meta.findings = findings;
-    meta.suppressedFindings = suppressedFindings;
-    await repositoryDriftMonitor?.checkNow();
-    meta.exitCode = determineExitCode(options, meta, previousReports["03-risk-and-bug-report.md"], findings, evidence);
     completeRunTiming(meta, runStartedAtMs);
     await updateFeatureRecordsFromFindings(outputProjectRoot, options.outDir, findings, paths.runId, now);
     await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings, outputProjectRoot);
@@ -495,7 +496,7 @@ async function runPhaseWithLifecycle(
     input.previousReports[phase.reportFile] = input.incrementalReports[phase.reportFile];
     await markSkippedOrPreserved(status, phase, input.paths, input.previousReports);
     status.durationMs ??= 0;
-    input.recordReportDuration(input.meta, phase.reportFile, status.durationMs);
+    input.recordReportDuration(input.meta, phase.reportFile, status.totalDurationMs ?? status.durationMs);
     input.logger.info(`Incremental cache reused ${phase.reportFile}.`);
     return;
   }
@@ -845,6 +846,7 @@ function sortPromptManifestPhases(manifest: PromptManifest): void {
 async function resolveParallelMeta(
   analysisProjectRoot: string,
   outputProjectRoot: string,
+  paths: RunPaths,
   options: AuditOptions,
   logger: Logger,
   currentMap?: Awaited<ReturnType<typeof createProjectMap>>
@@ -852,6 +854,14 @@ async function resolveParallelMeta(
   const mode = options.parallel ?? "off";
   if (mode === "off" || mode === 1) {
     return undefined;
+  }
+  if (options.githubRepo && currentMap) {
+    const mapPath = reportPath(paths.runDir, "project-map.json");
+    await writeJsonFile(mapPath, currentMap);
+    logger.info(`Recorded GitHub source project map for this run: ${mapPath}`);
+    const meta = createParallelExecutionMeta(currentMap, mapPath, mode);
+    emitParallelWarnings(meta, logger);
+    return meta;
   }
   let loaded = await loadProjectMap(outputProjectRoot, options.outDir);
   if (!loaded && mode === "auto" && currentMap) {
@@ -868,6 +878,11 @@ async function resolveParallelMeta(
     logger.info(`Refreshed RepoVista project map for current analysis source: ${mapPath}`);
   }
   const meta = createParallelExecutionMeta(loaded.map, loaded.mapPath, mode);
+  emitParallelWarnings(meta, logger);
+  return meta;
+}
+
+function emitParallelWarnings(meta: ParallelExecutionMeta, logger: Logger): void {
   for (const warning of meta.warnings) {
     logger.warn(warning);
   }
@@ -877,7 +892,6 @@ async function resolveParallelMeta(
   if (meta.effectiveParallelism > 1) {
     logger.info(`Shard parallelism: ${meta.effectiveParallelism} provider session(s) for shardable phases.`);
   }
-  return meta;
 }
 
 async function createRunPaths(projectRoot: string, options: AuditOptions, now: Date, createLogs: boolean): Promise<RunPaths> {
@@ -920,6 +934,66 @@ function recordReportDuration(meta: AuditMeta, reportFile: string, durationMs: n
   }
   meta.reportDurations ??= {};
   meta.reportDurations[reportFile] = durationMs;
+}
+
+async function appendRunQualityStatus(
+  paths: RunPaths,
+  meta: AuditMeta,
+  previousReports: Record<string, string>
+): Promise<void> {
+  const section = renderRunQualityStatus(meta);
+  if (!section) {
+    return;
+  }
+  const reportFile = "index.md";
+  const markerStart = "<!-- repovista-run-quality:start -->";
+  const markerEnd = "<!-- repovista-run-quality:end -->";
+  const existing = previousReports[reportFile] ?? await safeReadReport(reportPath(paths.runDir, reportFile), "Executive Summary");
+  const block = `${markerStart}
+${section}
+${markerEnd}`;
+  const updated = existing.includes(markerStart) && existing.includes(markerEnd)
+    ? existing.replace(new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}`), block)
+    : `${existing.trimEnd()}
+
+${block}
+`;
+  await writeMarkdownReport(reportPath(paths.runDir, reportFile), updated);
+  previousReports[reportFile] = updated;
+}
+
+function renderRunQualityStatus(meta: AuditMeta): string {
+  const failedPhases = meta.phases.filter((phase) => phase.status === "failed");
+  const repairedPhases = meta.phases.filter((phase) => phase.repairAttempts?.length);
+  if (!failedPhases.length && !repairedPhases.length) {
+    return "";
+  }
+  const lines = [
+    "## RepoVista Run Quality Status",
+    "",
+    `- Overall exit code: ${meta.exitCode ?? "not determined"}`,
+    `- Failed phases: ${failedPhases.length ? failedPhases.map((phase) => phase.title).join(", ") : "none"}`,
+    `- Repair attempts: ${repairedPhases.reduce((sum, phase) => sum + (phase.repairAttempts?.length ?? 0), 0)}`
+  ];
+  for (const phase of failedPhases) {
+    lines.push(`- ${phase.title}: ${phase.error ?? "failed"}`);
+    for (const warning of phase.qualityWarnings ?? []) {
+      lines.push(`  - ${warning}`);
+    }
+  }
+  for (const phase of repairedPhases) {
+    for (const attempt of phase.repairAttempts ?? []) {
+      lines.push(`- ${phase.title} repair ${attempt.attempt}: ${attempt.status}${attempt.error ? ` (${attempt.error})` : ""}`);
+      if (attempt.warnings.length) {
+        lines.push(`  - Triggered by: ${attempt.warnings.join("; ")}`);
+      }
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function completeRunTiming(meta: AuditMeta, runStartedAtMs: number): void {

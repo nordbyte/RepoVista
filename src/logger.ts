@@ -48,6 +48,14 @@ export interface AuditProviderEvent {
 }
 
 export class Logger {
+  private readonly providerHeartbeats = new Map<string, {
+    startedAt?: number;
+    pid?: number;
+    bytes: number;
+    lastReportedAt: number;
+    lastStream?: "stdout" | "stderr";
+  }>();
+
   constructor(private readonly progressEnabled: boolean, private readonly sink?: LoggerSink) {}
 
   auditSettings(summary: AuditSettingsSummary): void {
@@ -100,10 +108,43 @@ export class Logger {
 
   providerEvent(event: AuditProviderEvent): void {
     this.sink?.providerEvent?.(event);
+    if (!this.progressEnabled || this.sink?.handlesOutput) {
+      return;
+    }
+    const heartbeat = this.providerHeartbeats.get(event.providerId) ?? {
+      bytes: 0,
+      lastReportedAt: 0
+    };
+    const parsedAt = Date.parse(event.at);
+    const timestamp = Number.isFinite(parsedAt) ? parsedAt : Date.now();
+    if (event.type === "spawned") {
+      heartbeat.startedAt = timestamp;
+      heartbeat.pid = event.pid;
+      this.providerHeartbeats.set(event.providerId, heartbeat);
+      if (event.pid) {
+        process.stderr.write(`.. ${event.providerId} spawned pid ${event.pid}\n`);
+      }
+      return;
+    }
+    if (event.type === "closed") {
+      this.providerHeartbeats.delete(event.providerId);
+      return;
+    }
+    heartbeat.bytes += event.bytes ?? 0;
+    heartbeat.lastStream = event.stream;
+    this.providerHeartbeats.set(event.providerId, heartbeat);
+    if (timestamp - heartbeat.lastReportedAt < 60_000) {
+      return;
+    }
+    heartbeat.lastReportedAt = timestamp;
+    const elapsed = heartbeat.startedAt ? ` for ${formatDuration(timestamp - heartbeat.startedAt)}` : "";
+    const stream = heartbeat.lastStream ? ` on ${heartbeat.lastStream}` : "";
+    process.stderr.write(`.. ${event.providerId} active${elapsed}: ${formatBytes(heartbeat.bytes)} provider output${stream}\n`);
   }
 
   providerFinished(provider: AuditProviderProgress): void {
     this.sink?.providerFinished?.(provider);
+    this.providerHeartbeats.delete(provider.id);
     if (this.progressEnabled && !this.sink?.handlesOutput) {
       const status = provider.status ? ` (${provider.status})` : "";
       process.stderr.write(`<= ${provider.title}${status}${provider.error ? `: ${provider.error}` : ""}\n`);
@@ -123,4 +164,21 @@ export class Logger {
       process.stderr.write(`Error: ${message}\n`);
     }
   }
+}
+
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes}B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 102.4) / 10}KB`;
+  }
+  return `${Math.round(bytes / (1024 * 102.4)) / 10}MB`;
 }

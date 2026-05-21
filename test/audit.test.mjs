@@ -301,8 +301,13 @@ test("audit can analyze a public GitHub repository into the local report root", 
     assert.equal(cloneCalls.length, 1);
     assert.ok(await readFile(path.join(result.paths.runDir, "meta.json"), "utf8"));
 
-    const projectMap = JSON.parse(await readFile(path.join(root, ".repovista", "project-map.json"), "utf8"));
+    await assert.rejects(
+      readFile(path.join(root, ".repovista", "project-map.json"), "utf8"),
+      /ENOENT/
+    );
+    const projectMap = JSON.parse(await readFile(path.join(result.paths.runDir, "project-map.json"), "utf8"));
     assert.equal(projectMap.projectRoot, result.meta.projectRoot);
+    assert.equal(result.meta.parallel.projectMapPath, path.join(result.paths.runDir, "project-map.json"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1036,6 +1041,10 @@ test("risk phase auto-repairs missing findings schema before extraction", async 
       }),
       runProvider: async (request) => {
         seen.push(request.phaseId);
+        if (request.phaseId.includes("repair")) {
+          assert.ok(request.outputSchema);
+          assert.equal(request.outputSchemaKind, "risk-report");
+        }
         const content = request.phaseId.includes("repair")
           ? riskReportWithFinding("Repair-added finding", "src/index.ts", "export const value = 1;")
           : "# Risk\n\n## Critical Findings\n\nNo critical findings.\n";
@@ -1045,7 +1054,18 @@ test("risk phase auto-repairs missing findings schema before extraction", async 
           success: true,
           reportPath: request.reportPath,
           durationMs: 1,
-          exitCode: 0
+          exitCode: 0,
+          diagnostics: {
+            provider: "codex",
+            executable: "codex",
+            args: [],
+            phaseId: request.phaseId,
+            phaseTitle: request.phaseTitle,
+            startedAt: new Date("2026-05-18T14:57:32.123Z").toISOString(),
+            timeoutSeconds: request.timeoutSeconds,
+            timedOut: false,
+            interrupted: false
+          }
         };
       }
     });
@@ -1056,7 +1076,10 @@ test("risk phase auto-repairs missing findings schema before extraction", async 
     assert.equal(riskPhase.repairAttempts[0].phaseId, "risk-and-bug-repair-1");
     assert.equal(riskPhase.repairAttempts[0].status, "success");
     assert.match(riskPhase.repairAttempts[0].warnings.join("\n"), /Risk findings schema is missing or invalid/);
+    assert.equal(riskPhase.providerRun.phaseId, "risk-and-bug");
+    assert.equal(riskPhase.repairAttempts[0].providerRun.phaseId, "risk-and-bug-repair-1");
     assert.ok(result.meta.findings.some((finding) => finding.title === "Repair-added finding"));
+    assert.match(await readFile(path.join(result.paths.runDir, "index.md"), "utf8"), /RepoVista Run Quality Status/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

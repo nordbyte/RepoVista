@@ -33,11 +33,12 @@ export async function runProviderPhase(
   const args = provider.buildArgs(providerRequest);
   const useProcessGroup = process.platform !== "win32";
   const shouldStoreLogs = request.keepLogs || request.jsonEvents;
+  const logStem = providerLogStem(request.phaseId, request.phaseTitle);
   const stdoutLogPath = shouldStoreLogs && request.logsDir
-    ? path.join(request.logsDir, `${request.phaseId}.stdout${provider.stdoutLogExtension(request)}`)
+    ? path.join(request.logsDir, `${logStem}.stdout${provider.stdoutLogExtension(request)}`)
     : undefined;
   const stderrLogPath = shouldStoreLogs && request.logsDir
-    ? path.join(request.logsDir, `${request.phaseId}.stderr.log`)
+    ? path.join(request.logsDir, `${logStem}.stderr.log`)
     : undefined;
 
   if (request.logsDir && shouldStoreLogs) {
@@ -61,6 +62,7 @@ export async function runProviderPhase(
       executable: provider.executable,
       args,
       phaseId: providerRequest.phaseId,
+      phaseTitle: providerRequest.phaseTitle,
       processGroup: useProcessGroup,
       startedAt: new Date(startedAt).toISOString(),
       timeoutSeconds: providerRequest.timeoutSeconds,
@@ -484,6 +486,23 @@ function appendBounded(current: string, addition: string): string {
 
 function truncate(value: string): string {
   return value.length <= MAX_ERROR_TEXT ? value : `${value.slice(0, MAX_ERROR_TEXT)}\n... truncated ...`;
+}
+
+function providerLogStem(phaseId: string, phaseTitle: string): string {
+  const titleSlug = slugify(phaseTitle);
+  if (!titleSlug || titleSlug === phaseId) {
+    return phaseId;
+  }
+  return `${phaseId}.${titleSlug}`;
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
 }
 
 export function extractProviderUsageTelemetry(stdoutText: string, stderrText: string): ProviderUsageTelemetry | undefined {

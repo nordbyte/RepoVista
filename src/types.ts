@@ -870,6 +870,7 @@ export interface ProviderRunDiagnostics {
   executable: string;
   args: string[];
   phaseId: string;
+  phaseTitle?: string;
   pid?: number;
   processGroup?: boolean;
   startedAt: string;

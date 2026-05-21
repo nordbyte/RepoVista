@@ -46,7 +46,7 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `runChecks` | `true` |
 | `strictReports` | `true` |
 | `repairReports` | `true` |
-| `repairAttempts` | `1` |
+| `repairAttempts` | `2` |
 | `incremental` | `true` |
 | `exportFormats` | `sarif`, `html`, `jsonl` |
 | `fastMode`, `deepReview`, `snapshot`, `json`, `keepLogs`, `ci`, `failOnCritical`, `failOnDrift`, `failOnWeakEvidence` | `false` |
