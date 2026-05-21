@@ -911,6 +911,7 @@ You may edit files in this generated worktree only. Keep the fix minimal and lim
 If this command contains one finding, fix only that finding. Do not intentionally fix adjacent findings from the same report; mention them in the summary instead of changing unrelated files.
 Prefer the listed affected paths, files named in minimumFixScope, the smallest helper files needed by those paths, and focused regression tests. Avoid broad drive-by refactors, unrelated docs, generated output, or dependency lockfile changes.
 Do not edit out-of-scope production files just to extract or deduplicate helpers; create a small scoped helper instead and leave unrelated routes unchanged.
+Treat bundler, dev-server, package, lockfile, CI, and TypeScript config changes as out of scope unless one of those files is explicitly listed in the finding or minimumFixScope.
 Do not push, publish, create issues, create pull requests, or create releases. RepoVista will handle GitHub publishing after your patch.
 After editing, summarize the change and mention any validation you ran. RepoVista may run the expected validation commands after your patch; do not run dependency install/update commands if they modify lockfiles or generated output.
 

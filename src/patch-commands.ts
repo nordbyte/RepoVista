@@ -310,6 +310,7 @@ function buildFixPrompt(findings: StructuredFinding[], validationCommands: strin
 
 You may edit files, but keep the fix minimal and limited to the finding evidence.
 Do not edit out-of-scope production files just to extract or deduplicate helpers; create a small scoped helper instead and leave unrelated routes unchanged.
+Treat bundler, dev-server, package, lockfile, CI, and TypeScript config changes as out of scope unless one of those files is explicitly listed in the finding or minimumFixScope.
 Do not commit, push, publish, or create releases.
 After editing, summarize the change and mention any validation you ran.
 
