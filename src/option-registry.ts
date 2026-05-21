@@ -92,6 +92,8 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("issueUpdateExisting", undefined, flag("update-existing", "Update an existing matching GitHub issue instead of creating a duplicate")),
   entry("issueSync", undefined, flag("sync-issues", "Create, update, and persist GitHub issue links for selected findings")),
   entry("issueReopen", undefined, flag("reopen-issues", "Reopen linked GitHub issues when findings reappear as open")),
+  entry("publishTarget", undefined, value("as", "Publish selected findings as issue or pr")),
+  entry("publishFork", undefined, flag("fork", "Force fork-based pull request publishing for GitHub source runs")),
   entry("ownerRules", [], value("owner-rule", "Finding owner rule as path-glob=owner; repeatable")),
   entry("labelRules", [], value("label-rule", "Finding label rule as path-glob=label; repeatable")),
   entry("slaDays", undefined, value("sla-days", "Default finding SLA in days from first seen or creation time")),

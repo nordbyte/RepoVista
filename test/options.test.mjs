@@ -265,9 +265,18 @@ test("new operational commands and options are recognized", () => {
   assert.equal(openPr.options.patchBranch, "repovista/fix");
   assert.equal(openPr.options.patchTitle, "Fix");
 
+  const publish = parseCliArgs(["publish", "fnd_123", "--run", "2026-run", "--as", "pr", "--fork", "--dry-run"]);
+  assert.equal(publish.action, "publish");
+  assert.equal(publish.options.findingId, "fnd_123");
+  assert.equal(publish.options.findingRunId, "2026-run");
+  assert.equal(publish.options.publishTarget, "pr");
+  assert.equal(publish.options.publishFork, true);
+  assert.equal(publish.options.dryRun, true);
+
   assert.equal(parseCliArgs(["findings-ui"]).action, "findings-ui");
   assert.equal(parseCliArgs(["reports"]).action, "reports");
   assert.throws(() => parseCliArgs(["reports-ui"]), /Unknown command/);
+  assert.throws(() => parseCliArgs(["publish", "fnd_123", "--as", "comment"]), /--as/);
 });
 
 test("audit profiles, workspaces, issue metadata, and incremental mode parse", () => {

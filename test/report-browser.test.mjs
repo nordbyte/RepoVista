@@ -147,7 +147,29 @@ test("report browser lists report runs and renders sections", async () => {
     }, { columns: 140, rows: 50, color: false });
     assert.match(findingsFrame, /Fixture finding/);
     assert.match(findingsFrame, /sort severity/);
-    assert.match(findingsFrame, /1-5 triage/);
+    assert.match(findingsFrame, /i issue/);
+    assert.match(findingsFrame, /p PR/);
+
+    const publishFrame = renderReportsMenuFrame(runs, {
+      screen: "confirm-publish",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      publishTarget: "issue",
+      markedFindingIds: new Set(["fnd_test"])
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(publishFrame, /Publish 1 finding\(s\) as issue to nordbyte\/RepoVista/);
+    assert.match(publishFrame, /HIGH \| fnd_test \| Fixture finding/);
+
+    const publishOutputFrame = renderReportsMenuFrame(runs, {
+      screen: "publish-output",
+      runCursor: 0,
+      sectionCursor: findingsIndex,
+      scroll: 0,
+      publishOutput: "RepoVista publish dry run\n\nTitle: Fixture finding"
+    }, { columns: 140, rows: 50, color: false });
+    assert.match(publishOutputFrame, /Publish Output/);
+    assert.match(publishOutputFrame, /Title: Fixture finding/);
 
     const findingDetailFrame = renderReportsMenuFrame(runs, {
       screen: "finding-detail",

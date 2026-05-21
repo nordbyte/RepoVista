@@ -72,3 +72,7 @@ RepoVista masks sensitive values in errors, logs, provider failure output, metad
 ```sh
 repovista audit --sandbox read-only --run-checks --strict-reports
 ```
+
+## GitHub Publishing
+
+`repovista publish` is separate from audit execution and only works for reports created with `--github-repo`. Issue publishing uses `gh issue` against the recorded source repository. Pull request publishing is more powerful: it creates a generated worktree, lets the selected provider edit that worktree, commits the resulting patch, pushes a branch or fork, and opens a PR. Use `--dry-run` first when reviewing what will be posted.

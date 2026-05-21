@@ -88,6 +88,7 @@ Important types:
 | `renderRunReview(review)` | Render run review text. |
 | `runReviewCommand(options)` | Execute review command. |
 | `runPrCommentCommand(options)` | Execute PR comment command. |
+| `runPublishCommand(options, projectRoot?, dependencies?)` | Publish selected findings from a GitHub-source run as issues or pull requests. |
 
 Important types:
 
@@ -96,6 +97,7 @@ Important types:
 - `PromptManifestPhase`
 - `StructuredPhaseReport`
 - `StructuredRoadmapProposal`
+- `PublishTarget`
 
 ## Findings
 

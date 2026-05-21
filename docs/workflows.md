@@ -18,7 +18,7 @@ repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista triage --all --status uncertain --note "needs review"
 ```
 
-`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories newest-first by creation time, opens a selected run, and lets you navigate the full combined report, generated sections, report health, findings, evidence previews, grouped compare, global search, bookmarks, and current-view exports. Markdown headings, bold spans, inline code, links, blockquotes, lists, code blocks, search hits, and aligned Markdown tables are rendered in color-capable terminals. Space marks runs for deletion, and `d` opens a confirmation screen before RepoVista removes the marked run directories.
+`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories newest-first by creation time, opens a selected run, and lets you navigate the full combined report, generated sections, report health, findings, evidence previews, grouped compare, global search, bookmarks, and current-view exports. Markdown headings, bold spans, inline code, links, blockquotes, lists, code blocks, search hits, and aligned Markdown tables are rendered in color-capable terminals. In finding views, Space marks findings, `i` prepares GitHub issues, and `p` prepares pull requests for reports created with `--github-repo`. In the run list, Space marks runs for deletion, and `d` opens a confirmation screen before RepoVista removes the marked run directories.
 
 Supported statuses:
 
@@ -71,6 +71,23 @@ repovista issue fnd_abc123def456 --update-existing
 ```
 
 Issues are deduplicated by finding id. `--update-existing` adds fresh context to an existing issue instead of creating a duplicate.
+
+## Publishing GitHub-Source Findings
+
+Reports created with `--github-repo` can publish selected findings back to that source repository. Publishing is explicit and uses the GitHub CLI (`gh`); audits remain read-only.
+
+```sh
+repovista publish fnd_abc123def456 --run 2026-05-21T10-00-00-000Z --as issue --dry-run
+repovista publish fnd_abc123def456 --run 2026-05-21T10-00-00-000Z --as issue --label repovista
+repovista publish fnd_abc123def456 --run 2026-05-21T10-00-00-000Z --as pr --dry-run
+repovista publish fnd_abc123def456 --run 2026-05-21T10-00-00-000Z --as pr --fork
+```
+
+Issue publishing targets the repository recorded in `meta.source.repository`, not the current local checkout. Issue bodies include the analyzed commit, RepoVista run id, finding metadata, and GitHub permalink evidence refs such as `blob/<commit>/<path>#L10-L20`. Existing issues are detected by a hidden `repovista:finding:<id>` marker; use `--update-existing`, `--sync-issues`, and `--reopen-issues` to control updates.
+
+Pull request publishing creates a separate generated worktree under `.repovista/publish/<run-id>/<patch-id>/worktree`, asks the configured provider to patch the selected finding(s), applies the patch scope gate, records a patch attempt under `.repovista/patches/`, commits the patch, and opens a PR against the source repository. RepoVista first tries to push a branch to the source remote; if that fails, or if `--fork` is set, it uses `gh repo fork` and opens the PR from the fork.
+
+Inside `repovista reports`, open a GitHub-source run, enter the Findings view, mark findings with Space, then press `i` for issues or `p` for PRs. The confirmation screen shows the selected findings and supports `d` for a dry-run preview before Enter publishes.
 
 ## Fix Workflow
 

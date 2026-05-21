@@ -7,6 +7,7 @@ export type ReportExportFormat = "sarif" | "html" | "jsonl" | "github";
 export type CompareFormat = "markdown" | "json" | "html";
 export type AuditProfileId = "quick" | "security" | "pr-review" | "release-readiness" | "architecture";
 export type ReviewMode = "default" | "deslopify" | "security" | "test-gaps";
+export type PublishTarget = "issue" | "pr";
 
 export type CliAction =
   | "audit"
@@ -39,6 +40,7 @@ export type CliAction =
   | "triage"
   | "revalidate"
   | "issue"
+  | "publish"
   | "help"
   | "version";
 
@@ -123,6 +125,8 @@ export interface AuditOptions {
   issueUpdateExisting?: boolean;
   issueSync?: boolean;
   issueReopen?: boolean;
+  publishTarget?: PublishTarget;
+  publishFork?: boolean;
   ownerRules?: string[];
   labelRules?: string[];
   slaDays?: number;
@@ -283,6 +287,7 @@ export interface StructuredFinding {
   labels?: string[];
   sla?: FindingSla;
   issue?: FindingIssueLink;
+  pullRequest?: FindingPullRequestLink;
   parentId?: string;
   parentTitle?: string;
   childFindings?: StructuredFinding[];
@@ -350,7 +355,7 @@ export interface FindingEvidenceValidationReference {
 
 export interface FindingHistoryEntry {
   runId?: string;
-  kind: "audit" | "triage" | "revalidate" | "provider-revalidate" | "issue-sync";
+  kind: "audit" | "triage" | "revalidate" | "provider-revalidate" | "issue-sync" | "pr-opened";
   status?: FindingStatus;
   note?: string;
   reasoning?: string;
@@ -373,6 +378,17 @@ export interface FindingIssueLink {
   syncedAt: string;
   labels?: string[];
   assignees?: string[];
+}
+
+export interface FindingPullRequestLink {
+  provider: "github";
+  number?: number;
+  url?: string;
+  title?: string;
+  state?: "open" | "closed" | "merged" | "unknown";
+  syncedAt: string;
+  branch?: string;
+  patchAttemptId?: string;
 }
 
 export interface AuditMeta {

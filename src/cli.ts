@@ -23,6 +23,7 @@ import { runFindingsMenu } from "./finding-menu.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand, runRollbackPatchCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
+import { runPublishCommand } from "./publish.js";
 import { runRepairRunCommand } from "./repair-run.js";
 import { runReportsMenu } from "./report-browser.js";
 import { runPrCommentCommand, runReviewCommand } from "./report-review.js";
@@ -174,6 +175,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "issue") {
       process.stdout.write(await runCreateIssueCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "publish") {
+      process.stdout.write(await runPublishCommand(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "fix") {

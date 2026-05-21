@@ -26,6 +26,7 @@ repovista show <finding-id>
 repovista triage <finding-id|--all> --status <status> [--note <text>]
 repovista revalidate <finding-id|--all> [--provider-revalidate]
 repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues]
+repovista publish <finding-id|--all> --run <run-id|dir> --as issue|pr [--dry-run] [--fork]
 repovista fix <finding-id[,finding-id...]> [--dry-run] [--check <command>] [--no-isolate]
 repovista patches [patch-id] [--json] [--dry-run]
 repovista rollback <patch-id> [--dry-run]
@@ -65,6 +66,7 @@ repovista version
 | `triage` | Update one finding or all findings. |
 | `revalidate` | Re-check finding evidence against the current checkout. |
 | `issue` | Create, update, or sync GitHub issues with `gh`. |
+| `publish` | Publish selected findings from a `--github-repo` run as GitHub issues or pull requests. |
 | `fix` | Create an isolated patch attempt for one or more findings. |
 | `patches` | List, show, or preview patch attempts. |
 | `rollback` | Reverse a recorded patch diff with `git apply -R`. |
@@ -146,6 +148,8 @@ Phase ids are `architecture`, `code-quality`, `risk-and-bug`, `feature-roadmap`,
 | `--update-existing` | Update a matching GitHub issue instead of creating a duplicate. |
 | `--sync-issues` | Sync selected findings to GitHub issues and persist issue links. |
 | `--reopen-issues` | Reopen linked GitHub issues when open findings reappear. |
+| `--as <issue\|pr>` | Publish target for `repovista publish`. |
+| `--fork` | Force fork-based pull request publishing for `repovista publish --as pr`. |
 | `--owner-rule <glob=owner>` | Assign a finding owner when an affected path matches the glob, repeatable. |
 | `--label-rule <glob=label>` | Add a finding label when an affected path matches the glob, repeatable. |
 | `--sla-days <n>` | Store a finding SLA due date this many days after first detection. |

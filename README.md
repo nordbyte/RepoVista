@@ -61,6 +61,7 @@ repovista audit --ci --json --fail-on-critical
 repovista compare .repovista/old-run .repovista/new-run
 repovista findings
 repovista next
+repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --dry-run
 repovista fix fnd_abc123def456 --dry-run
 repovista ci init --template security --dry-run
 ```
@@ -83,4 +84,4 @@ Full documentation lives in [docs/](docs/README.md):
 
 ## Notes
 
-RepoVista is an audit and review assistant. It is not a replacement for tests, manual review, SAST, dependency scanning, or a security assessment. By default, provider runs use read-only intent. The opt-in `repovista fix` workflow can write changes, records patch attempts, and never commits or pushes by itself.
+RepoVista is an audit and review assistant. It is not a replacement for tests, manual review, SAST, dependency scanning, or a security assessment. By default, provider runs use read-only intent. The opt-in `repovista fix` workflow can write changes, records patch attempts, and never commits or pushes by itself. The separate `repovista publish --as pr` workflow is explicit GitHub publishing for `--github-repo` reports and can create commits, push a branch or fork, and open a PR after confirmation.

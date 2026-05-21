@@ -3,6 +3,7 @@ import { lstat, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { runCompareCommand } from "./compare.js";
+import { runPublishCommand } from "./publish.js";
 import { resolveProviderDefaultModel } from "./provider-models.js";
 import { validateReportRoot } from "./reports.js";
 import {
@@ -14,7 +15,7 @@ import {
   wrappedLineCount,
   type TuiKey
 } from "./tui.js";
-import type { AuditMeta, AuditOptions, FindingEvidenceReference, FindingStatus, StructuredFinding } from "./types.js";
+import type { AuditMeta, AuditOptions, FindingEvidenceReference, FindingStatus, PublishTarget, StructuredFinding } from "./types.js";
 
 export type ReportDefaultModelResolver = (provider: string, run: {
   runId: string;
@@ -83,6 +84,8 @@ export type ReportBrowserScreen =
   | "bookmarks"
   | "export"
   | "help"
+  | "confirm-publish"
+  | "publish-output"
   | "confirm-delete";
 export type ReportBrowserInitialScreen = "runs" | "sections" | "viewer";
 
@@ -109,6 +112,9 @@ export interface ReportBrowserState {
   layout?: ReportLayout;
   bookmarkedFindings?: Set<string>;
   bookmarkedSections?: Set<string>;
+  markedFindingIds?: Set<string>;
+  publishTarget?: PublishTarget;
+  publishOutput?: string;
   severityFilter?: ReportSeverityFilter;
   statusFilter?: ReportStatusFilter;
 }
@@ -159,7 +165,7 @@ export async function runReportsMenu(
       color: shouldUseColor(output)
     }),
     onKey: async (key, controls) => {
-      await handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100, shouldUseColor(output));
+      await handleReportBrowserKey(runs, state, key, output.rows ?? 30, output.columns ?? 100, shouldUseColor(output), options, projectRoot);
       if ((key.ctrl && key.name === "c") || (!state.searchMode && key.name === "q")) {
         controls.finish();
       }
@@ -231,6 +237,36 @@ export function renderReportsMenuFrame(
   const run = runs[state.runCursor];
   const section = run?.sections[state.sectionCursor];
   const markedRuns = selectedMarkedRuns(runs, state);
+  if (state.screen === "confirm-publish" && run) {
+    const findings = selectedFindingsForPublish(run, state);
+    return renderTuiListFrame({
+      title: "RepoVista Reports",
+      help: "Enter publishes | d dry-run preview | Esc cancels | q exits",
+      sectionTitle: `Publish ${findings.length} finding(s) as ${state.publishTarget ?? "issue"} to ${run.source?.repository ?? "n/a"}`,
+      items: findings.map((finding) => `${finding.severity.toUpperCase()} | ${finding.id} | ${finding.title}`),
+      cursor: -1,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      emptyMessage: "No findings selected. Mark findings with Space or select one finding first.",
+      footer: `${contextFooter(run, state)} | ${state.publishTarget === "pr" ? "PR creates a patch attempt and branch" : "Issue creates or updates GitHub issues"}`
+    });
+  }
+
+  if (state.screen === "publish-output") {
+    return renderTuiTextFrame({
+      title: "RepoVista Publish",
+      help: "Esc returns | Enter returns | q exits",
+      sectionTitle: "Publish Output",
+      lines: (state.publishOutput ?? "No publish output.").split(/\r?\n/),
+      scroll: state.scroll,
+      columns: options.columns,
+      rows: options.rows,
+      color: options.color,
+      footer: contextFooter(run, state)
+    });
+  }
+
   if (state.screen === "confirm-delete") {
     return renderTuiListFrame({
       title: "RepoVista Reports",
@@ -346,7 +382,7 @@ export function renderReportsMenuFrame(
     const findings = sortedFilteredFindings(run.findings, state);
     return renderTuiListFrame({
       title: "RepoVista Reports",
-      help: "Enter details | 1-5 triage | s sort | f severity | t status | e evidence | b bookmark | Esc returns",
+      help: "Enter details | Space mark | i issue | p PR | 1-5 triage | s/f/t | e evidence | b bookmark | Esc returns",
       sectionTitle: `${run.runId} findings`,
       items: findings.map((finding) => formatFindingListItem(run, finding, state)),
       cursor: state.findingCursor ?? 0,
@@ -440,7 +476,16 @@ export function renderReportsMenuFrame(
   });
 }
 
-async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBrowserState, key: TuiKey, rows: number, columns: number, color: boolean): Promise<void> {
+async function handleReportBrowserKey(
+  runs: ReportRunSummary[],
+  state: ReportBrowserState,
+  key: TuiKey,
+  rows: number,
+  columns: number,
+  color: boolean,
+  options: AuditOptions,
+  projectRoot: string
+): Promise<void> {
   if ((key.ctrl && key.name === "c") || (!state.searchMode && key.name === "q")) {
     return;
   }
@@ -461,13 +506,13 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
     state.globalSearchCursor = 0;
     return;
   }
-  if (!state.searchMode && key.name === "x" && state.screen !== "runs" && state.screen !== "confirm-delete") {
+  if (!state.searchMode && key.name === "x" && state.screen !== "runs" && state.screen !== "confirm-delete" && state.screen !== "confirm-publish" && state.screen !== "publish-output") {
     state.previousScreen = state.screen;
     state.screen = "export";
     state.exportCursor = 0;
     return;
   }
-  if (!state.searchMode && key.name === "g" && state.screen !== "confirm-delete") {
+  if (!state.searchMode && key.name === "g" && state.screen !== "confirm-delete" && state.screen !== "confirm-publish" && state.screen !== "publish-output") {
     state.previousScreen = state.screen;
     state.screen = "global-search";
     state.searchScope = state.searchScope === "all" ? "all" : "run";
@@ -492,6 +537,57 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
       } catch (error) {
         state.notice = `Delete failed: ${error instanceof Error ? error.message : String(error)}`;
       }
+    }
+    return;
+  }
+
+  if (state.screen === "confirm-publish") {
+    const run = runs[state.runCursor];
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
+      state.screen = state.previousScreen ?? "findings-list";
+      state.previousScreen = undefined;
+      state.notice = "Publish cancelled.";
+    } else if ((key.name === "return" || key.name === "enter" || key.name === "d") && run) {
+      const dryRun = key.name === "d";
+      const findings = selectedFindingsForPublish(run, state);
+      if (!findings.length) {
+        state.notice = "No findings selected for publishing.";
+        return;
+      }
+      try {
+        const output = await runPublishCommand({
+          ...options,
+          findingRunId: run.runDir,
+          findingId: findings.map((finding) => finding.id).join(","),
+          publishTarget: state.publishTarget ?? "issue",
+          dryRun
+        }, projectRoot);
+        if (!dryRun) {
+          state.markedFindingIds?.clear();
+        }
+        state.publishOutput = output;
+        state.notice = dryRun ? "Dry-run preview generated." : firstLine(output);
+        state.screen = "publish-output";
+        state.scroll = 0;
+        return;
+      } catch (error) {
+        state.notice = `Publish failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      state.screen = state.previousScreen ?? "findings-list";
+      state.previousScreen = undefined;
+    }
+    return;
+  }
+
+  if (state.screen === "publish-output") {
+    if (key.name === "escape" || key.name === "left" || key.name === "backspace" || key.name === "return" || key.name === "enter") {
+      state.screen = state.previousScreen ?? "findings-list";
+      state.previousScreen = undefined;
+      state.scroll = 0;
+    } else if (key.name === "up") {
+      state.scroll = Math.max(0, state.scroll - 1);
+    } else if (key.name === "down") {
+      state.scroll += 1;
     }
     return;
   }
@@ -710,6 +806,10 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
     } else if (key.name === "t") {
       state.statusFilter = nextStatusFilter(state.statusFilter ?? "all");
       state.findingCursor = 0;
+    } else if (key.name === "space" && findings.length) {
+      toggleMarkedFinding(findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
+    } else if ((key.name === "i" || key.name === "p") && findings.length) {
+      beginPublish(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state, key.name === "p" ? "pr" : "issue");
     } else if (isTriageKey(key) && findings.length) {
       await triageFinding(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], triageStatusForKey(key));
       state.notice = `Status set to ${triageStatusForKey(key)}.`;
@@ -744,6 +844,10 @@ async function handleReportBrowserKey(runs: ReportRunSummary[], state: ReportBro
       state.evidenceCursor = 0;
     } else if (key.name === "b" && finding) {
       toggleFindingBookmark(run, finding, state);
+    } else if (key.name === "space" && finding) {
+      toggleMarkedFinding(finding, state);
+    } else if ((key.name === "i" || key.name === "p") && finding) {
+      beginPublish(run, finding, state, key.name === "p" ? "pr" : "issue");
     } else if (key.name === "o" && finding) {
       state.notice = openFindingEvidenceInEditor(run, finding, state);
     } else if (isTriageKey(key) && finding) {
@@ -1383,18 +1487,19 @@ function selectFinding(run: ReportRunSummary, state: ReportBrowserState, finding
 
 function formatFindingListItem(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
   const bookmarked = findingBookmarks(state).has(findingBookmarkKey(run, finding)) ? "*" : " ";
+  const marked = markedFindingIds(state).has(finding.id) ? "x" : " ";
   const diff = run.compareGroups ? `${findingDiffLabel(run, finding)} | ` : "";
   const owner = finding.owner ?? "owner n/a";
   const confidence = finding.confidence ? ` | confidence ${finding.confidence}` : "";
   const sla = finding.sla?.dueAt ? ` | SLA ${finding.sla.dueAt}${finding.sla.overdue ? " overdue" : ""}` : "";
   const pathLabel = finding.paths[0] ?? "path n/a";
   if ((state.layout ?? "normal") === "compact") {
-    return `${bookmarked} ${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${finding.title}`;
+    return `[${marked}]${bookmarked} ${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${finding.title}`;
   }
   if (state.layout === "detailed") {
-    return `${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner}${confidence}${sla} | ${pathLabel} | ${finding.title}`;
+    return `[${marked}]${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner}${confidence}${sla} | ${pathLabel} | ${finding.title}`;
   }
-  return `${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner} | ${pathLabel} | ${finding.title}`;
+  return `[${marked}]${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner} | ${pathLabel} | ${finding.title}`;
 }
 
 function renderFindingDetail(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
@@ -1454,6 +1559,10 @@ function renderFindingDetail(run: ReportRunSummary, finding: StructuredFinding, 
       "## Issue",
       "",
       finding.issue?.url ?? "n/a",
+      "",
+      "## Pull Request",
+      "",
+      finding.pullRequest?.url ?? "n/a",
       "",
       "## History",
       "",
@@ -1727,6 +1836,41 @@ function toggleFindingBookmark(run: ReportRunSummary, finding: StructuredFinding
   }
 }
 
+function beginPublish(run: ReportRunSummary, fallbackFinding: StructuredFinding, state: ReportBrowserState, target: PublishTarget): void {
+  if (!run.source) {
+    state.notice = "Publishing requires a report generated with --github-repo.";
+    return;
+  }
+  if (!markedFindingIds(state).size) {
+    markedFindingIds(state).add(fallbackFinding.id);
+  }
+  state.previousScreen = state.screen;
+  state.publishTarget = target;
+  state.screen = "confirm-publish";
+  state.notice = undefined;
+}
+
+function selectedFindingsForPublish(run: ReportRunSummary, state: ReportBrowserState): StructuredFinding[] {
+  const marked = markedFindingIds(state);
+  return run.findings.filter((finding) => marked.has(finding.id));
+}
+
+function toggleMarkedFinding(finding: StructuredFinding, state: ReportBrowserState): void {
+  const marked = markedFindingIds(state);
+  if (marked.has(finding.id)) {
+    marked.delete(finding.id);
+    state.notice = `Unmarked finding: ${finding.id}.`;
+  } else {
+    marked.add(finding.id);
+    state.notice = `Marked finding: ${finding.id}.`;
+  }
+}
+
+function markedFindingIds(state: ReportBrowserState): Set<string> {
+  state.markedFindingIds ??= new Set<string>();
+  return state.markedFindingIds;
+}
+
 function removeBookmark(item: BookmarkItem, state: ReportBrowserState): void {
   if (item.kind === "section") {
     sectionBookmarks(state).delete(item.key);
@@ -1734,6 +1878,10 @@ function removeBookmark(item: BookmarkItem, state: ReportBrowserState): void {
     findingBookmarks(state).delete(item.key);
   }
   state.notice = "Bookmark removed.";
+}
+
+function firstLine(value: string): string {
+  return value.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
 }
 
 function openBookmark(item: BookmarkItem, runs: ReportRunSummary[], state: ReportBrowserState): void {
@@ -1975,6 +2123,9 @@ function helpLines(screen: ReportBrowserScreen): string[] {
     "## Findings",
     "",
     "- Enter: finding detail",
+    "- Space: mark finding for GitHub publishing",
+    "- `i`: publish selected GitHub-source findings as issues",
+    "- `p`: publish selected GitHub-source findings as pull requests",
     "- `s`: cycle finding sort",
     "- `1`: open, `2`: uncertain, `3`: fixed, `4`: false-positive, `5`: wont-fix",
     "- `e`: evidence preview",

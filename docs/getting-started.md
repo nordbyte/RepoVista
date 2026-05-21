@@ -107,6 +107,7 @@ repovista next
 repovista show fnd_abc123def456
 repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista baseline add fnd_abc123def456 --note "accepted risk"
+repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --dry-run
 repovista fix fnd_abc123def456 --dry-run
 ```
 

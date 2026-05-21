@@ -2,7 +2,7 @@ import { CliUsageError } from "./errors.js";
 import { BOOLEAN_OPTION_NAMES, renderCliHelp, VALUE_OPTION_NAMES } from "./cli-schema.js";
 import { createDefaultAuditOptions } from "./option-registry.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, FindingStatus, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, FindingStatus, ParallelMode, PublishTarget, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = createDefaultAuditOptions();
 
@@ -189,6 +189,9 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
         break;
       case "reopen-issues":
         options.issueReopen = true;
+        break;
+      case "fork":
+        options.publishFork = true;
         break;
       case "pr":
         options.prMode = true;
@@ -407,6 +410,16 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "issue", options };
   }
 
+  if (command === "publish") {
+    if (positionals.length > 2) {
+      throw new CliUsageError("Command publish accepts at most one finding id.");
+    }
+    if (positionals[1]) {
+      options.findingId = requireNonEmpty("finding", positionals[1]);
+    }
+    return { action: "publish", options };
+  }
+
   if (command === "fix") {
     if (positionals.length > 2) {
       throw new CliUsageError("Command fix accepts at most one finding id.");
@@ -606,6 +619,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "assignee":
       options.issueAssignees = [...(options.issueAssignees ?? []), requireNonEmpty(name, value)];
       break;
+    case "as":
+      options.publishTarget = validatePublishTarget(value);
+      break;
     case "patch":
       options.patchId = requireNonEmpty(name, value);
       break;
@@ -645,6 +661,7 @@ function isCommand(value: string): boolean {
     value === "patches" ||
     value === "rollback" ||
     value === "open-pr" ||
+    value === "publish" ||
     value === "issue";
 }
 
@@ -673,7 +690,7 @@ function maxPositionalsFor(positionals: string[]): number {
   if (command === "baseline" && (positionals[1] === "add" || positionals[1] === "remove")) {
     return 3;
   }
-  if (command === "fix" || command === "patches" || command === "rollback" || command === "open-pr") {
+  if (command === "fix" || command === "patches" || command === "rollback" || command === "open-pr" || command === "publish") {
     return 2;
   }
   if (command === "ci") {
@@ -823,6 +840,14 @@ function validateFindingStatus(value: string): FindingStatus {
     return normalized;
   }
   throw new CliUsageError("Option --status must be open, fixed, false-positive, wont-fix, or uncertain.");
+}
+
+function validatePublishTarget(value: string): PublishTarget {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "issue" || normalized === "pr") {
+    return normalized;
+  }
+  throw new CliUsageError("Option --as must be issue or pr.");
 }
 
 export function renderHelp(): string {

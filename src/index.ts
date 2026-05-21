@@ -21,6 +21,7 @@ export { writeFindingExports } from "./exporters.js";
 export { runDoctorCommand } from "./doctor.js";
 export { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport, hasStructuredPhaseSchema } from "./phase-schema.js";
 export { runProvidersCommand } from "./provider-commands.js";
+export { runPublishCommand } from "./publish.js";
 export { AUDIT_PROFILES, applyAuditProfile, runProfilesCommand } from "./profiles.js";
 export { checkProjectMapFreshness, createProjectMap, createParallelExecutionMeta, initializeProjectMap, loadProjectMap, projectMapPath, renderProjectPlan } from "./project-map.js";
 export { scanProject } from "./project-scan.js";
@@ -103,6 +104,7 @@ export type {
   PhaseReportStatus,
   PromptManifest,
   PromptManifestPhase,
+  PublishTarget,
   ReportExportFormat,
   ReviewMode,
   ProjectArea,
