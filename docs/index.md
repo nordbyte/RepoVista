@@ -2,6 +2,8 @@
 
 RepoVista is a command line tool for structured, read-only AI repository audits. It collects local project evidence, runs specialized analysis phases through provider CLIs such as Codex CLI and Claude Code CLI, and writes Markdown plus machine-readable reports to `.repovista/<run-id>`.
 
+<img class="repovista-home-image" src="/repovista-hero.png" alt="RepoVista report overview">
+
 > TL;DR - `npm install -g repovista`, authenticate one provider CLI, then run `repovista` from a repository root.
 
 ## Where to start

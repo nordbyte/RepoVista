@@ -19,7 +19,7 @@ export default defineConfig({
     ["meta", { property: "og:url", content: "https://repovista.com/" }]
   ],
   themeConfig: {
-    logo: "/repovista.png",
+    logo: "/repovista-logo.png",
     siteTitle: "RepoVista docs",
     nav: [
       { text: "Home", link: "/" },

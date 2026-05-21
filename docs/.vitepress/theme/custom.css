@@ -33,3 +33,11 @@
 .vp-doc .custom-block.tip {
   border-color: var(--vp-c-brand-2);
 }
+
+.repovista-home-image {
+  display: block;
+  width: min(100%, 760px);
+  margin: 24px 0 28px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+}
