@@ -429,7 +429,7 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     const cloneCall = calls.find((call) => call.command === "git" && call.args[0] === "clone");
     assert.ok(cloneCall);
     assert.equal(cloneCall.args[1], "--no-hardlinks");
-    assert.match(cloneCall.args[2], /\.repovista\/sources\/github\/creativeprofit22\/contract-and-flow/);
+    assert.match(cloneCall.args[2].replaceAll(path.sep, "/"), /\.repovista\/sources\/github\/creativeprofit22\/contract-and-flow/);
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "remote set-url origin https://github.com/creativeprofit22/contract-and-flow.git"));
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.name RepoVista Bot"));
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.email 12345+tester@users.noreply.github.com"));

@@ -1,6 +1,6 @@
 {
   "name": "repovista",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Read-only AI-powered repository audit reports from local provider CLIs.",
   "type": "module",
   "bin": {
