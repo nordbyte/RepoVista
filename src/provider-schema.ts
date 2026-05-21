@@ -275,10 +275,10 @@ Additional structured-output rule:
 - The JSON must match RepoVista's provider-native risk-report schema.
 - Put all concrete risk findings in the "findings" array.
 - If no findings are supported by concrete evidence, return "findings": [] and explain the empty result in severitySummary and executiveSummary.
-- Every finding must have at least one affectedPaths item and at least one evidenceReferences item with path, startLine, and endLine.
-- Do not keep a finding if you cannot provide a concrete file and line range for it.
-- Every evidenceReferences item with a quote must use text copied exactly from the referenced path and startLine/endLine range.
-- Do not paraphrase, normalize, or invent quote text; if an exact substring is uncertain, omit quote and use the safest concrete line range.
+- Every finding must have at least one affectedPaths item and at least one evidenceReferences item with path, startLine, endLine, and a non-empty quote.
+- Do not keep a finding if you cannot provide a concrete file, line range, and exact quote for it.
+- Every evidenceReferences quote must use text copied exactly from the referenced path and startLine/endLine range.
+- Do not paraphrase, normalize, invent, or omit quote text for kept risk findings; if an exact substring is uncertain, drop that evidence reference or the unsupported finding.
 - Prefer short quotes that uniquely identify the evidence line and can be verified as a direct substring.
 `;
   }

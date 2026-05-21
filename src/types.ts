@@ -763,6 +763,8 @@ export interface PromptManifestPhase {
   approximateTokens: number;
   includedFiles: PromptManifestFile[];
   omittedFiles: PromptManifestFile[];
+  omittedFileCount?: number;
+  omittedFilesTruncated?: boolean;
 }
 
 export interface PromptManifest {

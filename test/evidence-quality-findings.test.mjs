@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import {
   collectEvidence,
+  addPromptManifestPhase,
+  createPromptManifest,
   extractFindings,
   extractFindingsWithSource,
   hasFailedChecks,
@@ -562,6 +564,97 @@ Fix src/schema.ts, src/index.ts and test/schema.test.ts.
     const validation = await validateFindingEvidence(root, first, new Set(["src"]));
     assert.equal(validation.passed, true);
     assert.equal(validation.references[0].quoteMatches, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence validation accepts exact provider-discovered quotes outside prompt manifest", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-evidence-provider-discovered-"));
+  try {
+    await mkdir(path.join(root, "extensions", "acpx", "src"), { recursive: true });
+    await writeFile(path.join(root, "extensions", "acpx", "src", "runtime.ts"), "export const runtime = true;\n", "utf8");
+    const finding = {
+      id: "fnd_provider_discovered",
+      source: "risk-and-bug",
+      title: "Provider discovered exact evidence",
+      severity: "medium",
+      category: "bug",
+      paths: ["extensions/acpx/src/runtime.ts"],
+      evidenceDetails: [
+        {
+          path: "extensions/acpx/src/runtime.ts",
+          startLine: 1,
+          endLine: 1,
+          quote: "export const runtime = true;"
+        }
+      ]
+    };
+
+    const validation = await validateFindingEvidence(root, finding, new Set(["README.md"]));
+    assert.equal(validation.passed, true);
+    assert.equal(validation.references[0].promptIncluded, false);
+    assert.equal(validation.references[0].source, "provider-discovered");
+    assert.equal(validation.references[0].quoteMatches, true);
+    assert.deepEqual(validation.warnings, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence validation still warns for vague provider-discovered paths outside prompt manifest", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-evidence-provider-vague-"));
+  try {
+    await mkdir(path.join(root, "extensions", "acpx", "src"), { recursive: true });
+    await writeFile(path.join(root, "extensions", "acpx", "src", "runtime.ts"), "export const runtime = true;\n", "utf8");
+    const finding = {
+      id: "fnd_provider_vague",
+      source: "risk-and-bug",
+      title: "Provider discovered vague evidence",
+      severity: "medium",
+      category: "bug",
+      paths: ["extensions/acpx/src/runtime.ts"],
+      evidenceReferences: ["extensions/acpx/src/runtime.ts"]
+    };
+
+    const validation = await validateFindingEvidence(root, finding, new Set(["README.md"]));
+    assert.equal(validation.passed, false);
+    assert.match(validation.warnings[0], /not part of the provider context manifest/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt manifest caps omitted file details for large repositories", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-prompt-manifest-large-"));
+  try {
+    const inventoryPath = path.join(root, "inventory.md");
+    await writeFile(inventoryPath, "# Inventory\n", "utf8");
+    const manifest = createPromptManifest("run", new Date("2026-05-21T00:00:00.000Z"), []);
+    const files = Array.from({ length: 900 }, (_, index) => ({
+      relativePath: `src/file-${String(index).padStart(4, "0")}.ts`,
+      size: 10,
+      hashAlgorithm: "sha256",
+      sha256: "a".repeat(64),
+      scopeReason: "fixture"
+    }));
+
+    await addPromptManifestPhase(manifest, {
+      phaseId: "risk-and-bug",
+      reportFile: "03-risk-and-bug-report.md",
+      prompt: "prompt",
+      inventoryPath,
+      previousReports: {},
+      projectFiles: files,
+      projectFileLimit: 100,
+      omittedProjectFileCount: 25
+    });
+
+    const phase = manifest.phases[0];
+    assert.equal(phase.includedFiles.filter((file) => file.role === "project-file").length, 100);
+    assert.equal(phase.omittedFiles.length, 250);
+    assert.equal(phase.omittedFileCount, 825);
+    assert.equal(phase.omittedFilesTruncated, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

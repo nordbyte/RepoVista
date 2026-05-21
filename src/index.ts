@@ -65,7 +65,7 @@ export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateC
 export { OPTION_REGISTRY, cliOptionDefinitions, createDefaultAuditOptions, menuItemIdsFromRegistry, settingDefinitions } from "./option-registry.js";
 export { runPreflight } from "./preflight.js";
 export { prepareRunDirectory, useExistingRunDirectory, validateReportRoot, writeMeta } from "./reports.js";
-export { allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
+export { addPromptManifestPhase, allowedEvidencePathsFromPromptManifest, createPromptManifest } from "./prompt-manifest.js";
 export { PROMPT_CONTEXT_VERSION } from "./prompts.js";
 export { QUALITY_GATES_VERSION, validateReportQuality } from "./quality-gates.js";
 export { createRunId } from "./run-id.js";

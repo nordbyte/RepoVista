@@ -11,6 +11,7 @@ import type {
 const CLIP_LIMIT = 18000;
 const PREVIOUS_REPORT_SUMMARY_LIMIT = 14000;
 const DEFAULT_PROJECT_FILE_LIMIT = 500;
+const MAX_OMITTED_FILE_ENTRIES = 250;
 
 export function createPromptManifest(
   runId: string,
@@ -89,7 +90,8 @@ export async function addPromptManifestPhase(
     });
   }
 
-  const omittedFiles = projectFiles.slice(projectFileLimit).map<PromptManifestFile>((file) => ({
+  const omittedProjectFiles = projectFiles.slice(projectFileLimit);
+  const omittedFiles = omittedProjectFiles.slice(0, MAX_OMITTED_FILE_ENTRIES).map<PromptManifestFile>((file) => ({
     path: file.relativePath,
     role: "project-file",
     bytes: file.size,
@@ -102,17 +104,8 @@ export async function addPromptManifestPhase(
       tokenBudgetEstimate: 0,
       skippedReason: "omitted from prompt manifest detail because the project file list limit was reached"
     }));
-  for (let index = 0; index < (input.omittedProjectFileCount ?? 0); index += 1) {
-    omittedFiles.push({
-      path: `<additional-omitted-file-${index + 1}>`,
-      role: "project-file",
-      bytes: 0,
-      includedBytes: 0,
-      truncated: true,
-      readable: false,
-      skippedReason: "ignored or truncated by repository scan settings"
-    });
-  }
+  const omittedFileCount = omittedProjectFiles.length + (input.omittedProjectFileCount ?? 0);
+  const omittedFilesTruncated = omittedFileCount > omittedFiles.length;
 
   const phase: PromptManifestPhase = {
     phaseId: input.phaseId,
@@ -120,7 +113,9 @@ export async function addPromptManifestPhase(
     promptBytes: Buffer.byteLength(input.prompt, "utf8"),
     approximateTokens: approximateTokens(input.prompt),
     includedFiles,
-    omittedFiles
+    omittedFiles,
+    omittedFileCount,
+    omittedFilesTruncated
   };
   manifest.phases.push(phase);
 }

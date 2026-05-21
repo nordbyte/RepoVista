@@ -332,8 +332,8 @@ test("risk report renderer separates findings with a blank line", () => {
 
 test("risk structured prompt requires exact evidence quotes", () => {
   const prompt = structuredPromptForPhase("risk-and-bug", "Base prompt");
-  assert.match(prompt, /Every evidenceReferences item with a quote must use text copied exactly/);
-  assert.match(prompt, /if an exact substring is uncertain, omit quote/);
+  assert.match(prompt, /Every finding must have at least one affectedPaths item and at least one evidenceReferences item with path, startLine, endLine, and a non-empty quote/);
+  assert.match(prompt, /if an exact substring is uncertain, drop that evidence reference or the unsupported finding/);
   assert.match(prompt, /direct substring/);
 });
 

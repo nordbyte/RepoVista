@@ -92,16 +92,8 @@ async function validateReference(
     };
   }
 
-  if (allowedPaths?.size && !isAllowedPath(normalizedPath, allowedPaths)) {
-    return {
-      path: normalizedPath,
-      exists: false,
-      insideRoot: false,
-      source: "provider-discovered",
-      promptIncluded: false,
-      warning: `Evidence path was not part of the provider context manifest: ${normalizedPath}`
-    };
-  }
+  const promptIncluded = allowedPaths?.size ? isAllowedPath(normalizedPath, allowedPaths) : undefined;
+  const source = promptIncluded ? "prompt-context" : "provider-discovered";
 
   const absolutePath = path.resolve(projectRoot, normalizedPath);
   const insideRoot = await resolvesInside(projectRoot, absolutePath);
@@ -110,8 +102,8 @@ async function validateReference(
       path: normalizedPath,
       exists: false,
       insideRoot: false,
-      source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
-      promptIncluded: allowedPaths?.size ? true : undefined,
+      source,
+      promptIncluded,
       warning: `Evidence path resolves outside the project root: ${normalizedPath}`
     };
   }
@@ -123,8 +115,8 @@ async function validateReference(
         path: normalizedPath,
         exists: true,
         insideRoot: true,
-        source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
-        promptIncluded: allowedPaths?.size ? true : undefined,
+        source,
+        promptIncluded,
         warning: `Evidence path is not a file: ${normalizedPath}`
       };
     }
@@ -133,20 +125,24 @@ async function validateReference(
       path: normalizedPath,
       exists: false,
       insideRoot: true,
-      source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
-      promptIncluded: allowedPaths?.size ? true : undefined,
+      source,
+      promptIncluded,
       warning: `Evidence path does not exist: ${normalizedPath}`
     };
   }
 
   const lineCheck = await validateLineAndQuote(absolutePath, normalizedPath, reference);
+  const hasConcreteLocation = lineCheck.quoteMatches === true || lineCheck.lineRangeValid === true;
   return {
     path: normalizedPath,
     exists: true,
     insideRoot: true,
-    source: allowedPaths?.size ? "prompt-context" : "provider-discovered",
-    promptIncluded: allowedPaths?.size ? true : undefined,
-    ...lineCheck
+    source,
+    promptIncluded,
+    ...lineCheck,
+    warning: lineCheck.warning ?? (allowedPaths?.size && !promptIncluded && !hasConcreteLocation
+      ? `Evidence path was not part of the provider context manifest: ${normalizedPath}`
+      : undefined)
   };
 }
 

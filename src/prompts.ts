@@ -266,7 +266,7 @@ Also include a RepoVista findings JSON block near the end of the report. This JS
           "path": "src/example.ts",
           "startLine": 1,
           "endLine": 12,
-          "quote": "<short exact snippet when useful>",
+          "quote": "<required short exact quote copied from the referenced line range>",
           "symbol": "<function/class/config key when useful>"
         }
       ],

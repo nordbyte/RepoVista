@@ -2,9 +2,11 @@ import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { validateFindingsEvidence } from "./evidence-validation.js";
 import { RepoVistaError } from "./errors.js";
+import { allowedEvidencePathsFromPromptManifest } from "./prompt-manifest.js";
 import { validateReportQuality } from "./quality-gates.js";
-import type { AuditMeta, AuditOptions, PhaseReportStatus, StructuredFinding, StructuredPhaseReport } from "./types.js";
+import type { AuditMeta, AuditOptions, PhaseReportStatus, PromptManifest, StructuredFinding, StructuredPhaseReport } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -82,12 +84,13 @@ export async function runPrCommentCommand(options: AuditOptions, projectRoot = p
 export async function reviewRunDirectory(projectRoot: string, runDirectory: string): Promise<ReviewedRun> {
   const runDir = path.resolve(projectRoot, runDirectory);
   await assertDirectory(runDir);
-  const [meta, findings, structuredReports] = await Promise.all([
+  const [meta, findings, structuredReports, promptManifest] = await Promise.all([
     readJson<AuditMeta>(path.join(runDir, "meta.json")),
     readJson<StructuredFinding[]>(path.join(runDir, "findings.json")),
-    readJson<StructuredPhaseReport[]>(path.join(runDir, "structured-reports.json"))
+    readJson<StructuredPhaseReport[]>(path.join(runDir, "structured-reports.json")),
+    readJson<PromptManifest>(path.join(runDir, "prompt-manifest.json"))
   ]);
-  const normalizedFindings = Array.isArray(findings) ? findings : [];
+  const normalizedFindings = await findingsForReview(projectRoot, meta, promptManifest, findings);
   const normalizedStructuredReports = Array.isArray(structuredReports) ? structuredReports : [];
   const reportReviews = await Promise.all(REPORT_FILES.map(async ([phaseId, fileName]) => {
     const filePath = path.join(runDir, fileName);
@@ -125,6 +128,28 @@ export async function reviewRunDirectory(projectRoot: string, runDirectory: stri
     weakEvidence: weakEvidenceFindings(normalizedFindings),
     staleWarnings: await staleWarnings(projectRoot, meta)
   };
+}
+
+async function findingsForReview(
+  projectRoot: string,
+  meta: AuditMeta | undefined,
+  promptManifest: PromptManifest | undefined,
+  findings: StructuredFinding[] | undefined
+): Promise<StructuredFinding[]> {
+  const normalizedFindings = Array.isArray(findings) ? findings : [];
+  if (!normalizedFindings.length) {
+    return normalizedFindings;
+  }
+  try {
+    const reviewRoot = await resolveReviewCheckoutRoot(projectRoot, meta);
+    return await validateFindingsEvidence(
+      reviewRoot,
+      normalizedFindings,
+      promptManifest ? allowedEvidencePathsFromPromptManifest(promptManifest, "risk-and-bug") : undefined
+    );
+  } catch {
+    return normalizedFindings;
+  }
 }
 
 export function renderRunReview(reviewed: ReviewedRun): string {

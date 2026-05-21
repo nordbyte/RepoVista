@@ -133,7 +133,7 @@ Additional RepoVista repair task:
 - Preserve accurate findings, recommendations, and concrete path evidence.
 - For risk findings, use the repovista-findings sentinel JSON block and include title, severity, category, status, signature, affectedPaths, evidence, evidenceReferences with path/startLine/endLine/quote, problemRationale, recommendedFix, reproduction, suggestedRegressionTest, minimumFixScope, estimatedEffort, and confidence.
 - Avoid Markdown code fences around the RepoVista JSON sentinel block.
-- Exact evidence quotes must be copied from the referenced file and line range. If an exact quote is uncertain, omit the quote and choose a safer line range.
+- Every kept risk finding must include at least one evidence reference with a non-empty exact quote copied from the referenced file and line range. If an exact quote is uncertain, remove that evidence reference or drop the unsupported finding instead of keeping it without a quote.
 - Do not claim checks were not run when the Evidence Pack contains check results.
 - Keep the report read-only and return only the corrected Markdown report.
 

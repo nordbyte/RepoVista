@@ -174,3 +174,73 @@ test("review command checks GitHub-source staleness against the source clone", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("review command refreshes stale evidence validation for exact provider-discovered quotes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-review-evidence-refresh-"));
+  try {
+    const runDir = path.join(root, ".repovista", "run");
+    const cloneDir = path.join(root, ".repovista", "sources", "github", "owner", "repo", "abc123");
+    await mkdir(path.join(cloneDir, "extensions", "acpx", "src"), { recursive: true });
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(cloneDir, "extensions", "acpx", "src", "runtime.ts"), "export const runtime = true;\n", "utf8");
+    const finding = {
+      id: "fnd_exact",
+      source: "risk-and-bug",
+      title: "Exact quote outside manifest",
+      severity: "medium",
+      paths: ["extensions/acpx/src/runtime.ts"],
+      evidenceDetails: [{
+        path: "extensions/acpx/src/runtime.ts",
+        startLine: 1,
+        endLine: 1,
+        quote: "export const runtime = true;"
+      }],
+      evidenceValidation: {
+        checkedAt: "2026-05-21T00:00:00.000Z",
+        passed: false,
+        warnings: ["Evidence path was not part of the provider context manifest: extensions/acpx/src/runtime.ts"],
+        references: []
+      }
+    };
+
+    await writeFile(path.join(runDir, "meta.json"), JSON.stringify({
+      runId: "run",
+      projectRoot: cloneDir,
+      source: {
+        type: "github",
+        repository: "owner/repo",
+        owner: "owner",
+        repo: "repo",
+        url: "https://github.com/owner/repo.git",
+        commit: "abc123",
+        cloneDir,
+        fetchedAt: "2026-05-21T00:00:00.000Z"
+      },
+      options: { exportFormats: [] },
+      ai: { displayName: "Codex CLI", model: "gpt-5.5", reasoning: "xhigh" },
+      phases: []
+    }), "utf8");
+    await writeFile(path.join(runDir, "findings.json"), JSON.stringify([finding]), "utf8");
+    await writeFile(path.join(runDir, "structured-reports.json"), "[]", "utf8");
+    await writeFile(path.join(runDir, "prompt-manifest.json"), JSON.stringify({
+      schemaVersion: 1,
+      runId: "run",
+      phases: [{
+        phaseId: "risk-and-bug",
+        reportFile: "03-risk-and-bug-report.md",
+        includedFiles: [{ path: "README.md", role: "project-file", readable: true }],
+        omittedFiles: []
+      }]
+    }), "utf8");
+    for (const file of ["01-architecture-report.md", "02-code-quality-report.md", "03-risk-and-bug-report.md", "04-feature-roadmap.md", "index.md"]) {
+      await writeFile(path.join(runDir, file), "# Fixture\n\nextensions/acpx/src/runtime.ts\n", "utf8");
+    }
+
+    const reviewed = await reviewRunDirectory(root, ".repovista/run");
+    assert.equal(reviewed.weakEvidence.length, 0);
+    assert.equal(reviewed.findings[0].evidenceValidation.passed, true);
+    assert.equal(reviewed.findings[0].evidenceValidation.references[0].promptIncluded, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
