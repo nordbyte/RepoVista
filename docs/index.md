@@ -4,7 +4,7 @@ RepoVista is a command line tool for structured, read-only AI repository audits.
 
 <img class="repovista-home-image" src="/repovista-hero.png" alt="RepoVista report overview">
 
-> TL;DR - `npm install -g repovista`, authenticate one provider CLI, then run `repovista` from a repository root.
+Install RepoVista with `npm install -g repovista`, authenticate one provider CLI, then run `repovista` from a repository root.
 
 ## Where to start
 
