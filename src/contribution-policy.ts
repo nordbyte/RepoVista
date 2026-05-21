@@ -43,6 +43,7 @@ export interface ContributionPolicyRules {
   issueRequiredSections: string[];
   pullRequestRequiredSections: string[];
   requiredChecks: string[];
+  suggestedChecks: string[];
   needsIssueFirst: boolean;
   requiresRealBehaviorProof: boolean;
   requiresAiDisclosure: boolean;
@@ -106,10 +107,15 @@ const STATIC_CANDIDATES: readonly Candidate[] = [
   { path: ".github/CODE_OF_CONDUCT.md", kind: "code-of-conduct" },
   { path: "README.md", kind: "readme" },
   { path: ".github/ISSUE_TEMPLATE.md", kind: "issue-template" },
+  { path: ".github/issue_template.md", kind: "issue-template" },
   { path: "ISSUE_TEMPLATE.md", kind: "issue-template" },
+  { path: "issue_template.md", kind: "issue-template" },
   { path: ".github/PULL_REQUEST_TEMPLATE.md", kind: "pull-request-template" },
+  { path: ".github/pull_request_template.md", kind: "pull-request-template" },
   { path: "PULL_REQUEST_TEMPLATE.md", kind: "pull-request-template" },
-  { path: "docs/PULL_REQUEST_TEMPLATE.md", kind: "pull-request-template" }
+  { path: "pull_request_template.md", kind: "pull-request-template" },
+  { path: "docs/PULL_REQUEST_TEMPLATE.md", kind: "pull-request-template" },
+  { path: "docs/pull_request_template.md", kind: "pull-request-template" }
 ];
 
 export async function prepareContributionPolicy(input: ContributionPolicyInput): Promise<ContributionPolicyEvaluation> {
@@ -118,8 +124,12 @@ export async function prepareContributionPolicy(input: ContributionPolicyInput):
   const bundle = input.mode === "off"
     ? emptyContributionPolicyBundle(input, sourceRoot, discoveredAt)
     : await discoverContributionPolicy(input, sourceRoot, discoveredAt);
-  const initialBlockers = evaluateContributionPolicyBlockers(bundle, input.target, input.findings, input.validationCommands ?? [], Boolean(input.runChecks));
-  const warnings = [...bundle.warnings];
+  const validationCommands = input.validationCommands ?? [];
+  const initialBlockers = evaluateContributionPolicyBlockers(bundle, input.target, input.findings, validationCommands, Boolean(input.runChecks));
+  const warnings = [
+    ...bundle.warnings,
+    ...evaluateContributionPolicyWarnings(bundle, input.target, validationCommands, Boolean(input.runChecks))
+  ];
   let blockers = initialBlockers;
 
   if (input.mode === "warn" && blockers.length) {
@@ -209,6 +219,7 @@ export function renderContributionPolicyPrompt(bundle: ContributionPolicyBundle)
     rules.requiresRealBehaviorProof ? "- Include concrete behavior proof, reproduction details, or validation evidence where relevant." : undefined,
     rules.requiresAiDisclosure ? "- Disclose AI assistance in the PR body." : undefined,
     rules.requiredChecks.length ? `- Checks mentioned by guidelines: ${rules.requiredChecks.join(", ")}` : undefined,
+    rules.suggestedChecks.length ? `- Additional context-specific checks mentioned by guidelines: ${rules.suggestedChecks.join(", ")}` : undefined,
     rules.pullRequestRequiredSections.length ? `- PR template sections to satisfy: ${rules.pullRequestRequiredSections.join(", ")}` : undefined
   ].filter((line): line is string => Boolean(line));
   return lines.join("\n");
@@ -267,6 +278,7 @@ function emptyContributionPolicyBundle(input: ContributionPolicyInput, sourceRoo
       issueRequiredSections: [],
       pullRequestRequiredSections: [],
       requiredChecks: [],
+      suggestedChecks: [],
       needsIssueFirst: false,
       requiresRealBehaviorProof: false,
       requiresAiDisclosure: false,
@@ -280,7 +292,9 @@ function emptyContributionPolicyBundle(input: ContributionPolicyInput, sourceRoo
 async function collectPolicyCandidates(sourceRoot: string): Promise<Candidate[]> {
   const candidates = [...STATIC_CANDIDATES];
   candidates.push(...await directoryCandidates(sourceRoot, ".github/ISSUE_TEMPLATE", "issue-template", [".md", ".markdown", ".yml", ".yaml"]));
+  candidates.push(...await directoryCandidates(sourceRoot, ".github/issue_template", "issue-template", [".md", ".markdown", ".yml", ".yaml"]));
   candidates.push(...await directoryCandidates(sourceRoot, ".github/PULL_REQUEST_TEMPLATE", "pull-request-template", [".md", ".markdown"]));
+  candidates.push(...await directoryCandidates(sourceRoot, ".github/pull_request_template", "pull-request-template", [".md", ".markdown"]));
   const seen = new Set<string>();
   return candidates.filter((candidate) => {
     const normalized = normalizePolicyPath(candidate.path);
@@ -350,7 +364,8 @@ function extractContributionPolicyRules(
 ): ContributionPolicyRules {
   const text = documents.map((document) => document.text).join("\n\n");
   const lower = text.toLowerCase();
-  const requiredChecks = extractRequiredChecks(text);
+  const checks = extractValidationChecks(text);
+  const requiredChecks = checks.required;
   const securityReportInstructions = securityInstructions(documents);
   const publicSecurityReportBlocked = Boolean(securityReportInstructions) &&
     /(?:privately|private|email|security@|responsible disclosure|do not.{0,40}(?:public|issue)|not.{0,40}(?:public|issue))/.test(securityReportInstructions?.toLowerCase() ?? "");
@@ -358,6 +373,7 @@ function extractContributionPolicyRules(
     issueRequiredSections: normalizeSectionNames(issueTemplates.flatMap((template) => template.sections)),
     pullRequestRequiredSections: normalizeSectionNames(pullRequestTemplates.flatMap((template) => template.sections)),
     requiredChecks,
+    suggestedChecks: checks.suggested,
     needsIssueFirst: /(?:open|file|create)\s+(?:an?\s+)?issue\s+(?:first|before)|(?:discuss|discussion).{0,80}(?:issue|proposal|maintainer).{0,80}(?:before|first)|before\s+(?:opening|submitting)\s+(?:a\s+)?pull request/.test(lower),
     requiresRealBehaviorProof: /steps to reproduce|reproduction|minimal repro|actual behavior|expected behavior|proof of behavior|real behavior proof|screenshots?|logs?/.test(lower),
     requiresAiDisclosure: /(?:ai-assisted|ai assisted|ai-generated|ai generated|llm|chatgpt|copilot).{0,80}(?:disclos|mention|label|required|must|should)|(?:disclos|mention).{0,80}(?:ai|llm|chatgpt|copilot)/.test(lower),
@@ -368,6 +384,9 @@ function extractContributionPolicyRules(
 
   if (requiredChecks.length) {
     rules.notes.push(`Detected validation commands: ${requiredChecks.join(", ")}`);
+  }
+  if (rules.suggestedChecks.length) {
+    rules.notes.push(`Detected context-specific validation commands: ${rules.suggestedChecks.join(", ")}`);
   }
   if (rules.issueRequiredSections.length) {
     rules.notes.push(`Detected issue template sections: ${rules.issueRequiredSections.join(", ")}`);
@@ -397,14 +416,29 @@ function evaluateContributionPolicyBlockers(
     blockers.push("Repository guidelines ask contributors to open or discuss an issue before submitting this kind of pull request; no linked issue is recorded for at least one selected finding.");
   }
   if (target === "pr" && rules.requiredChecks.length) {
-    const missing = rules.requiredChecks.filter((command) => !validationCommands.some((provided) => sameCommand(provided, command)));
+    const missing = missingRequiredChecks(rules.requiredChecks, validationCommands);
     if (missing.length && !runChecks) {
       blockers.push(`Repository guidelines mention validation checks, but --no-run-checks is active: ${missing.join(", ")}.`);
-    } else if (missing.length) {
+    } else if (missing.length && validationCommands.length === 0) {
       blockers.push(`Repository guidelines mention validation checks that were not passed with --check: ${missing.join(", ")}.`);
     }
   }
   return blockers;
+}
+
+function evaluateContributionPolicyWarnings(
+  bundle: ContributionPolicyBundle,
+  target: PublishTarget,
+  validationCommands: string[],
+  runChecks: boolean
+): string[] {
+  if (bundle.mode === "off" || target !== "pr" || !runChecks || !validationCommands.length) {
+    return [];
+  }
+  const missing = missingRequiredChecks(bundle.rules.requiredChecks, validationCommands);
+  return missing.length
+    ? [`Repository guidelines mention additional validation checks that were not passed with --check: ${missing.join(", ")}.`]
+    : [];
 }
 
 function findingLooksSecuritySensitive(finding: StructuredFinding): boolean {
@@ -456,10 +490,13 @@ function ruleSummaryLines(rules: ContributionPolicyRules, target: PublishTarget)
     lines.push("- Behavior proof: include reproduction, observed behavior, or validation details where applicable.");
   }
   if (rules.requiresAiDisclosure) {
-    lines.push("- AI disclosure: RepoVista helped identify and prepare this publication from an audit finding.");
+    lines.push("- AI disclosure: AI-assisted; RepoVista helped identify and prepare this publication from an audit finding.");
   }
   if (target === "pr" && rules.requiredChecks.length) {
-    lines.push(`- Guideline checks: ${rules.requiredChecks.join(", ")}`);
+    lines.push(`- Required guideline checks: ${rules.requiredChecks.join(", ")}`);
+  }
+  if (target === "pr" && rules.suggestedChecks.length) {
+    lines.push(`- Context-specific guideline checks mentioned: ${rules.suggestedChecks.join(", ")}`);
   }
   if (rules.publicSecurityReportBlocked) {
     lines.push(`- Security reporting: ${rules.securityReportInstructions ?? "private security disclosure requested by repository policy"}`);
@@ -509,13 +546,110 @@ function issueTemplateValue(finding: StructuredFinding): (section: string) => st
 function pullRequestTemplateValue(patch: PatchAttempt): (section: string) => string {
   return (section) => {
     const normalized = section.toLowerCase();
+    if (/what (?:you )?(?:did )?(?:not verify|not test)|what was not tested|what did not change|scope boundary/.test(normalized)) {
+      return [
+        "- Full application runtime behavior was not tested unless listed in validation.",
+        "- The change is intended to stay within the selected RepoVista finding scope."
+      ].join("\n");
+    }
+    if (/behavior or issue addressed|problem\b/.test(normalized)) {
+      return patch.plan;
+    }
+    if (/solution|what changed/.test(normalized)) {
+      return [
+        patch.filesChanged.length ? `Changed files:\n${patch.filesChanged.map((file) => `- ${file}`).join("\n")}` : "Changed files: n/a",
+        patch.commandsRun.length ? `Validation:\n${validationCommandLines(patch)}` : "Validation: not recorded"
+      ].join("\n\n");
+    }
+    if (/real behavior proof|human verification/.test(normalized)) {
+      return behaviorProofValue(patch);
+    }
+    if (/exact steps|command run|steps/.test(normalized)) {
+      return patch.commandsRun.length
+        ? patch.commandsRun.map((command, index) => `${index + 1}. ${command.command}`).join("\n")
+        : "1. Apply the focused patch for the selected RepoVista finding.\n2. Run the smallest targeted validation for the changed surface.";
+    }
+    if (/observed result|actual/.test(normalized)) {
+      return patch.commandsRun.length
+        ? `Recorded validation result:\n${validationCommandLines(patch)}`
+        : "The patch stayed within the selected finding scope; no validation result was recorded.";
+    }
+    if (/expected/.test(normalized)) {
+      return "The changed surface should no longer exhibit the selected RepoVista finding and the targeted regression guard should cover it.";
+    }
+    if (/before evidence|before/.test(normalized)) {
+      return patch.plan;
+    }
+    if (/after/.test(normalized)) {
+      return patch.commandsRun.length ? validationCommandLines(patch) : "The focused patch is present in this PR.";
+    }
+    if (/environment/.test(normalized)) {
+      return [
+        "- OS: generated RepoVista publish worktree",
+        `- Provider: ${providerSummary(patch)}`,
+        "- Relevant config: repository checkout at the analyzed commit"
+      ].join("\n");
+    }
+    if (/runtime\/container/.test(normalized)) {
+      return "Generated RepoVista publish worktree.";
+    }
+    if (/model\/provider/.test(normalized)) {
+      return providerSummary(patch);
+    }
+    if (/security impact/.test(normalized)) {
+      return [
+        "- New permissions/capabilities? `No`",
+        "- Secrets/tokens handling changed? `No`",
+        "- New/changed network calls? `No`",
+        "- Command/tool execution surface changed? `No`",
+        "- Data access scope changed? `No`"
+      ].join("\n");
+    }
+    if (/change type/.test(normalized)) {
+      return "- [x] Bug fix\n- [ ] Feature\n- [ ] Refactor required for the fix\n- [ ] Docs\n- [ ] Security hardening\n- [ ] Chore/infra";
+    }
+    if (/scope/.test(normalized)) {
+      return patch.filesChanged.length
+        ? patch.filesChanged.map((file) => `- ${file}`).join("\n")
+        : "- Scoped to the selected RepoVista finding.";
+    }
+    if (/motivation|root cause/.test(normalized)) {
+      return patch.plan;
+    }
+    if (/missing detection|guardrail/.test(normalized)) {
+      return "A targeted regression test or manifest/schema guard should catch this before review.";
+    }
+    if (/regression test plan/.test(normalized)) {
+      return patch.commandsRun.length
+        ? validationCommandLines(patch)
+        : "- Add or run the smallest targeted test for the changed surface.";
+    }
+    if (/coverage level/.test(normalized)) {
+      return "- [x] Unit test\n- [ ] Integration test\n- [ ] End-to-end test\n- [ ] Existing coverage already sufficient";
+    }
+    if (/target test|scenario|edge cases checked|verified scenarios/.test(normalized)) {
+      return patch.commandsRun.length ? validationCommandLines(patch) : "- Targeted validation for the changed surface.";
+    }
+    if (/attach at least one|evidence/.test(normalized)) {
+      return patch.commandsRun.length ? `- [x] Passing targeted validation\n${validationCommandLines(patch)}` : "- [ ] Validation output was not recorded.";
+    }
+    if (/risk\b/.test(normalized)) {
+      return "Low: patch scope is limited to the files listed in this PR.";
+    }
+    if (/mitigation/.test(normalized)) {
+      return [
+        "- Scope gate passed for the selected finding.",
+        patch.commandsRun.length ? validationCommandLines(patch) : "- Add targeted validation before merge if required by maintainers."
+      ].join("\n");
+    }
+    if (/user-visible|behavior changes|compatibility|migration|diagram/.test(normalized)) {
+      return "N/A";
+    }
     if (/summary|description|what|change/.test(normalized)) {
       return patch.plan;
     }
     if (/test|validation|check/.test(normalized)) {
-      return patch.commandsRun.length
-        ? patch.commandsRun.map((command) => `- ${command.command}: ${command.exitCode ?? "unknown"}${command.timedOut ? " (timed out)" : ""}`).join("\n")
-        : "No validation commands recorded.";
+      return patch.commandsRun.length ? validationCommandLines(patch) : "No validation commands recorded.";
     }
     if (/issue|related|link/.test(normalized)) {
       return patch.findingIds.map((id) => `- RepoVista finding ${id}`).join("\n");
@@ -527,29 +661,82 @@ function pullRequestTemplateValue(patch: PatchAttempt): (section: string) => str
   };
 }
 
-function extractRequiredChecks(text: string): string[] {
-  const candidates = new Set<string>();
-  for (const value of codeLikeFragments(text)) {
-    const normalized = normalizeCommandCandidate(value);
-    if (normalized && isLikelyValidationCommand(normalized)) {
-      candidates.add(normalized);
+function behaviorProofValue(patch: PatchAttempt): string {
+  const validation = patch.commandsRun.length
+    ? validationCommandLines(patch)
+    : "- No validation commands recorded.";
+  return [
+    "- Behavior or issue addressed: the selected RepoVista finding described in this PR.",
+    "- Real environment tested: generated RepoVista publish worktree.",
+    "- Exact steps or command run after this patch:",
+    validation,
+    "- Evidence after fix: validation command result(s) above and the focused diff in this PR.",
+    "- Observed result after fix: the patch stayed within the selected finding scope.",
+    "- What was not tested: full application runtime behavior unless listed above."
+  ].join("\n");
+}
+
+function validationCommandLines(patch: PatchAttempt): string {
+  return patch.commandsRun
+    .map((command) => `- ${command.command}: ${command.exitCode ?? "unknown"}${command.timedOut ? " (timed out)" : ""}`)
+    .join("\n");
+}
+
+function providerSummary(patch: PatchAttempt): string {
+  const provider = patch.provider;
+  if (!provider) {
+    return "not recorded";
+  }
+  return `${provider.id}${provider.model ? ` / ${provider.model}` : ""}${provider.reasoning ? ` / ${provider.reasoning}` : ""}`;
+}
+
+function extractValidationChecks(text: string): { required: string[]; suggested: string[] } {
+  const required = new Set<string>();
+  const suggested = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    const commands = inlineCommandFragments(line)
+      .flatMap(commandCandidatesFromFragment)
+      .filter((command) => isLikelyValidationCommand(command) && !isValidationCommandHelper(command));
+    if (!commands.length) {
+      continue;
+    }
+    const lower = line.toLowerCase();
+    const target = isRequiredValidationLine(lower)
+      ? required
+      : isSuggestedValidationLine(lower)
+        ? suggested
+        : undefined;
+    if (!target) {
+      continue;
+    }
+    for (const command of commands) {
+      target.add(command);
     }
   }
-  return Array.from(candidates).sort();
+  for (const command of required) {
+    suggested.delete(command);
+  }
+  return {
+    required: Array.from(required).sort(),
+    suggested: Array.from(suggested).sort()
+  };
 }
 
-function codeLikeFragments(text: string): string[] {
-  const fragments: string[] = [];
-  for (const match of text.matchAll(/```[\w-]*\n([\s\S]*?)```/g)) {
-    fragments.push(...(match[1] ?? "").split(/\r?\n/));
-  }
-  for (const match of text.matchAll(/`([^`\n]+)`/g)) {
-    fragments.push(match[1] ?? "");
-  }
-  return fragments;
+function inlineCommandFragments(line: string): string[] {
+  return Array.from(line.matchAll(/`([^`\n]+)`/g)).map((match) => match[1] ?? "");
 }
 
-function normalizeCommandCandidate(value: string): string | undefined {
+function commandCandidatesFromFragment(value: string): string[] {
+  return value
+    .split(/\s+&&\s+/)
+    .map(normalizeCommandCandidate)
+    .filter((command): command is string => Boolean(command));
+}
+
+function normalizeCommandCandidate(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
   const trimmed = value.trim().replace(/^\$\s*/, "").replace(/^>\s*/, "");
   if (!trimmed || /[;&|`$<>]/.test(trimmed)) {
     return undefined;
@@ -560,6 +747,21 @@ function normalizeCommandCandidate(value: string): string | undefined {
 function isLikelyValidationCommand(command: string): boolean {
   return /^(?:npm|pnpm|yarn|bun) (?:run )?(?:test|lint|typecheck|check|build|audit|security:audit)(?:\b.*)?$/.test(command) ||
     /^(?:cargo test|cargo clippy|go test \.\/\.\.\.|pytest|python -m pytest|ruff check|mypy|make test|make check|gradle test|\.\/gradlew test)(?:\b.*)?$/.test(command);
+}
+
+function isValidationCommandHelper(command: string): boolean {
+  return /\s--list\b/.test(command);
+}
+
+function isRequiredValidationLine(lowerLine: string): boolean {
+  if (/\b(?:if|when|for .{0,60}changes|for .{0,60}work|if you|touched|changed shared|matching|targeted|wider|relevant|optional|to see|only use)\b/.test(lowerLine)) {
+    return false;
+  }
+  return /\b(?:run tests?|required checks?|must run|required to run|ensure .{0,40}pass|before .{0,40}(?:pr|pull request).{0,40}run)\b/.test(lowerLine);
+}
+
+function isSuggestedValidationLine(lowerLine: string): boolean {
+  return /\b(?:run|test|check|validation|lane|command)\b/.test(lowerLine);
 }
 
 function securityInstructions(documents: ContributionPolicyDocument[]): string | undefined {
@@ -634,6 +836,11 @@ function yamlName(text: string): string | undefined {
 
 function readmeLooksPolicyRelevant(text: string): boolean {
   return /contribut|pull request|issue|bug report|security|vulnerab/i.test(text);
+}
+
+function missingRequiredChecks(requiredChecks: string[], validationCommands: string[]): string[] {
+  const provided = validationCommands.flatMap(commandCandidatesFromFragment);
+  return requiredChecks.filter((command) => !provided.some((candidate) => sameCommand(candidate, command)));
 }
 
 function sameCommand(left: string, right: string): boolean {

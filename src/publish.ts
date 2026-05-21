@@ -64,6 +64,7 @@ interface GithubPublishTarget {
   repo: string;
   url: string;
   commit: string;
+  cloneDir?: string;
   defaultBranch?: string;
 }
 
@@ -229,7 +230,7 @@ ${buildFixPlan(displayFindings)}
   await rm(publishRoot, { recursive: true, force: true });
   await mkdir(patchDir, { recursive: true });
   await mkdir(path.dirname(worktree), { recursive: true });
-  await exec("git", ["clone", input.github.url, worktree], { cwd: input.projectRoot, timeout: 120_000, maxBuffer: 1024 * 1024 });
+  await clonePublishWorktree(exec, input.github, input.projectRoot, worktree);
   await exec("git", ["checkout", "-B", branch, input.github.commit], { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
 
   const baseSha = await gitHead(exec, worktree);
@@ -418,8 +419,58 @@ function requireGithubSource(meta: AuditMeta): GithubPublishTarget {
     repo: meta.source.repo,
     url: meta.source.url,
     commit: meta.source.commit,
+    cloneDir: meta.source.cloneDir,
     defaultBranch: meta.source.defaultBranch
   };
+}
+
+async function clonePublishWorktree(
+  exec: NonNullable<PublishDependencies["execFile"]>,
+  github: GithubPublishTarget,
+  projectRoot: string,
+  worktree: string
+): Promise<void> {
+  if (github.cloneDir && await cloneDirMatchesCommit(exec, github.cloneDir, github.commit)) {
+    try {
+      await exec("git", ["clone", "--no-hardlinks", github.cloneDir, worktree], {
+        cwd: projectRoot,
+        timeout: 120_000,
+        maxBuffer: 1024 * 1024
+      });
+      await exec("git", ["remote", "set-url", "origin", github.url], {
+        cwd: worktree,
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024
+      });
+      return;
+    } catch {
+      await rm(worktree, { recursive: true, force: true });
+      await mkdir(path.dirname(worktree), { recursive: true });
+    }
+  }
+
+  await exec("git", ["clone", github.url, worktree], {
+    cwd: projectRoot,
+    timeout: 120_000,
+    maxBuffer: 1024 * 1024
+  });
+}
+
+async function cloneDirMatchesCommit(
+  exec: NonNullable<PublishDependencies["execFile"]>,
+  cloneDir: string,
+  commit: string
+): Promise<boolean> {
+  try {
+    const { stdout } = await exec("git", ["rev-parse", "HEAD"], {
+      cwd: cloneDir,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim() === commit;
+  } catch {
+    return false;
+  }
 }
 
 function selectFindings(findings: StructuredFinding[], options: AuditOptions): StructuredFinding[] {

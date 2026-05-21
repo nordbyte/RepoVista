@@ -77,6 +77,42 @@ test("publish applies repository contribution guidelines to issue previews", asy
   }
 });
 
+test("publish separates required and context-specific contribution checks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-policy-checks-"));
+  try {
+    await writeGithubRun(root, {
+      policyFiles: {
+        "CONTRIBUTING.md": [
+          "# Contributing",
+          "- Run tests: `pnpm build && pnpm check && pnpm test`",
+          "- For extension/plugin changes, run the fast local lane first:",
+          "  - `pnpm test:extension <extension-name>`",
+          "  - `pnpm test:extension --list` to see valid extension ids",
+          "  - If you changed shared plugin surfaces, run `pnpm test:contracts`"
+        ].join("\n")
+      }
+    });
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "pr",
+      dryRun: true,
+      checkCommands: ["pnpm test:extension acpx"]
+    }, root);
+
+    assert.match(output, /Contribution blockers: none/);
+    assert.match(output, /Contribution warnings:/);
+    assert.match(output, /pnpm build, pnpm check, pnpm test/);
+    assert.doesNotMatch(output, /pnpm test:extension --list/);
+    const artifact = JSON.parse(await readFile(path.join(root, ".repovista", RUN_ID, "contribution-policy.json"), "utf8"));
+    assert.deepEqual(artifact.bundle.rules.requiredChecks, ["pnpm build", "pnpm check", "pnpm test"]);
+    assert.deepEqual(artifact.bundle.rules.suggestedChecks, ["pnpm test:contracts"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publish translates non-English report findings to English GitHub issues by default", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-issue-language-"));
   try {
@@ -280,10 +316,16 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     await writeGithubRun(root, {
       policyFiles: {
         "CONTRIBUTING.md": "AI-assisted contributions should disclose AI assistance.\n",
-        ".github/PULL_REQUEST_TEMPLATE.md": [
+        ".github/pull_request_template.md": [
           "# Pull Request",
           "## Summary",
+          "## Real behavior proof (required for external PRs)",
+          "- What was not tested:",
+          "## Repro + Verification",
+          "### Environment",
+          "### Actual",
           "## Tests",
+          "## Risks and Mitigations",
           "## Checklist"
         ].join("\n")
       }
@@ -367,14 +409,28 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     const prBody = prCall.args[prCall.args.indexOf("--body") + 1];
     assert.match(prBody, /Hi,\n\nI opened this PR to address a RepoVista finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
     assert.match(prBody, /Contribution Guidelines/);
-    assert.match(prBody, /AI disclosure: RepoVista helped identify and prepare this publication/);
+    assert.match(prBody, /AI disclosure: AI-assisted; RepoVista helped identify and prepare this publication/);
     assert.match(prBody, /Pull Request Template Fields/);
     assert.match(prBody, /### Summary/);
+    assert.match(prBody, /### Real behavior proof \(required for external PRs\)/);
+    assert.match(prBody, /Full application runtime behavior was not tested unless listed in validation/);
+    assert.match(prBody, /### Environment/);
+    assert.match(prBody, /Provider: codex/);
+    assert.match(prBody, /### Risks and Mitigations/);
+    assert.match(prBody, /Scope gate passed for the selected finding/);
     assert.match(prBody, /### Tests/);
     assert.match(prBody, /_Found with \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\)\._/);
     assert.equal(providerRequests.length, 1);
     assert.match(providerRequests[0].prompt, /Repository contribution guidelines discovered by RepoVista/);
-    assert.match(providerRequests[0].prompt, /PR template sections to satisfy: Pull Request, Summary, Tests, Checklist/);
+    assert.match(providerRequests[0].prompt, /PR template sections to satisfy: .*Summary/);
+    assert.match(providerRequests[0].prompt, /PR template sections to satisfy: .*Real behavior proof/);
+    assert.match(providerRequests[0].prompt, /PR template sections to satisfy: .*Tests/);
+    assert.match(providerRequests[0].prompt, /PR template sections to satisfy: .*Checklist/);
+    const cloneCall = calls.find((call) => call.command === "git" && call.args[0] === "clone");
+    assert.ok(cloneCall);
+    assert.equal(cloneCall.args[1], "--no-hardlinks");
+    assert.match(cloneCall.args[2], /\.repovista\/sources\/github\/creativeprofit22\/contract-and-flow/);
+    assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "remote set-url origin https://github.com/creativeprofit22/contract-and-flow.git"));
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.name RepoVista Bot"));
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.email 12345+tester@users.noreply.github.com"));
     const patchFiles = await readdir(path.join(root, ".repovista", "patches"));
