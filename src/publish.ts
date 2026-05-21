@@ -1053,7 +1053,7 @@ function renderPatchPrIntro(patch: PatchAttempt, github: GithubPublishTarget): s
   const summary = patchPlanSummary(patch);
   return `Hi,
 
-I opened this PR to address a RepoVista finding in ${github.repository}: ${summary}. The implementation is intended to stay focused on the affected files and the evidence from the audit.`;
+I opened this PR to address a [RepoVista](${REPOVISTA_REPOSITORY_URL}) finding in ${github.repository}: ${summary}. The implementation is intended to stay focused on the affected files and the evidence from the audit.`;
 }
 
 function patchPlanSummary(patch: PatchAttempt): string {

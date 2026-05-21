@@ -449,7 +449,7 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     assert.equal(prCall.args[prCall.args.indexOf("--title") + 1], "fix: audit-only command allows writes");
     assert.equal(prCall.args[prCall.args.indexOf("--head") + 1], "tester:repovista/fix-fnd-test");
     const prBody = prCall.args[prCall.args.indexOf("--body") + 1];
-    assert.match(prBody, /Hi,\n\nI opened this PR to address a RepoVista finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
+    assert.match(prBody, /Hi,\n\nI opened this PR to address a \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\) finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
     assert.match(prBody, /Contribution Guidelines/);
     assert.match(prBody, /AI disclosure: AI-assisted; RepoVista helped identify and prepare this publication/);
     assert.match(prBody, /Pull Request Template Fields/);
