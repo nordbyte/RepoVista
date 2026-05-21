@@ -54,7 +54,7 @@ export {
 } from "./finding-state.js";
 export { renderFindingsMenuFrame, runFindingsMenu } from "./finding-menu.js";
 export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpenPrCommand, runPatchesCommand, runRollbackPatchCommand } from "./patch-commands.js";
-export { fixPlanJsonSchema, phaseReportJsonSchema, revalidationJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
+export { fixPlanJsonSchema, phaseReportJsonSchema, publishFindingJsonSchema, revalidationJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity, findingDedupeKey } from "./findings.js";
 export { collectDiffScope } from "./git-diff.js";
 export { normalizeGithubRepository, prepareGithubSource, validateGithubRef } from "./github-source.js";

@@ -60,6 +60,7 @@ export interface AuditOptions {
   fastMode: boolean;
   sandbox: SandboxMode;
   language: string;
+  publishLanguage?: string;
   json: boolean;
   includes: string[];
   ignores: string[];
@@ -818,7 +819,7 @@ export interface ProviderRunRequest {
   keepLogs: boolean;
   timeoutSeconds: number;
   outputSchema?: Record<string, unknown>;
-  outputSchemaKind?: "risk-report" | "phase-report" | "fix-plan" | "revalidation";
+  outputSchemaKind?: "risk-report" | "phase-report" | "fix-plan" | "revalidation" | "publish-finding";
   outputSchemaPath?: string;
   structuredOutputPath?: string;
   promptFilePath?: string;

@@ -20,6 +20,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.options.parallel, "auto");
   assert.equal(parsed.options.sandbox, "read-only");
   assert.equal(parsed.options.language, "English");
+  assert.equal(parsed.options.publishLanguage, "English");
   assert.equal(parsed.options.reasoning, "xhigh");
   assert.equal(parsed.options.fastMode, false);
   assert.equal(parsed.options.runChecks, true);
@@ -54,6 +55,8 @@ test("explicit audit command parses supported options", () => {
     "workspace-write",
     "--language",
     "English",
+    "--publish-language",
+    "German",
     "--json",
     "--include",
     "src/**,README.md",
@@ -100,6 +103,7 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.fastMode, true);
   assert.equal(parsed.options.sandbox, "workspace-write");
   assert.equal(parsed.options.language, "English");
+  assert.equal(parsed.options.publishLanguage, "German");
   assert.equal(parsed.options.json, true);
   assert.deepEqual(parsed.options.includes, ["src/**", "README.md"]);
   assert.deepEqual(parsed.options.ignores, ["fixtures/**"]);

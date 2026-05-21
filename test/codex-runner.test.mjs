@@ -10,6 +10,7 @@ import {
   buildCodexExecArgs,
   fixPlanJsonSchema,
   phaseReportJsonSchema,
+  publishFindingJsonSchema,
   revalidationJsonSchema,
   renderStructuredProviderOutput,
   riskReportJsonSchema,
@@ -62,7 +63,8 @@ test("codex provider-native schemas satisfy strict structured-output requirement
     phaseReportJsonSchema,
     riskReportJsonSchema,
     fixPlanJsonSchema,
-    revalidationJsonSchema
+    revalidationJsonSchema,
+    publishFindingJsonSchema
   })) {
     assertAllObjectPropertiesRequired(schema, label);
   }

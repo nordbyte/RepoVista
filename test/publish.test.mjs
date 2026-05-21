@@ -31,6 +31,66 @@ test("publish renders a dry-run GitHub issue from a GitHub source run", async ()
   }
 });
 
+test("publish translates non-English report findings to English GitHub issues by default", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-issue-language-"));
+  try {
+    await writeGithubRun(root, { language: "German", finding: germanFindingFixture() });
+    const providerRequests = [];
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "issue",
+      dryRun: true
+    }, root, {
+      runProvider: async (request) => {
+        providerRequests.push(request);
+        await writeTranslatedPublishFinding(request.reportPath);
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(providerRequests.length, 1);
+    assert.equal(providerRequests[0].outputSchemaKind, "publish-finding");
+    assert.match(providerRequests[0].prompt, /Target language: English/);
+    assert.match(output, /Title: \[RepoVista\] HIGH: Audit-only command allows writes/);
+    assert.match(output, /Write access contradicts audit-only mode/);
+    assert.doesNotMatch(output, /Schreibzugriff|Nur-Prüfung|entfernen/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("publish honors an explicit non-English GitHub issue language", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-issue-explicit-language-"));
+  try {
+    await writeGithubRun(root, { language: "German", finding: germanFindingFixture() });
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "issue",
+      publishLanguage: "Deutsch",
+      dryRun: true
+    }, root, {
+      runProvider: async () => {
+        throw new Error("translation should not run when source and target languages match");
+      }
+    });
+
+    assert.match(output, /Nur-Prüfung-Befehl erlaubt Schreibzugriff/);
+    assert.match(output, /Schreibzugriff widerspricht dem Nur-Prüfung-Modus/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publish creates a GitHub issue in the source repository and records the link", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-issue-"));
   try {
@@ -65,6 +125,38 @@ test("publish creates a GitHub issue in the source repository and records the li
 
     const findings = JSON.parse(await readFile(path.join(root, ".repovista", RUN_ID, "findings.json"), "utf8"));
     assert.equal(findings[0].issue.url, "https://github.com/creativeprofit22/contract-and-flow/issues/12");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("publish translates non-English report findings to English pull request plans by default", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-pr-language-"));
+  try {
+    await writeGithubRun(root, { language: "German", finding: germanFindingFixture() });
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "pr",
+      dryRun: true,
+      patchBranch: "repovista/fix-fnd-test"
+    }, root, {
+      runProvider: async (request) => {
+        await writeTranslatedPublishFinding(request.reportPath);
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 1,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.match(output, /Finding: fnd_test - Audit-only command allows writes/);
+    assert.match(output, /Recommended fix: Remove write access/);
+    assert.doesNotMatch(output, /Schreibzugriff|Nur-Prüfung|entfernen/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -150,7 +242,9 @@ test("publish creates a fork-backed pull request for a selected finding", async 
   }
 });
 
-async function writeGithubRun(root) {
+async function writeGithubRun(root, options = {}) {
+  const language = options.language ?? "English";
+  const finding = options.finding ?? findingFixture();
   const outRoot = path.join(root, ".repovista");
   const runDir = path.join(outRoot, RUN_ID);
   const cloneDir = path.join(outRoot, "sources", "github", "creativeprofit22", "contract-and-flow", SHA.slice(0, 12));
@@ -164,7 +258,7 @@ async function writeGithubRun(root) {
     runId: RUN_ID,
     startedAt: "2026-05-21T10:00:00.000Z",
     completedAt: "2026-05-21T10:01:00.000Z",
-    options: { outDir: ".repovista", provider: "codex", parallel: "auto", language: "English", json: false, includes: [], ignores: [], phases: [], runChecks: false, checkCommands: [], checkTimeoutSeconds: 300, phaseTimeoutSeconds: 1800, strictReports: true, repairReports: true, exportFormats: [], ci: false, failOnCritical: false, progress: false, keepLogs: false },
+    options: { outDir: ".repovista", provider: "codex", parallel: "auto", language, json: false, includes: [], ignores: [], phases: [], runChecks: false, checkCommands: [], checkTimeoutSeconds: 300, phaseTimeoutSeconds: 1800, strictReports: true, repairReports: true, exportFormats: [], ci: false, failOnCritical: false, progress: false, keepLogs: false },
     source: {
       type: "github",
       repository: "creativeprofit22/contract-and-flow",
@@ -183,9 +277,24 @@ async function writeGithubRun(root) {
     findings: [],
     exitCode: 0
   };
-  const findings = [findingFixture()];
+  const findings = [finding];
   await writeFile(path.join(runDir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
   await writeFile(path.join(runDir, "findings.json"), `${JSON.stringify(findings, null, 2)}\n`, "utf8");
+}
+
+async function writeTranslatedPublishFinding(reportPath) {
+  await writeFile(reportPath, `${JSON.stringify({
+    schemaVersion: 1,
+    language: "English",
+    title: "Audit-only command allows writes",
+    category: "bug",
+    evidence: "README line 2 shows the issue.",
+    problemRationale: "Write access contradicts audit-only mode.",
+    recommendedFix: "Remove write access.",
+    reproduction: "Run the audit-only command and inspect its declared permissions.",
+    suggestedRegressionTest: "Assert command manifests do not include write tools.",
+    minimumFixScope: "README.md"
+  }, null, 2)}\n`, "utf8");
 }
 
 function findingFixture() {
@@ -205,5 +314,18 @@ function findingFixture() {
     problemRationale: "Write access contradicts audit-only mode.",
     suggestedRegressionTest: "Assert command manifests do not include write tools.",
     minimumFixScope: "README.md"
+  };
+}
+
+function germanFindingFixture() {
+  return {
+    ...findingFixture(),
+    title: "Nur-Prüfung-Befehl erlaubt Schreibzugriff",
+    category: "Fehler",
+    evidence: "README Zeile 2 zeigt das Problem.",
+    recommendation: "Schreibzugriff entfernen.",
+    problemRationale: "Schreibzugriff widerspricht dem Nur-Prüfung-Modus.",
+    reproduction: "Den Nur-Prüfung-Befehl ausführen und die Berechtigungen prüfen.",
+    suggestedRegressionTest: "Sicherstellen, dass Befehlsmanifeste keine Schreibwerkzeuge enthalten."
   };
 }

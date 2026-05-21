@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { evidenceReferencesForFinding } from "./evidence-validation.js";
 import { loadStoredFindings, rewriteFindingStateAtomic } from "./finding-store.js";
+import { publishFindingJsonSchema } from "./provider-schema.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
 import { stableId } from "./stable-id.js";
@@ -54,6 +55,24 @@ interface GithubPublishTarget {
   defaultBranch?: string;
 }
 
+interface PublishFindingSelection {
+  original: StructuredFinding;
+  display: StructuredFinding;
+}
+
+interface PublishFindingTranslation {
+  schemaVersion: 1;
+  language: string;
+  title: string;
+  category: string;
+  evidence: string;
+  problemRationale: string;
+  recommendedFix: string;
+  reproduction: string;
+  suggestedRegressionTest: string;
+  minimumFixScope: string;
+}
+
 export async function runPublishCommand(
   options: AuditOptions,
   projectRoot = process.cwd(),
@@ -66,30 +85,33 @@ export async function runPublishCommand(
   if (!selected.length) {
     throw new RepoVistaError("No RepoVista findings selected for publishing.");
   }
+  const publishFindings = await preparePublishFindings({ context, github, findings: selected, options, dependencies });
 
   return target === "issue"
-    ? publishIssues({ projectRoot, context, github, findings: selected, options, dependencies })
-    : publishPullRequest({ projectRoot, context, github, findings: selected, options, dependencies });
+    ? publishIssues({ projectRoot, context, github, findings: publishFindings, options, dependencies })
+    : publishPullRequest({ projectRoot, context, github, findings: publishFindings, options, dependencies });
 }
 
 async function publishIssues(input: {
   projectRoot: string;
   context: PublishRunContext;
   github: GithubPublishTarget;
-  findings: StructuredFinding[];
+  findings: PublishFindingSelection[];
   options: AuditOptions;
   dependencies: PublishDependencies;
 }): Promise<string> {
   const now = input.dependencies.now ?? new Date();
   const exec = input.dependencies.execFile ?? defaultExecFile;
   if (input.options.dryRun) {
-    return `RepoVista publish dry run: ${input.findings.length} GitHub issue(s) for ${input.github.repository}\n\n${input.findings.map((finding) => renderIssuePreview(finding, input.github, input.context.meta, input.options)).join("\n\n---\n\n")}\n`;
+    return `RepoVista publish dry run: ${input.findings.length} GitHub issue(s) for ${input.github.repository}\n\n${input.findings.map((selection) => renderIssuePreview(selection.display, input.github, input.context.meta, input.options)).join("\n\n---\n\n")}\n`;
   }
 
   const rows: string[] = [];
   const updates = new Map<string, StructuredFinding>();
-  for (const finding of input.findings) {
-    const body = renderIssueBody(finding, input.github, input.context.meta);
+  for (const selection of input.findings) {
+    const finding = selection.original;
+    const displayFinding = selection.display;
+    const body = renderIssueBody(displayFinding, input.github, input.context.meta);
     const existing = await findExistingIssue(exec, input.context.meta.projectRoot, input.github.repository, finding.id);
     if (existing && !input.options.issueUpdateExisting && !input.options.issueSync) {
       const linked = issueLinkedFinding(finding, existing, existing.state ?? "unknown", input.options, now, "Existing GitHub issue detected.");
@@ -111,15 +133,15 @@ async function publishIssues(input: {
           maxBuffer: 1024 * 1024
         }).catch(() => ({ stdout: "" }));
       }
-      await applyIssueMetadata(exec, input.context.meta.projectRoot, input.github.repository, existing.number, combinedIssueLabels(finding, input.options), input.options.issueAssignees ?? []);
+      await applyIssueMetadata(exec, input.context.meta.projectRoot, input.github.repository, existing.number, combinedIssueLabels(displayFinding, input.options), input.options.issueAssignees ?? []);
       const linked = issueLinkedFinding(finding, existing, "open", input.options, now, "Synced existing GitHub issue.");
       updates.set(finding.id, linked);
       rows.push(`- ${finding.id}: updated ${existing.url ?? ""}`.trimEnd());
       continue;
     }
 
-    const args = ["issue", "create", "-R", input.github.repository, "--title", issueTitle(finding), "--body", body];
-    for (const label of combinedIssueLabels(finding, input.options)) {
+    const args = ["issue", "create", "-R", input.github.repository, "--title", issueTitle(displayFinding), "--body", body];
+    for (const label of combinedIssueLabels(displayFinding, input.options)) {
       args.push("--label", label);
     }
     for (const assignee of input.options.issueAssignees ?? []) {
@@ -131,7 +153,7 @@ async function publishIssues(input: {
       maxBuffer: 1024 * 1024
     });
     const url = firstUrl(created.stdout);
-    const linked = issueLinkedFinding(finding, { number: issueNumberFromUrl(url), title: issueTitle(finding), url }, "open", input.options, now, "Created GitHub issue.");
+    const linked = issueLinkedFinding(finding, { number: issueNumberFromUrl(url), title: issueTitle(displayFinding), url }, "open", input.options, now, "Created GitHub issue.");
     updates.set(finding.id, linked);
     rows.push(`- ${finding.id}: created ${url ?? ""}`.trimEnd());
   }
@@ -144,17 +166,19 @@ async function publishPullRequest(input: {
   projectRoot: string;
   context: PublishRunContext;
   github: GithubPublishTarget;
-  findings: StructuredFinding[];
+  findings: PublishFindingSelection[];
   options: AuditOptions;
   dependencies: PublishDependencies;
 }): Promise<string> {
   const now = input.dependencies.now ?? new Date();
   const exec = input.dependencies.execFile ?? defaultExecFile;
   const runProvider = input.dependencies.runProvider ?? runProviderPhase;
-  const primary = input.findings[0];
-  const patchAttemptId = stableId("pat", [input.context.meta.runId, input.findings.map((finding) => finding.id).join(","), now.toISOString()]);
+  const originalFindings = input.findings.map((selection) => selection.original);
+  const displayFindings = input.findings.map((selection) => selection.display);
+  const primary = originalFindings[0];
+  const patchAttemptId = stableId("pat", [input.context.meta.runId, originalFindings.map((finding) => finding.id).join(","), now.toISOString()]);
   const branch = input.options.patchBranch ?? safeBranchName(`repovista/fix-${primary.id}-${patchAttemptId}`);
-  const title = input.options.patchTitle ?? `RepoVista: fix ${input.findings.map((finding) => finding.id).join(", ")}`;
+  const title = input.options.patchTitle ?? `RepoVista: fix ${originalFindings.map((finding) => finding.id).join(", ")}`;
   const patchDir = path.join(input.context.outRoot, "patches");
   const publishRoot = path.join(input.context.outRoot, "publish", input.context.meta.runId, patchAttemptId);
   const worktree = path.join(publishRoot, "worktree");
@@ -165,10 +189,10 @@ async function publishPullRequest(input: {
 - Run: ${input.context.meta.runId}
 - Branch: ${branch}
 - Base: ${input.options.baseRef ?? input.github.defaultBranch ?? "main"}
-- Findings: ${input.findings.map((finding) => finding.id).join(", ")}
+- Findings: ${originalFindings.map((finding) => finding.id).join(", ")}
 - Worktree: ${worktree}
 
-${buildFixPlan(input.findings)}
+${buildFixPlan(displayFindings)}
 `;
   }
 
@@ -189,10 +213,10 @@ ${buildFixPlan(input.findings)}
   const initial: PatchAttempt = {
     schemaVersion: 1,
     patchAttemptId,
-    findingIds: input.findings.map((finding) => finding.id),
-    featureIds: Array.from(new Set(input.findings.map((finding) => finding.featureId).filter((value): value is string => Boolean(value)))),
+    findingIds: originalFindings.map((finding) => finding.id),
+    featureIds: Array.from(new Set(originalFindings.map((finding) => finding.featureId).filter((value): value is string => Boolean(value)))),
     status: "planned",
-    plan: buildFixPlan(input.findings),
+    plan: buildFixPlan(displayFindings),
     filesChanged: [],
     preDiff,
     commandsRun: [],
@@ -215,8 +239,8 @@ ${buildFixPlan(input.findings)}
   const providerResult = await runProvider({
     provider: input.options.provider ?? "codex",
     phaseId: `publish-pr-${patchAttemptId}`,
-    phaseTitle: `Publish PR for ${input.findings.map((finding) => finding.id).join(", ")}`,
-    prompt: buildFixPrompt(input.findings, input.options.checkCommands ?? [], input.github, input.context.meta),
+    phaseTitle: `Publish PR for ${originalFindings.map((finding) => finding.id).join(", ")}`,
+    prompt: buildFixPrompt(originalFindings, input.options.checkCommands ?? [], input.github, input.context.meta),
     projectRoot: worktree,
     reportPath: providerReportPath,
     model: input.options.model,
@@ -236,7 +260,7 @@ ${buildFixPlan(input.findings)}
   if (diffPath) {
     await writeFile(diffPath, `${fullDiff.trimEnd()}\n`, "utf8");
   }
-  const scopeGate = evaluatePatchScope(input.findings, filesChanged, input.options.patchMaxFiles ?? 12);
+  const scopeGate = evaluatePatchScope(originalFindings, filesChanged, input.options.patchMaxFiles ?? 12);
   const missingValidation = input.options.runChecks === true && !(input.options.checkCommands ?? []).length;
   const commandsRun = providerResult.success && scopeGate.passed && !missingValidation
     ? await runValidationCommands(exec, worktree, input.options.checkCommands ?? [], input.options.checkTimeoutSeconds ?? 300)
@@ -294,7 +318,7 @@ ${buildFixPlan(input.findings)}
   await writePatchAttempt(patchDir, updated);
 
   const pullRequest = pullRequestLinkedFinding(prUrl, title, branch, patchAttemptId, now);
-  const updates = new Map(input.findings.map((finding) => [finding.id, {
+  const updates = new Map(originalFindings.map((finding) => [finding.id, {
     ...finding,
     pullRequest,
     updatedAt: now.toISOString(),
@@ -383,6 +407,156 @@ function selectFindings(findings: StructuredFinding[], options: AuditOptions): S
     }
     return finding;
   });
+}
+
+async function preparePublishFindings(input: {
+  context: PublishRunContext;
+  github: GithubPublishTarget;
+  findings: StructuredFinding[];
+  options: AuditOptions;
+  dependencies: PublishDependencies;
+}): Promise<PublishFindingSelection[]> {
+  const targetLanguage = resolvePublishLanguage(input.options);
+  const sourceLanguage = input.context.meta.options.language || input.options.language || "English";
+  if (sameLanguage(sourceLanguage, targetLanguage)) {
+    return input.findings.map((finding) => ({ original: finding, display: finding }));
+  }
+
+  const translated: PublishFindingSelection[] = [];
+  for (const finding of input.findings) {
+    translated.push({
+      original: finding,
+      display: await translateFindingForPublish({
+        context: input.context,
+        github: input.github,
+        finding,
+        sourceLanguage,
+        targetLanguage,
+        options: input.options,
+        dependencies: input.dependencies
+      })
+    });
+  }
+  return translated;
+}
+
+async function translateFindingForPublish(input: {
+  context: PublishRunContext;
+  github: GithubPublishTarget;
+  finding: StructuredFinding;
+  sourceLanguage: string;
+  targetLanguage: string;
+  options: AuditOptions;
+  dependencies: PublishDependencies;
+}): Promise<StructuredFinding> {
+  const runProvider = input.dependencies.runProvider ?? runProviderPhase;
+  const publishDir = path.join(input.context.runDir, "publish-language");
+  await mkdir(publishDir, { recursive: true });
+  const reportPath = path.join(publishDir, `${safePatchFileName(`${input.finding.id}-${input.targetLanguage}`)}.json`);
+  const result = await runProvider({
+    provider: input.options.provider ?? input.context.meta.ai?.provider ?? "codex",
+    phaseId: `publish-language-${safeBranchName(input.finding.id)}`,
+    phaseTitle: `Translate finding ${input.finding.id} for GitHub publishing`,
+    prompt: buildPublishFindingTranslationPrompt(input.finding, input.github, input.context.meta, input.sourceLanguage, input.targetLanguage),
+    projectRoot: input.context.meta.projectRoot,
+    reportPath,
+    logsDir: path.join(input.context.runDir, "logs"),
+    model: input.options.model ?? input.context.meta.ai?.model,
+    profile: input.options.profile ?? input.context.meta.ai?.profile,
+    reasoning: input.options.reasoning ?? input.context.meta.ai?.reasoning,
+    fastMode: input.options.fastMode ?? input.context.meta.ai?.fastMode ?? false,
+    sandbox: "read-only",
+    jsonEvents: input.options.json,
+    keepLogs: input.options.keepLogs,
+    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+    outputSchema: publishFindingJsonSchema,
+    outputSchemaKind: "publish-finding"
+  }, input.dependencies.spawnAdapter);
+
+  if (!result.success) {
+    throw new RepoVistaError(`Could not translate finding ${input.finding.id} to ${input.targetLanguage} for GitHub publishing: ${result.error ?? "provider failed"}`);
+  }
+
+  const translated = await readJson<PublishFindingTranslation>(result.reportPath);
+  return mergeTranslatedFinding(input.finding, translated);
+}
+
+function buildPublishFindingTranslationPrompt(
+  finding: StructuredFinding,
+  github: GithubPublishTarget,
+  meta: AuditMeta,
+  sourceLanguage: string,
+  targetLanguage: string
+): string {
+  return `Translate this RepoVista finding for GitHub publication.
+
+Target language: ${targetLanguage}
+Source report language: ${sourceLanguage}
+Repository: ${github.repository}
+Analyzed commit: ${github.commit}
+RepoVista run: ${meta.runId}
+
+Rules:
+- Return strict JSON only. No Markdown fences.
+- The JSON must match RepoVista's publish-finding schema.
+- Translate all human-readable finding content into ${targetLanguage}.
+- Preserve code identifiers, commands, file paths, URLs, package names, commit SHAs, issue IDs, and quoted code exactly.
+- Preserve the finding meaning exactly and do not add new facts, new evidence, or new remediation steps.
+- If a source field is missing or empty, return "n/a" for that field.
+- Keep the language value equal to the target language.
+
+Finding JSON:
+${JSON.stringify(finding, null, 2)}
+`;
+}
+
+function mergeTranslatedFinding(finding: StructuredFinding, translated: PublishFindingTranslation): StructuredFinding {
+  return {
+    ...finding,
+    title: nonEmptyString(translated.title) ?? finding.title,
+    category: nonEmptyString(translated.category) ?? finding.category,
+    evidence: nonEmptyString(translated.evidence) ?? finding.evidence,
+    problemRationale: nonEmptyString(translated.problemRationale) ?? finding.problemRationale,
+    recommendation: nonEmptyString(translated.recommendedFix) ?? finding.recommendation,
+    reproduction: nonEmptyString(translated.reproduction) ?? finding.reproduction,
+    suggestedRegressionTest: nonEmptyString(translated.suggestedRegressionTest) ?? finding.suggestedRegressionTest,
+    minimumFixScope: nonEmptyString(translated.minimumFixScope) ?? finding.minimumFixScope
+  };
+}
+
+function resolvePublishLanguage(options: AuditOptions): string {
+  return nonEmptyString(options.publishLanguage) ?? "English";
+}
+
+function sameLanguage(left: string, right: string): boolean {
+  return normalizeLanguage(left) === normalizeLanguage(right);
+}
+
+function normalizeLanguage(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (["en", "eng", "english"].includes(normalized)) {
+    return "english";
+  }
+  if (["de", "deu", "ger", "german", "deutsch"].includes(normalized)) {
+    return "german";
+  }
+  if (["es", "spa", "spanish", "espanol", "español"].includes(normalized)) {
+    return "spanish";
+  }
+  if (["fr", "fra", "fre", "french", "francais", "français"].includes(normalized)) {
+    return "french";
+  }
+  if (["it", "ita", "italian", "italiano"].includes(normalized)) {
+    return "italian";
+  }
+  if (["pt", "por", "portuguese", "portugues", "português"].includes(normalized)) {
+    return "portuguese";
+  }
+  return normalized.replace(/\s+/g, " ");
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function renderIssuePreview(finding: StructuredFinding, github: GithubPublishTarget, meta: AuditMeta, options: AuditOptions): string {

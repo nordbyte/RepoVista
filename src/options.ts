@@ -521,6 +521,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "language":
       options.language = requireNonEmpty(name, value);
       break;
+    case "publish-language":
+      options.publishLanguage = requireNonEmpty(name, value);
+      break;
     case "include":
       options.includes.push(...splitPatterns(value));
       break;

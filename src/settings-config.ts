@@ -13,6 +13,7 @@ export interface RepoVistaSettings {
   fastMode?: boolean;
   sandbox?: SandboxMode;
   language?: string;
+  publishLanguage?: string;
   outDir?: string;
   includes?: string[];
   ignores?: string[];
@@ -87,6 +88,7 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     fastMode: settings.fastMode ?? defaults.fastMode,
     sandbox: settings.sandbox ?? defaults.sandbox,
     language: settings.language ?? defaults.language,
+    publishLanguage: settings.publishLanguage ?? defaults.publishLanguage,
     json: settings.json ?? defaults.json,
     keepLogs: settings.keepLogs ?? defaults.keepLogs,
     progress: settings.progress ?? defaults.progress,
@@ -138,7 +140,7 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     sanitized.parallel = settings.parallel;
   }
 
-  for (const key of ["model", "profile", "reasoning", "language", "outDir", "workspace", "promptFile"] as const) {
+  for (const key of ["model", "profile", "reasoning", "language", "publishLanguage", "outDir", "workspace", "promptFile"] as const) {
     const value = settings[key];
     if (typeof value === "string" && value.trim()) {
       sanitized[key] = value.trim();

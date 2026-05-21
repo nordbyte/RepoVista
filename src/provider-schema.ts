@@ -227,6 +227,35 @@ export const revalidationJsonSchema: Record<string, unknown> = {
   }
 };
 
+export const publishFindingJsonSchema: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "schemaVersion",
+    "language",
+    "title",
+    "category",
+    "evidence",
+    "problemRationale",
+    "recommendedFix",
+    "reproduction",
+    "suggestedRegressionTest",
+    "minimumFixScope"
+  ],
+  properties: {
+    schemaVersion: { type: "number", enum: [1] },
+    language: { type: "string" },
+    title: { type: "string" },
+    category: { type: "string" },
+    evidence: { type: "string" },
+    problemRationale: { type: "string" },
+    recommendedFix: { type: "string" },
+    reproduction: { type: "string" },
+    suggestedRegressionTest: { type: "string" },
+    minimumFixScope: { type: "string" }
+  }
+};
+
 export function schemaForPhase(phaseId: string): { kind: "risk-report" | "phase-report"; schema: Record<string, unknown> } | undefined {
   if (phaseId === "risk-and-bug") {
     return { kind: "risk-report", schema: riskReportJsonSchema };
@@ -280,6 +309,9 @@ export function renderStructuredProviderOutput(kind: string, rawJson: string): s
   }
   if (kind === "revalidation") {
     return renderRevalidation(JSON.parse(rawJson) as Record<string, unknown>);
+  }
+  if (kind === "publish-finding") {
+    return rawJson;
   }
   return rawJson;
 }

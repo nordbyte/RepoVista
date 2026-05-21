@@ -48,6 +48,7 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("fastMode", undefined, flag("no-fast", "Disable Codex fast service tier")),
   entry("sandbox", "read-only", value("sandbox", "Provider sandbox: read-only or workspace-write (default: read-only)"), setting("sandbox", "enum", "Default provider sandbox mode"), "sandbox"),
   entry("language", "English", value("language", "Report language (default: English)"), setting("language", "string", "Default report language"), "language"),
+  entry("publishLanguage", "English", value("publish-language", "GitHub issue/PR language for published findings (default: English)"), setting("publishLanguage", "string", "Default GitHub issue/PR language")),
   entry("json", false, flag("json", "Store metadata, provider logs/events, or emit command JSON where supported"), setting("json", "boolean", "Keep JSON provider events/log metadata"), "json"),
   entry("includes", [], value("include", "Additional include patterns for inventory/context"), setting("includes", "list", "Default include patterns"), "includes"),
   entry("ignores", [], value("ignore", "Additional ignore patterns"), setting("ignores", "list", "Default ignore patterns"), "ignores"),

@@ -64,9 +64,12 @@ repovista findings
 repovista findings-ui
 repovista next
 repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --dry-run
+repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --publish-language German
 repovista fix fnd_abc123def456 --dry-run
 repovista ci init --template security --dry-run
 ```
+
+GitHub issues and pull request descriptions published from findings default to English, even when the report was generated in another language. Use `--publish-language <name>` to publish them in a different language.
 
 ## Documentation
 
