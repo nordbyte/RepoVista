@@ -20,7 +20,7 @@ Install RepoVista with `npm install -g repovista`, authenticate one provider CLI
 - [Providers](guides/providers.md) - Codex, Claude, Gemini, OpenCode, Aider, and provider plugins.
 - [Reports and state](guides/reports.md) - generated files, terminal browser, HTML/SARIF/JSONL exports, and cache.
 - [Findings](guides/findings.md) - lifecycle, triage, baselines, validation, and issue queues.
-- [Publishing](guides/publishing.md) - explicit GitHub issue and pull request publishing from GitHub-source runs.
+- [Publishing](guides/publishing.md) - explicit GitHub issue and pull request publishing from GitHub-source runs, plus linked remote status refreshes.
 - [Fixes and patches](guides/fixes.md) - opt-in write workflow, scope gates, validation, rollback, and PR creation.
 
 ## Reference

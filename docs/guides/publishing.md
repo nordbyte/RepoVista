@@ -39,3 +39,19 @@ repovista publish fnd_abc123def456 --run <run> --as issue --contribution-policy 
 ## TUI queues
 
 Inside `repovista reports` and `repovista findings-ui`, use the finding views to queue issue or PR actions, review them, dry-run them, and publish after confirmation.
+
+## Remote status tracking
+
+After an issue or pull request is linked to a finding, refresh its GitHub state on demand:
+
+```sh
+repovista github-status fnd_abc123def456
+repovista github-status fnd_abc123def456 --run 2026-05-21T10-00-00-000Z
+repovista github-status --all --run 2026-05-21T10-00-00-000Z
+```
+
+The command reads the stored issue and PR links, calls `gh issue view` and `gh pr view`, and writes the refreshed state back to persistent finding state. With `--run`, it also updates that run's `findings.json`.
+
+In `repovista reports` and `repovista findings-ui`, press `g` to refresh the selected finding or `G` to refresh all visible findings. The TUI then shows statuses such as `issue open`, `issue closed/not-planned`, `PR open`, `PR draft`, `PR closed`, or `PR merged`.
+
+GitHub remote status is separate from the RepoVista lifecycle status. For example, a merged pull request is displayed and persisted, but RepoVista will not automatically mark the finding as `fixed`.

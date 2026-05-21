@@ -410,6 +410,16 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
     return { action: "issue", options };
   }
 
+  if (command === "github-status") {
+    if (positionals.length > 2) {
+      throw new CliUsageError("Command github-status accepts at most one finding id.");
+    }
+    if (positionals[1]) {
+      options.findingId = requireNonEmpty("finding", positionals[1]);
+    }
+    return { action: "github-status", options };
+  }
+
   if (command === "publish") {
     if (positionals.length > 2) {
       throw new CliUsageError("Command publish accepts at most one finding id.");
@@ -668,6 +678,7 @@ function isCommand(value: string): boolean {
     value === "rollback" ||
     value === "open-pr" ||
     value === "publish" ||
+    value === "github-status" ||
     value === "issue";
 }
 

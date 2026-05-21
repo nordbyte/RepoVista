@@ -111,6 +111,7 @@ export default defineConfig({
           { text: "triage", link: "/commands/triage" },
           { text: "revalidate", link: "/commands/revalidate" },
           { text: "issue", link: "/commands/issue" },
+          { text: "github-status", link: "/commands/github-status" },
           { text: "publish", link: "/commands/publish" },
           { text: "fix", link: "/commands/fix" },
           { text: "patches", link: "/commands/patches" },

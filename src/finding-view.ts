@@ -18,8 +18,8 @@ export function findingQueueMarker(target: PublishTarget | undefined): string {
 export function findingPublishReadiness(finding: StructuredFinding, publishable: boolean | undefined): string {
   return [
     publishable ? "github ok" : "github n/a",
-    finding.issue?.url ? "issue linked" : "no issue",
-    finding.pullRequest?.url ? "PR linked" : "no PR",
+    githubIssueStatusLabel(finding),
+    githubPullRequestStatusLabel(finding),
     evidenceReferencesForFinding(finding).length ? "evidence ok" : "weak evidence"
   ].join(" | ");
 }
@@ -114,13 +114,9 @@ export function renderStructuredFindingDetail(finding: StructuredFinding, contex
       "",
       finding.minimumFixScope ?? "n/a",
       "",
-      "## Issue",
+      "## GitHub",
       "",
-      finding.issue?.url ?? "n/a",
-      "",
-      "## Pull Request",
-      "",
-      finding.pullRequest?.url ?? "n/a",
+      ...githubLinkDetailLines(finding),
       "",
       "## History",
       "",
@@ -136,6 +132,80 @@ export function renderStructuredFindingDetail(finding: StructuredFinding, contex
   );
 
   return lines;
+}
+
+export function githubIssueStatusLabel(finding: StructuredFinding): string {
+  const issue = finding.issue;
+  if (!issue?.url && !issue?.number) {
+    return "no issue";
+  }
+  if (issue.state === "closed" && issue.stateReason) {
+    return `issue closed/${issue.stateReason}`;
+  }
+  if (issue.state && issue.state !== "unknown") {
+    return `issue ${issue.state}`;
+  }
+  if (issue.lastStatusError) {
+    return "issue unknown";
+  }
+  return "issue linked";
+}
+
+export function githubPullRequestStatusLabel(finding: StructuredFinding): string {
+  const pr = finding.pullRequest;
+  if (!pr?.url && !pr?.number) {
+    return "no PR";
+  }
+  if (pr.state === "merged") {
+    return "PR merged";
+  }
+  if (pr.state === "open" && pr.isDraft) {
+    return "PR draft";
+  }
+  if (pr.state && pr.state !== "unknown") {
+    return `PR ${pr.state}`;
+  }
+  if (pr.lastStatusError) {
+    return "PR unknown";
+  }
+  return "PR linked";
+}
+
+function githubLinkDetailLines(finding: StructuredFinding): string[] {
+  const lines: string[] = [];
+  if (finding.issue?.url || finding.issue?.number) {
+    lines.push(
+      `- Issue: ${githubIssueStatusLabel(finding).replace(/^issue /, "")}`,
+      `- Issue URL: ${finding.issue.url ?? "n/a"}`,
+      `- Issue repository: ${finding.issue.repository ?? "n/a"}`,
+      `- Issue last checked: ${finding.issue.lastStatusCheckAt ?? finding.issue.syncedAt ?? "n/a"}`
+    );
+    if (finding.issue.lastStatusError) {
+      lines.push(`- Issue status error: ${finding.issue.lastStatusError}`);
+    }
+  } else {
+    lines.push("- Issue: n/a");
+  }
+  if (finding.pullRequest?.url || finding.pullRequest?.number) {
+    lines.push(
+      `- Pull request: ${githubPullRequestStatusLabel(finding).replace(/^PR /, "")}`,
+      `- Pull request URL: ${finding.pullRequest.url ?? "n/a"}`,
+      `- Pull request repository: ${finding.pullRequest.repository ?? "n/a"}`,
+      `- Pull request last checked: ${finding.pullRequest.lastStatusCheckAt ?? finding.pullRequest.syncedAt ?? "n/a"}`
+    );
+    if (finding.pullRequest.mergedAt) {
+      lines.push(`- Pull request merged at: ${finding.pullRequest.mergedAt}`);
+    }
+    if (finding.pullRequest.closedAt) {
+      lines.push(`- Pull request closed at: ${finding.pullRequest.closedAt}`);
+    }
+    if (finding.pullRequest.lastStatusError) {
+      lines.push(`- Pull request status error: ${finding.pullRequest.lastStatusError}`);
+    }
+  } else {
+    lines.push("- Pull request: n/a");
+  }
+  return lines.filter((line): line is string => Boolean(line));
 }
 
 export function statusCycleLabel(status: FindingStatus | "all" | undefined): string {

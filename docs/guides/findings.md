@@ -68,4 +68,4 @@ repovista suppress fnd_abc123def456 --note "accepted risk"
 repovista findings-ui
 ```
 
-The TUI shows publish readiness, issue and PR links, evidence refs, workflow filters, and mixed publish queues.
+The TUI shows publish readiness, linked issue and PR remote status, evidence refs, workflow filters, and mixed publish queues. Press `g` to refresh the selected finding's GitHub issue or PR status, or `G` to refresh all visible findings.

@@ -15,7 +15,7 @@ A run directory is created below `.repovista/` by default.
 | `*.structured.json` | Provider-native structured outputs for repair and review. |
 | `summary.json` | Run summary, phase status, and aggregate metrics. |
 | `meta.json` | Run metadata, source repository, options, and environment facts. |
-| `findings.json` | Structured findings for the run. |
+| `findings.json` | Structured findings for the run, including linked GitHub issue and PR status when refreshed. |
 | `findings.jsonl` | Line-delimited finding export. |
 | `findings.sarif` | SARIF export for code scanning tools. |
 | `report.html` | Standalone HTML dashboard. |
@@ -26,7 +26,7 @@ A run directory is created below `.repovista/` by default.
 
 | Path | Purpose |
 | --- | --- |
-| `.repovista/findings/` | Cross-run finding state. |
+| `.repovista/findings/` | Cross-run finding state, lifecycle history, and linked GitHub issue/PR status. |
 | `.repovista/features/` | Feature state and lock metadata. |
 | `.repovista/cache/` | Scan cache and fingerprints. |
 | `.repovista/patches/` | Patch attempt metadata, diffs, and summaries. |

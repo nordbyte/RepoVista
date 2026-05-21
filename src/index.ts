@@ -59,6 +59,7 @@ export { fixPlanJsonSchema, phaseReportJsonSchema, publishFindingJsonSchema, rev
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity, findingDedupeKey } from "./findings.js";
 export { collectDiffScope } from "./git-diff.js";
 export { normalizeGithubRepository, prepareGithubSource, validateGithubRef } from "./github-source.js";
+export { runGithubStatusCommand } from "./github-status.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";
 export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateContributionPolicyMode, validateProvider, validateSandbox } from "./options.js";
@@ -97,6 +98,8 @@ export type {
   FindingEvidenceReference,
   FindingEvidenceValidation,
   FindingHistoryEntry,
+  FindingIssueLink,
+  FindingPullRequestLink,
   FindingStatus,
   DiffFileStatus,
   ParallelExecutionMeta,

@@ -37,3 +37,5 @@ repovista publish fnd_abc123def456 --run 2026-05-21T10-00-00-000Z --as pr --fork
 ## Requirements
 
 The source run must have been created with `--github-repo`, and `gh` must be authenticated.
+
+After publishing, use [`repovista github-status`](github-status.md) or press `g`/`G` in the TUIs to refresh whether linked issues are open or closed and whether linked pull requests are open, closed, draft, or merged.

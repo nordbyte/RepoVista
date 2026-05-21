@@ -41,6 +41,7 @@ export type CliAction =
   | "triage"
   | "revalidate"
   | "issue"
+  | "github-status"
   | "publish"
   | "help"
   | "version";
@@ -358,7 +359,7 @@ export interface FindingEvidenceValidationReference {
 
 export interface FindingHistoryEntry {
   runId?: string;
-  kind: "audit" | "triage" | "revalidate" | "provider-revalidate" | "issue-sync" | "pr-opened";
+  kind: "audit" | "triage" | "revalidate" | "provider-revalidate" | "issue-sync" | "pr-opened" | "github-status-sync";
   status?: FindingStatus;
   note?: string;
   reasoning?: string;
@@ -374,17 +375,24 @@ export interface FindingSla {
 
 export interface FindingIssueLink {
   provider: "github";
+  repository?: string;
   number?: number;
   url?: string;
   title?: string;
   state?: "open" | "closed" | "unknown";
+  stateReason?: "completed" | "not-planned" | "reopened" | "unknown";
   syncedAt: string;
   labels?: string[];
   assignees?: string[];
+  updatedAt?: string;
+  closedAt?: string;
+  lastStatusCheckAt?: string;
+  lastStatusError?: string;
 }
 
 export interface FindingPullRequestLink {
   provider: "github";
+  repository?: string;
   number?: number;
   url?: string;
   title?: string;
@@ -392,6 +400,15 @@ export interface FindingPullRequestLink {
   syncedAt: string;
   branch?: string;
   patchAttemptId?: string;
+  isDraft?: boolean;
+  mergeStateStatus?: string;
+  baseRefName?: string;
+  headRefName?: string;
+  updatedAt?: string;
+  closedAt?: string;
+  mergedAt?: string;
+  lastStatusCheckAt?: string;
+  lastStatusError?: string;
 }
 
 export interface AuditMeta {

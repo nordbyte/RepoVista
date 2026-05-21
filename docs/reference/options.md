@@ -106,7 +106,7 @@ This page mirrors the current option registry used by `repovista --help`.
 | `--patch <value>` | patch id | Patch attempt id for `patches` or `open-pr`. |
 | `--branch <value>` | branch name | Branch name for `open-pr`. |
 | `--title <value>` | title text | Pull request title. |
-| `--all` | flag | Include all finding statuses or revalidate all findings. |
+| `--all` | flag | Include all finding statuses, revalidate all findings, or refresh all linked GitHub statuses. |
 | `--provider-revalidate` | flag | Ask the configured provider to revalidate finding status. |
 | `--dry-run` | flag | Preview commands, writes, issues, or workflow content. |
 | `--isolate-branch` | flag | Run `fix` on a temporary branch. |

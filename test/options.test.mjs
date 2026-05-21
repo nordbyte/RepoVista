@@ -284,6 +284,11 @@ test("new operational commands and options are recognized", () => {
 
   assert.equal(parseCliArgs(["findings-ui"]).action, "findings-ui");
   assert.equal(parseCliArgs(["reports"]).action, "reports");
+  const githubStatus = parseCliArgs(["github-status", "fnd_123", "--run", "2026-run", "--json"]);
+  assert.equal(githubStatus.action, "github-status");
+  assert.equal(githubStatus.options.findingId, "fnd_123");
+  assert.equal(githubStatus.options.findingRunId, "2026-run");
+  assert.equal(githubStatus.options.json, true);
   assert.throws(() => parseCliArgs(["reports-ui"]), /Unknown command/);
   assert.throws(() => parseCliArgs(["publish", "fnd_123", "--as", "comment"]), /--as/);
   assert.throws(() => parseCliArgs(["publish", "fnd_123", "--contribution-policy", "strict"]), /--contribution-policy/);

@@ -47,7 +47,7 @@ repovista audit --ci --json --fail-on-critical
 repovista reports
 ```
 
-The report browser lists runs newest-first and lets you open generated sections, search, filter findings, bookmark items, compare with previous runs, export the current view, and queue GitHub publishing actions.
+The report browser lists runs newest-first and lets you open generated sections, search, filter findings, bookmark items, compare with previous runs, export the current view, queue GitHub publishing actions, and refresh linked issue or PR status.
 
 ## Manage findings
 
@@ -56,6 +56,7 @@ repovista findings
 repovista next
 repovista show fnd_abc123def456
 repovista triage fnd_abc123def456 --status fixed --note "validated"
+repovista github-status fnd_abc123def456
 ```
 
 Use [Findings](../guides/findings.md) for lifecycle details and [Publishing](../guides/publishing.md) for GitHub issue or PR publishing.

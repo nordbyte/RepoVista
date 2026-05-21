@@ -43,6 +43,7 @@ This reference lists every current RepoVista command. Each command has a dedicat
 | Command | Purpose |
 | --- | --- |
 | [`repovista issue`](issue.md) | Create, update, or sync GitHub issues through `gh`. |
+| [`repovista github-status`](github-status.md) | Refresh linked GitHub issue and pull request status. |
 | [`repovista publish`](publish.md) | Publish GitHub-source findings as issues or pull requests. |
 | [`repovista fix`](fix.md) | Create an isolated patch attempt for one or more findings. |
 | [`repovista patches`](patches.md) | List or preview patch attempts. |

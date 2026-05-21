@@ -24,6 +24,7 @@ RepoVista is a TypeScript CLI. The runtime flow is intentionally narrow: collect
 | `src/report-repair.ts` | Provider repair loop for weak reports. |
 | `src/github-source.ts` | GitHub source cloning and metadata. |
 | `src/publish.ts` | GitHub issue and PR publishing. |
+| `src/github-status.ts` | On-demand linked GitHub issue and PR status refresh. |
 | `src/patch-commands.ts` | Fix, patch, rollback, and open-pr workflows. |
 
 ## Source of truth

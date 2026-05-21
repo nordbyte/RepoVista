@@ -32,3 +32,5 @@ repovista issue --all --sync-issues --update-existing --reopen-issues
 ## Requirements
 
 `issue` uses `gh` and requires GitHub CLI authentication.
+
+Use [`repovista github-status`](github-status.md) after issue creation to refresh whether linked issues are still open, closed as completed, or closed as not planned.

@@ -3,6 +3,7 @@ import { lstat, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { runCompareCommand } from "./compare.js";
+import { runGithubStatusCommand } from "./github-status.js";
 import { runPublishCommand } from "./publish.js";
 import {
   findingPublishReadiness,
@@ -394,7 +395,7 @@ export function renderReportsMenuFrame(
     const findings = sortedFilteredFindings(run.findings, state, run);
     return renderTuiListFrame({
       title: "RepoVista Reports",
-      help: "Enter details | Space queue | i issue | p PR | c publish | 1-5 triage | s/f/t/r | e evidence | b bookmark",
+      help: "Enter details | g/G sync GitHub | Space queue | i issue | p PR | c publish | 1-5 triage | s/f/t/r | e evidence | b bookmark",
       sectionTitle: `${run.runId} findings`,
       items: findings.map((finding) => formatFindingListItem(run, finding, state)),
       cursor: state.findingCursor ?? 0,
@@ -411,7 +412,7 @@ export function renderReportsMenuFrame(
     const content = finding ? renderFindingDetail(run, finding, state) : "No finding selected.";
     return renderTuiTextFrame({
       title: "RepoVista Reports",
-      help: "Up/Down scroll | e evidence | 1-5 triage | o editor | b bookmark | x export | Esc returns",
+      help: "Up/Down scroll | g sync GitHub | e evidence | 1-5 triage | o editor | b bookmark | x export | Esc returns",
       sectionTitle: finding ? `${finding.severity.toUpperCase()}: ${finding.title}` : "Finding Detail",
       lines: content.split(/\r?\n/),
       scroll: state.scroll,
@@ -524,7 +525,7 @@ async function handleReportBrowserKey(
     state.exportCursor = 0;
     return;
   }
-  if (!state.searchMode && key.name === "g" && state.screen !== "confirm-delete" && state.screen !== "confirm-publish" && state.screen !== "publish-output") {
+  if (!state.searchMode && key.name === "g" && key.sequence !== "G" && state.screen !== "findings-list" && state.screen !== "finding-detail" && state.screen !== "confirm-delete" && state.screen !== "confirm-publish" && state.screen !== "publish-output") {
     state.previousScreen = state.screen;
     state.screen = "global-search";
     state.searchScope = state.searchScope === "all" ? "all" : "run";
@@ -824,6 +825,9 @@ async function handleReportBrowserKey(
       toggleQueuedFinding(findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
     } else if ((key.name === "i" || key.name === "p") && findings.length) {
       queueFindingForPublish(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state, key.name === "p" ? "pr" : "issue");
+    } else if ((key.name === "g" || key.sequence === "G") && findings.length) {
+      const selected = key.sequence === "G" ? findings : [findings[clampCursor(state.findingCursor ?? 0, findings.length)]];
+      await syncGithubStatusForReportFindings(run, selected, runs, state, options, projectRoot);
     } else if (key.name === "c") {
       beginPublish(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
     } else if (isTriageKey(key) && findings.length) {
@@ -864,6 +868,8 @@ async function handleReportBrowserKey(
       toggleQueuedFinding(finding, state);
     } else if ((key.name === "i" || key.name === "p") && finding) {
       queueFindingForPublish(run, finding, state, key.name === "p" ? "pr" : "issue");
+    } else if (key.name === "g" && finding) {
+      await syncGithubStatusForReportFindings(run, [finding], runs, state, options, projectRoot);
     } else if (key.name === "c" && finding) {
       beginPublish(run, finding, state);
     } else if (key.name === "o" && finding) {
@@ -1879,6 +1885,35 @@ async function publishQueuedReportFindings(
   return outputs.join("\n");
 }
 
+async function syncGithubStatusForReportFindings(
+  run: ReportRunSummary,
+  findings: StructuredFinding[],
+  runs: ReportRunSummary[],
+  state: ReportBrowserState,
+  options: AuditOptions,
+  projectRoot: string
+): Promise<void> {
+  const ids = findings.map((finding) => finding.id).join(",");
+  if (!ids) {
+    state.notice = "No findings selected for GitHub status sync.";
+    return;
+  }
+  try {
+    const output = await runGithubStatusCommand({
+      ...options,
+      findingRunId: run.runDir,
+      findingId: ids,
+      allFindings: false,
+      json: false,
+      exportFormats: []
+    }, projectRoot);
+    await reloadReportRuns(runs, run.runDir, state, projectRoot, options);
+    state.notice = firstLine(output);
+  } catch (error) {
+    state.notice = `GitHub status sync failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 async function reloadReportRuns(
   runs: ReportRunSummary[],
   currentRunDir: string,
@@ -2149,6 +2184,8 @@ function helpLines(screen: ReportBrowserScreen): string[] {
     "- Space: mark finding for GitHub publishing",
     "- `i`: queue finding as GitHub issue",
     "- `p`: queue finding as GitHub pull request",
+    "- `g`: refresh linked GitHub status for the selected finding",
+    "- `G`: refresh linked GitHub status for all visible findings",
     "- `c`: review queued GitHub publishing",
     "- `s`: cycle finding sort",
     "- `1`: open, `2`: uncertain, `3`: fixed, `4`: false-positive, `5`: wont-fix",

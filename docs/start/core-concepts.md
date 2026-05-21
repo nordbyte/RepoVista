@@ -26,7 +26,7 @@ Use `--phase <id>` to run selected phases.
 
 ## Finding
 
-A finding is a structured risk item with a stable id, severity, category, affected paths, evidence references, rationale, recommended fix, reproduction guidance, regression-test suggestion, status, and lifecycle history.
+A finding is a structured risk item with a stable id, severity, category, affected paths, evidence references, rationale, recommended fix, reproduction guidance, regression-test suggestion, lifecycle status, linked GitHub issue or PR status, and lifecycle history.
 
 ## Project map
 
@@ -34,4 +34,4 @@ The project map records repository structure and feature areas. `parallel=auto` 
 
 ## State layer
 
-RepoVista persists findings, feature state, baselines, patches, scan cache, locks, and GitHub links under `.repovista/`.
+RepoVista persists findings, feature state, baselines, patches, scan cache, locks, GitHub links, and refreshed GitHub issue/PR status under `.repovista/`.

@@ -10,6 +10,7 @@ import {
   statusCycleLabel,
   type FindingWorkflowFilter
 } from "./finding-view.js";
+import { runGithubStatusCommand } from "./github-status.js";
 import { runPublishCommand } from "./publish.js";
 import { listReportRuns, type ReportRunSummary } from "./report-browser.js";
 import { renderTuiListFrame, renderTuiTextFrame, runTuiSession, shouldUseColor, wrappedLineCount, type TuiKey } from "./tui.js";
@@ -207,7 +208,7 @@ export function renderFindingsMenuFrame(
   if (screen === "detail" && finding) {
     return renderTuiTextFrame({
       title: "RepoVista Findings",
-      help: "Up/Down scroll | Space queue | i issue | p PR | c publish | 1-5 triage | Enter/Esc returns",
+      help: "Up/Down scroll | g sync GitHub | Space queue | i issue | p PR | c publish | 1-5 triage | Enter/Esc returns",
       sectionTitle: `${finding.id} / ${finding.status ?? "open"}`,
       lines: renderStructuredFindingDetail(finding, {
         layout: "detailed",
@@ -225,7 +226,7 @@ export function renderFindingsMenuFrame(
 
   return renderTuiListFrame({
     title: "RepoVista Findings",
-    help: "Up/Down move | Enter detail | Space queue | i issue | p PR | 0 skip | c publish | 1-5 triage | s/t/r filters",
+    help: "Up/Down move | Enter detail | g/G sync GitHub | Space queue | i issue | p PR | 0 skip | c publish | 1-5 triage | s/t/r filters",
     sectionTitle: "Persisted findings",
     items: visibleFindings.map((item) => formatFindingItem(item, state)),
     cursor: state.cursor,
@@ -378,6 +379,11 @@ async function handleFindingsMenuKey(
     queueFindingForPublish(finding, state, key.name === "p" ? "pr" : "issue");
     return false;
   }
+  if ((key.name === "g" || key.sequence === "G") && finding) {
+    const targets = key.sequence === "G" ? visibleFindings : [finding];
+    await syncGithubStatusForMenuFindings(targets, state, context);
+    return false;
+  }
   if ((key.name === "0" || key.name === "delete") && finding) {
     removeFromPublishQueue(finding, state);
     return false;
@@ -412,6 +418,33 @@ async function handleFindingsMenuKey(
     state.scroll = 0;
   }
   return false;
+}
+
+async function syncGithubStatusForMenuFindings(
+  findings: StructuredFinding[],
+  state: FindingsMenuState,
+  context: HandleFindingsMenuContext
+): Promise<void> {
+  const ids = findings.map((finding) => finding.id).join(",");
+  if (!ids) {
+    state.notice = "No findings selected for GitHub status sync.";
+    return;
+  }
+  try {
+    await context.saveIfDirty();
+    const output = await runGithubStatusCommand({
+      ...context.options,
+      findingId: ids,
+      allFindings: false,
+      findingRunId: undefined,
+      json: false,
+      exportFormats: []
+    }, context.projectRoot, context.now);
+    await context.reload();
+    state.notice = firstLine(output);
+  } catch (error) {
+    state.notice = `GitHub status sync failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 function formatFindingItem(finding: StructuredFinding, state: FindingsMenuState): string {

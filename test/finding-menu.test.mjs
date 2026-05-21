@@ -14,8 +14,8 @@ test("findings-ui renders publish readiness, queue targets, filters, and run sel
       paths: ["src/index.ts"],
       evidence: "src/index.ts:1 shows the issue.",
       evidenceDetails: [{ path: "src/index.ts", startLine: 1, endLine: 1, quote: "issue" }],
-      issue: { provider: "github", url: "https://github.com/nordbyte/RepoVista/issues/1", syncedAt: "2026-05-21T10:00:00.000Z" },
-      pullRequest: { provider: "github", url: "https://github.com/nordbyte/RepoVista/pull/2", syncedAt: "2026-05-21T10:00:00.000Z" }
+      issue: { provider: "github", url: "https://github.com/nordbyte/RepoVista/issues/1", state: "open", syncedAt: "2026-05-21T10:00:00.000Z" },
+      pullRequest: { provider: "github", url: "https://github.com/nordbyte/RepoVista/pull/2", state: "merged", syncedAt: "2026-05-21T10:00:00.000Z" }
     },
     {
       id: "fnd_no_issue",
@@ -58,7 +58,7 @@ test("findings-ui renders publish readiness, queue targets, filters, and run sel
   }, { columns: 140, rows: 40, color: false });
 
   assert.match(listFrame, /\[P\] HIGH/);
-  assert.match(listFrame, /github ok \| issue linked \| PR linked \| evidence ok/);
+  assert.match(listFrame, /github ok \| issue open \| PR merged \| evidence ok/);
   assert.match(listFrame, /Space queue \| i issue \| p PR/);
   assert.match(listFrame, /workflow all/);
 
@@ -119,5 +119,7 @@ test("findings-ui renders publish readiness, queue targets, filters, and run sel
   assert.match(detailFrame, /Publish readiness: github ok/);
   assert.match(detailFrame, /Publish source: nordbyte\/RepoVista@main/);
   assert.match(detailFrame, /Queued target: pr/);
-  assert.match(detailFrame, /## Pull Request/);
+  assert.match(detailFrame, /## GitHub/);
+  assert.match(detailFrame, /Issue: open/);
+  assert.match(detailFrame, /Pull request: merged/);
 });

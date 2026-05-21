@@ -18,8 +18,10 @@ repovista reports
 - search
 - bookmarks
 - current-view export
-- issue and PR queues
+- issue and PR queues with linked GitHub status refresh
 - marked-run deletion with confirmation
+
+In the findings list or detail view, press `g` to refresh the selected finding's linked GitHub issue or pull request status. Press `G` to refresh all visible findings.
 
 ## Related commands
 

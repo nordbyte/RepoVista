@@ -20,7 +20,10 @@ The browser supports:
 - bookmarks
 - current-view export
 - issue and PR publish queues
+- linked GitHub issue and PR status refreshes
 - deletion of marked runs after confirmation
+
+In finding views, `g` refreshes linked GitHub status for the selected finding and `G` refreshes all visible findings.
 
 ## Generated exports
 
@@ -50,7 +53,7 @@ Compare gates can fail on new critical, high, or medium findings. See [compare](
 
 | Path | Purpose |
 | --- | --- |
-| `.repovista/findings/` | persisted finding records and lifecycle history |
+| `.repovista/findings/` | persisted finding records, lifecycle history, and linked GitHub status |
 | `.repovista/features/` | feature state and locks |
 | `.repovista/cache/` | scan fingerprints and reusable metadata |
 | `.repovista/patches/` | recorded patch attempts |

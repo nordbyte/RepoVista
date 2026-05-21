@@ -36,7 +36,7 @@ RepoVista avoids including obvious secret-like content where its ignore and evid
 
 ## Writes and remote actions
 
-- `audit`, `doctor`, `plan`, `reports`, `findings`, and `review` are non-mutating except for RepoVista output/state files.
+- `audit`, `doctor`, `plan`, `reports`, `findings`, `github-status`, and `review` are non-mutating except for RepoVista output/state files. `github-status` reads linked GitHub resources through `gh`.
 - `fix` can write local code and records patch attempts, but it does not commit or push.
 - `issue`, `publish`, and `open-pr` can create or update GitHub resources after explicit command invocation.
 - `--dry-run` is supported by publishing, issue, CI-init, patch preview, rollback preview, and related workflows.

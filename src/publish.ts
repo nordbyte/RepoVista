@@ -140,7 +140,7 @@ async function publishIssues(input: {
     const body = renderIssueBody(displayFinding, input.github, input.context.meta, input.contributionPolicy.bundle);
     const existing = await findExistingIssue(exec, input.context.meta.projectRoot, input.github.repository, finding.id);
     if (existing && !input.options.issueUpdateExisting && !input.options.issueSync) {
-      const linked = issueLinkedFinding(finding, existing, existing.state ?? "unknown", input.options, now, "Existing GitHub issue detected.");
+      const linked = issueLinkedFinding(finding, existing, existing.state ?? "unknown", input.github.repository, input.options, now, "Existing GitHub issue detected.");
       updates.set(finding.id, linked);
       rows.push(`- ${finding.id}: existing ${existing.url ?? ""}`.trimEnd());
       continue;
@@ -160,7 +160,7 @@ async function publishIssues(input: {
         }).catch(() => ({ stdout: "" }));
       }
       await applyIssueMetadata(exec, input.context.meta.projectRoot, input.github.repository, existing.number, combinedIssueLabels(displayFinding, input.options), input.options.issueAssignees ?? []);
-      const linked = issueLinkedFinding(finding, existing, "open", input.options, now, "Synced existing GitHub issue.");
+      const linked = issueLinkedFinding(finding, existing, "open", input.github.repository, input.options, now, "Synced existing GitHub issue.");
       updates.set(finding.id, linked);
       rows.push(`- ${finding.id}: updated ${existing.url ?? ""}`.trimEnd());
       continue;
@@ -179,7 +179,7 @@ async function publishIssues(input: {
       maxBuffer: 1024 * 1024
     });
     const url = firstUrl(created.stdout);
-    const linked = issueLinkedFinding(finding, { number: issueNumberFromUrl(url), title: issueTitle(displayFinding), url }, "open", input.options, now, "Created GitHub issue.");
+    const linked = issueLinkedFinding(finding, { number: issueNumberFromUrl(url), title: issueTitle(displayFinding), url }, "open", input.github.repository, input.options, now, "Created GitHub issue.");
     updates.set(finding.id, linked);
     rows.push(`- ${finding.id}: created ${url ?? ""}`.trimEnd());
   }
@@ -348,7 +348,7 @@ ${buildFixPlan(displayFindings)}
   };
   await writePatchAttempt(patchDir, updated);
 
-  const pullRequest = pullRequestLinkedFinding(prUrl, title, branch, patchAttemptId, now);
+  const pullRequest = pullRequestLinkedFinding(prUrl, title, branch, patchAttemptId, input.github.repository, now);
   const updates = new Map(originalFindings.map((finding) => [finding.id, {
     ...finding,
     pullRequest,
@@ -761,6 +761,7 @@ function issueLinkedFinding(
   finding: StructuredFinding,
   issue: { number?: number; title?: string; url?: string },
   state: "open" | "closed" | "unknown",
+  repository: string,
   options: AuditOptions,
   now: Date,
   note: string
@@ -770,6 +771,7 @@ function issueLinkedFinding(
     ...finding,
     issue: {
       provider: "github",
+      repository,
       number: issue.number,
       url: issue.url,
       title: issue.title,
@@ -1101,10 +1103,12 @@ function pullRequestLinkedFinding(
   title: string,
   branch: string,
   patchAttemptId: string,
+  repository: string,
   now: Date
 ): FindingPullRequestLink {
   return {
     provider: "github",
+    repository,
     number: pullRequestNumberFromUrl(url),
     url,
     title,

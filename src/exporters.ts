@@ -1,5 +1,6 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { githubIssueStatusLabel, githubPullRequestStatusLabel } from "./finding-view.js";
 import { reportPath } from "./reports.js";
 import type {
   AuditMeta,
@@ -549,7 +550,8 @@ function renderFindingCard(finding: StructuredFinding, snippets: Map<string, Htm
 <p><strong>Paths:</strong> ${escapeHtml(finding.paths.join(", ") || "n/a")}</p>
 <p><strong>Evidence:</strong> ${escapeHtml(finding.evidence ?? "n/a")}</p>
 <p><strong>Recommendation:</strong> ${escapeHtml(finding.recommendation ?? "n/a")}</p>
-<p><strong>Issue:</strong> ${finding.issue?.url ? `<a href="${escapeHtml(finding.issue.url)}">${escapeHtml(finding.issue.url)}</a>` : "n/a"}</p>
+<p><strong>Issue:</strong> ${escapeHtml(githubIssueStatusLabel(finding))}${finding.issue?.url ? ` - <a href="${escapeHtml(finding.issue.url)}">${escapeHtml(finding.issue.url)}</a>` : ""}</p>
+<p><strong>Pull request:</strong> ${escapeHtml(githubPullRequestStatusLabel(finding))}${finding.pullRequest?.url ? ` - <a href="${escapeHtml(finding.pullRequest.url)}">${escapeHtml(finding.pullRequest.url)}</a>` : ""}</p>
 <p><strong>Evidence refs:</strong><br>${renderEvidenceLinks(finding)}</p>
 ${snippetHtml || "<p class=\"muted\">No local evidence snippet available.</p>"}
 </details>`;

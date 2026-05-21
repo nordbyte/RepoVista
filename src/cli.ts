@@ -20,6 +20,7 @@ import {
   runTriageFindingCommand
 } from "./finding-state.js";
 import { runFindingsMenu } from "./finding-menu.js";
+import { runGithubStatusCommand } from "./github-status.js";
 import { parseCliArgs, renderHelp, DEFAULT_OPTIONS } from "./options.js";
 import { runFixFindingCommand, runOpenPrCommand, runPatchesCommand, runRollbackPatchCommand } from "./patch-commands.js";
 import { runProvidersCommand } from "./provider-commands.js";
@@ -175,6 +176,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (optionsWithSettings.action === "issue") {
       process.stdout.write(await runCreateIssueCommand(optionsWithSettings.options));
+      return 0;
+    }
+    if (optionsWithSettings.action === "github-status") {
+      process.stdout.write(await runGithubStatusCommand(optionsWithSettings.options));
       return 0;
     }
     if (optionsWithSettings.action === "publish") {
