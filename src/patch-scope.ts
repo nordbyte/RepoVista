@@ -96,7 +96,7 @@ function normalizePathMention(value: string): string | undefined {
   if (!cleaned || cleaned.startsWith("/") || cleaned.includes("://") || cleaned.includes("*") || cleaned.includes(" ")) {
     return undefined;
   }
-  if (!cleaned.includes("/") || /^api\//iu.test(cleaned)) {
+  if (!cleaned.includes("/") || /^api\//iu.test(cleaned) || !/\/?[^/]+\.[A-Za-z0-9]+$/u.test(cleaned)) {
     return undefined;
   }
   return cleaned;
