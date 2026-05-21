@@ -765,15 +765,46 @@ function isSuggestedValidationLine(lowerLine: string): boolean {
 }
 
 function securityInstructions(documents: ContributionPolicyDocument[]): string | undefined {
-  const securityDocs = documents.filter((document) => document.kind === "security" || /security|vulnerab|disclos/i.test(document.text));
-  for (const document of securityDocs) {
+  for (const document of documents) {
+    const strongSecurityDocument = document.kind === "security";
+    let inSecuritySection = strongSecurityDocument;
     const lines = document.text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const relevant = lines.filter((line) => /security@|vulnerab|privately|private|responsible disclosure|do not.*public|email/i.test(line));
+    const relevant: string[] = [];
+    for (const line of lines) {
+      const heading = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
+      if (heading) {
+        inSecuritySection = strongSecurityDocument || securityHeadingLooksRelevant(heading[1] ?? "");
+      }
+      if (lineLooksSecurityReportInstruction(line, strongSecurityDocument || inSecuritySection)) {
+        relevant.push(line);
+      }
+    }
     if (relevant.length) {
       return relevant.slice(0, 4).join(" ");
     }
   }
   return undefined;
+}
+
+function securityHeadingLooksRelevant(value: string): boolean {
+  return /\b(security|vulnerab|disclos|cve)\b/i.test(value);
+}
+
+function lineLooksSecurityReportInstruction(line: string, hasSecurityContext: boolean): boolean {
+  const lower = line.toLowerCase();
+  const reportSecurityContext = /\b(?:vulnerabilit(?:y|ies)|security issue|security bug|security report|security advisory|report.{0,50}security|security.{0,50}report|responsible disclosure|coordinated disclosure|disclos(?:e|ure)|cve)\b/.test(lower);
+  const directSecurityContact = /\bsecurity@[\w.+-]+|mailto:[^\s)]*security[^\s)]*@/i.test(line);
+  const privateDisclosureInstruction = /\b(?:privately|private disclosure|responsible disclosure|coordinated disclosure|private security advisory|security advisory)\b/.test(lower);
+  const emailSecurityReport = /\b(?:email|e-mail|contact|send)\b/.test(lower) && reportSecurityContext;
+  const publicIssueBlock = /\b(?:do not|don't|avoid|please don't|not)\b.{0,60}\b(?:public|github issue|issue tracker|issue)\b/.test(lower);
+
+  if (directSecurityContact || /responsible disclosure|coordinated disclosure/.test(lower)) {
+    return true;
+  }
+  if (!hasSecurityContext && !reportSecurityContext) {
+    return false;
+  }
+  return (privateDisclosureInstruction || emailSecurityReport || publicIssueBlock) && (hasSecurityContext || reportSecurityContext);
 }
 
 function markdownHeadings(text: string): string[] {

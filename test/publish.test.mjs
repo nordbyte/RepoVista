@@ -246,6 +246,45 @@ test("publish blocks public security issues when repository security policy requ
   }
 });
 
+test("publish does not treat generic private README wording as a security disclosure policy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-readme-private-"));
+  try {
+    await writeGithubRun(root, {
+      finding: {
+        ...findingFixture(),
+        title: "Admin APIs expose key controls",
+        severity: "high",
+        category: "security",
+        labels: ["security"]
+      },
+      policyFiles: {
+        "README.md": [
+          "# FreeLLMAPI",
+          "",
+          "Pull requests are welcome.",
+          "",
+          "| Provider | Status | Notes |",
+          "| --- | --- | --- |",
+          "| OpenRouter | Likely OK | Private single-user proxy usage still fine. |"
+        ].join("\n")
+      }
+    });
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "issue",
+      dryRun: true
+    }, root);
+
+    assert.match(output, /Contribution policy: enforce/);
+    assert.match(output, /Contribution blockers: none/);
+    assert.doesNotMatch(output, /private security disclosure|Would block in enforce mode/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publish can downgrade contribution policy blockers to warnings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-policy-warn-"));
   try {
