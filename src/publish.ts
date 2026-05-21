@@ -295,6 +295,7 @@ ${buildFixPlan(displayFindings)}
   }
 
   await exec("git", ["add", ...filesChanged], { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
+  await configureGithubNoreplyCommitIdentity(exec, worktree);
   await exec("git", ["commit", "-m", title], { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
   const commitSha = await gitHead(exec, worktree);
   const push = await pushBranch(exec, worktree, input.github.repository, branch, Boolean(input.options.publishFork));
@@ -858,6 +859,42 @@ async function pushBranch(
   }
   await exec("git", ["push", "-u", "repovista-fork", branch], { cwd, timeout: 120_000, maxBuffer: 1024 * 1024 });
   return { remote: "repovista-fork", head: `${login}:${branch}` };
+}
+
+async function configureGithubNoreplyCommitIdentity(
+  exec: NonNullable<PublishDependencies["execFile"]>,
+  cwd: string
+): Promise<void> {
+  const login = await ghApiText(exec, cwd, ".login");
+  if (!login) {
+    return;
+  }
+  const id = numericText(await ghApiText(exec, cwd, ".id"));
+  const name = await ghApiText(exec, cwd, ".name // .login") ?? login;
+  const email = id ? `${id}+${login}@users.noreply.github.com` : `${login}@users.noreply.github.com`;
+  await exec("git", ["config", "user.name", name], { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 });
+  await exec("git", ["config", "user.email", email], { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 });
+}
+
+async function ghApiText(
+  exec: NonNullable<PublishDependencies["execFile"]>,
+  cwd: string,
+  jq: string
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await exec("gh", ["api", "user", "--jq", jq], {
+      cwd,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    return nonEmptyString(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
+function numericText(value: string | undefined): string | undefined {
+  return value && /^\d+$/.test(value) ? value : undefined;
 }
 
 function renderPatchPrBody(patch: PatchAttempt, github: GithubPublishTarget, meta: AuditMeta): string {

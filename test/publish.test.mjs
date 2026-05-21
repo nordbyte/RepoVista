@@ -214,6 +214,12 @@ test("publish creates a fork-backed pull request for a selected finding", async 
           return { stdout: "" };
         }
         if (command === "gh" && args[0] === "api") {
+          if (args.includes(".id")) {
+            return { stdout: "12345\n" };
+          }
+          if (args.includes(".name // .login")) {
+            return { stdout: "RepoVista Bot\n" };
+          }
           return { stdout: "tester\n" };
         }
         if (command === "gh" && args[0] === "pr" && args[1] === "create") {
@@ -241,6 +247,8 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     const prBody = prCall.args[prCall.args.indexOf("--body") + 1];
     assert.match(prBody, /Hi,\n\nI opened this PR to address a RepoVista finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
     assert.match(prBody, /_Found with \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\)\._/);
+    assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.name RepoVista Bot"));
+    assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.email 12345+tester@users.noreply.github.com"));
     const patchFiles = await readdir(path.join(root, ".repovista", "patches"));
     assert.ok(patchFiles.some((file) => file.endsWith(".json")));
     const findings = JSON.parse(await readFile(path.join(root, ".repovista", RUN_ID, "findings.json"), "utf8"));
