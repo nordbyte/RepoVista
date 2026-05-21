@@ -1,0 +1,35 @@
+:root {
+  --vp-c-brand-1: #16724a;
+  --vp-c-brand-2: #1d8a5b;
+  --vp-c-brand-3: #2aa66e;
+  --vp-c-brand-soft: rgba(42, 166, 110, 0.14);
+  --vp-button-brand-bg: #16724a;
+  --vp-button-brand-hover-bg: #1d8a5b;
+  --vp-button-brand-active-bg: #125f3d;
+  --vp-home-hero-name-color: #16724a;
+}
+
+.dark {
+  --vp-c-brand-1: #5fd39a;
+  --vp-c-brand-2: #37b878;
+  --vp-c-brand-3: #1d8a5b;
+  --vp-c-brand-soft: rgba(95, 211, 154, 0.16);
+}
+
+.VPDoc h1 {
+  letter-spacing: 0;
+}
+
+.VPDoc table code,
+.VPDoc li code,
+.VPDoc p code {
+  white-space: nowrap;
+}
+
+.VPNavBarTitle .logo {
+  border-radius: 4px;
+}
+
+.vp-doc .custom-block.tip {
+  border-color: var(--vp-c-brand-2);
+}

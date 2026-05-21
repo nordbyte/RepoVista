@@ -6,5 +6,7 @@ dist/
 .nordrelay/
 coverage/
 .tmp/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
 *.log
 repovista.md

@@ -19,6 +19,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/make-cli-executable.mjs",
+    "docs:prepare": "npm install --no-save --no-package-lock --no-audit --no-fund vitepress@1.6.4",
+    "docs:dev": "npm run docs:prepare && vitepress dev docs --host 0.0.0.0",
+    "docs:build": "npm run docs:prepare && vitepress build docs",
+    "docs:preview": "npm run docs:prepare && vitepress preview docs --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "node scripts/lint.mjs",
     "golden:reports": "npm run build && node scripts/check-golden-reports.mjs",
@@ -44,7 +48,7 @@
   "bugs": {
     "url": "https://github.com/nordbyte/RepoVista/issues"
   },
-  "homepage": "https://github.com/nordbyte/RepoVista#readme",
+  "homepage": "https://repovista.com",
   "devDependencies": {
     "@types/node": "^20.17.19",
     "typescript": "^5.7.3"

@@ -75,19 +75,18 @@ For `--github-repo` reports, `repovista publish` also reads repository contribut
 
 ## Documentation
 
-Full documentation lives in [docs/](docs/README.md):
+Full documentation is published at [repovista.com](https://repovista.com/) and lives in [docs/](docs/index.md).
 
-- [Getting Started](docs/getting-started.md)
-- [CLI Reference](docs/cli-reference.md)
-- [Configuration and Settings](docs/configuration.md)
-- [Reports and State](docs/reports-and-state.md)
-- [Providers and Plugins](docs/providers.md)
-- [Finding and Fix Workflows](docs/workflows.md)
-- [CI/CD](docs/ci.md)
-- [Architecture](docs/architecture.md)
-- [Security Model](docs/security.md)
-- [API Reference](docs/api-reference.md)
-- [Development](docs/development.md)
+- [Quickstart](docs/start/quickstart.md)
+- [CLI Command Reference](docs/commands/index.md)
+- [CLI Options](docs/reference/options.md)
+- [Configuration](docs/guides/configuration.md)
+- [Providers](docs/guides/providers.md)
+- [Reports and State](docs/guides/reports.md)
+- [Finding and Fix Workflows](docs/guides/findings.md)
+- [CI/CD](docs/guides/ci.md)
+- [Architecture](docs/internals/architecture.md)
+- [Security Model](docs/internals/security.md)
 
 ## Notes
 
