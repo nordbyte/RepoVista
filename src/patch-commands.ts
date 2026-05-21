@@ -309,6 +309,7 @@ function buildFixPrompt(findings: StructuredFinding[], validationCommands: strin
   return `You are fixing ${findings.length === 1 ? "one RepoVista finding" : `${findings.length} related RepoVista findings`} in this repository.
 
 You may edit files, but keep the fix minimal and limited to the finding evidence.
+Do not edit out-of-scope production files just to extract or deduplicate helpers; create a small scoped helper instead and leave unrelated routes unchanged.
 Do not commit, push, publish, or create releases.
 After editing, summarize the change and mention any validation you ran.
 
