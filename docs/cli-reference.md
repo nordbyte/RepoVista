@@ -81,6 +81,8 @@ repovista version
 | `--no-parallel` | Disable a saved parallel default. |
 | `--out <dir>` | Output directory, default `.repovista`. |
 | `--resume <run-dir>` | Resume or complete an existing run directory. |
+| `--github-repo <owner/repo\|url>` | Audit a public GitHub repository by shorthand or `https://github.com/owner/repo`; the cloned source is stored below the local output root. |
+| `--github-ref <branch\|tag\|sha>` | Branch, tag, or full commit SHA to audit with `--github-repo`; default is the remote HEAD branch. |
 | `--since <git-ref>` | Focus on files changed since a Git ref. |
 | `--pr` | PR mode, default base `origin/main` unless `--base` is set. |
 | `--no-pr` | Disable saved PR mode. |

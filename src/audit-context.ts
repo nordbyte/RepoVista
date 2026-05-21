@@ -45,6 +45,8 @@ export function createInitialMeta(
       parallel: options.parallel ?? "off",
       outDir: options.outDir,
       resumeDir: options.resumeDir,
+      githubRepo: options.githubRepo,
+      githubRef: options.githubRef,
       since: options.since,
       prMode: options.prMode,
       baseRef: options.baseRef,

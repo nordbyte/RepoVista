@@ -53,6 +53,8 @@ Fresh installs use quality-oriented defaults: Codex CLI, `reasoning=xhigh`, read
 ```sh
 repovista audit --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
+repovista audit --github-repo nordbyte/RepoVista
+repovista audit --github-repo https://github.com/nordbyte/RepoVista --github-ref v0.4.0
 repovista audit --no-parallel
 repovista audit --since origin/main
 repovista audit --ci --json --fail-on-critical

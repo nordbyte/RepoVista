@@ -26,6 +26,10 @@ export interface PreflightDependencies {
   commandExists?: (command: string, args?: string[]) => Promise<boolean>;
 }
 
+export interface PreflightContext {
+  outputProjectRoot?: string;
+}
+
 const PROJECT_MARKERS = [
   "package.json",
   "pnpm-lock.yaml",
@@ -53,7 +57,8 @@ export async function runPreflight(
   projectRoot: string,
   runDir: string,
   options: AuditOptions,
-  dependencies: PreflightDependencies = {}
+  dependencies: PreflightDependencies = {},
+  context: PreflightContext = {}
 ): Promise<PreflightResult> {
   const warnings: string[] = [];
   const commandExists = dependencies.commandExists ?? defaultCommandExists;
@@ -68,7 +73,7 @@ export async function runPreflight(
 
   await assertDirectoryAccess(projectRoot, "Project directory", false);
   await assertDirectoryAccess(runDir, "Report directory", true);
-  await validateReportRoot(projectRoot, options.outDir);
+  await validateReportRoot(context.outputProjectRoot ?? projectRoot, options.outDir);
 
   const providerAvailable = await commandExists(provider.executable, provider.versionArgs);
   if (!providerAvailable) {

@@ -21,6 +21,9 @@ The public API follows the package build and may evolve between minor versions.
 | `validateSandbox(value)` | Validate sandbox mode. |
 | `parseParallelMode(value)` | Parse parallel mode. |
 | `runPreflight(options)` | Run preflight checks without starting an audit. |
+| `normalizeGithubRepository(input)` | Normalize and validate `--github-repo` input. |
+| `validateGithubRef(value)` | Validate a safe GitHub branch, tag, or full SHA. |
+| `prepareGithubSource(root, outRoot, options, context?)` | Resolve and prepare a commit-pinned public GitHub source checkout. |
 
 Important types:
 
@@ -28,6 +31,7 @@ Important types:
 - `AuditMeta`
 - `AuditProfileId`
 - `RunPaths`
+- `GithubSourceInfo`
 - `PhaseReportStatus`
 - `CliParseResult`
 - `CliAction`

@@ -23,6 +23,17 @@ test("report browser lists report runs and renders sections", async () => {
       title: "Newer report",
       model: "Codex CLI configured default",
       reasoning: "xhigh",
+      source: {
+        type: "github",
+        repository: "nordbyte/RepoVista",
+        owner: "nordbyte",
+        repo: "RepoVista",
+        url: "https://github.com/nordbyte/RepoVista.git",
+        defaultBranch: "main",
+        commit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        cloneDir: path.join(root, ".repovista", "sources", "github", "nordbyte", "RepoVista", "bbbbbbbbbbbb"),
+        fetchedAt: "2026-05-19T10:00:00.000Z"
+      },
       durationMs: 125000,
       inventoryDurationMs: 4000,
       summaryDurationMs: 5000,
@@ -51,6 +62,7 @@ test("report browser lists report runs and renders sections", async () => {
     }, { columns: 140, rows: 50, color: false });
     assert.match(listFrame, /RepoVista Reports/);
     assert.match(listFrame, /2026-05-19 10:00/);
+    assert.match(listFrame, /source nordbyte\/RepoVis/);
     assert.match(listFrame, /model: gpt-resolved-default/);
     assert.match(listFrame, /model: gpt-5\.5/);
     assert.match(listFrame, /reasoning: xhigh/);
@@ -88,6 +100,7 @@ test("report browser lists report runs and renders sections", async () => {
       scroll: 0
     }, { columns: 100, rows: 24, color: false });
     assert.match(sectionFrame, /Full Report/);
+    assert.match(sectionFrame, /source nordbyte\/RepoVista@main/);
     assert.match(sectionFrame, /Report Health/);
     assert.match(sectionFrame, /Findings/);
     assert.match(sectionFrame, /Evidence Refs/);
@@ -310,6 +323,7 @@ async function writeRun(runDir, input) {
   await writeFile(path.join(projectRoot, "src", "audit.ts"), "export function fixture() {\n  return \"fixture bug\";\n}\n", "utf8");
   await writeFile(path.join(runDir, "meta.json"), JSON.stringify({
     projectRoot,
+    source: input.source,
     runId: input.runId,
     startedAt: input.startedAt ?? input.completedAt,
     completedAt: input.completedAt,

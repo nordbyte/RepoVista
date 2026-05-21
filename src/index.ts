@@ -56,6 +56,7 @@ export { loadPatchAttempts, patchAttemptsDirectory, runFixFindingCommand, runOpe
 export { fixPlanJsonSchema, phaseReportJsonSchema, revalidationJsonSchema, riskReportJsonSchema, renderStructuredProviderOutput, structuredPromptForPhase } from "./provider-schema.js";
 export { extractFindings, extractFindingsWithSource, extractSchemaFindings, findingCountsBySeverity, findingDedupeKey } from "./findings.js";
 export { collectDiffScope } from "./git-diff.js";
+export { normalizeGithubRepository, prepareGithubSource, validateGithubRef } from "./github-source.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";
 export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateProvider, validateSandbox } from "./options.js";
@@ -117,6 +118,7 @@ export type {
   ProviderCapabilities,
   FeatureRecord,
   FeatureStatus,
+  GithubSourceInfo,
   RunPaths,
   SandboxMode,
   SemanticFeature,

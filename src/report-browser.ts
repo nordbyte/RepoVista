@@ -37,6 +37,7 @@ export interface ReportRunSummary {
   provider?: string;
   model?: string;
   reasoning?: string;
+  source?: AuditMeta["source"];
   findingCount: number;
   exitCode?: number;
   findings: StructuredFinding[];
@@ -923,6 +924,7 @@ async function loadReportRun(
     provider: displayName ?? providerId,
     model: resolvedModel,
     reasoning: cleanReasoningLabel(meta?.ai?.reasoning ?? meta?.codex?.reasoning),
+    source: meta?.source,
     findingCount: normalizedFindings.length || countFindings(meta?.findingCounts),
     exitCode: meta?.exitCode,
     findings: normalizedFindings,
@@ -1271,10 +1273,11 @@ async function readText(filePath: string): Promise<string | undefined> {
 
 function formatRunItem(run: ReportRunSummary, marked: boolean): string {
   const when = compactRunTime(run.startedAt ?? run.runId ?? run.completedAt);
+  const source = sourceRunLabel(run);
   const model = `model: ${run.model ?? "n/a"}`;
   const reasoning = `reasoning: ${run.reasoning ?? "n/a"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
-  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | total ${formatDuration(run.durationMs)}`;
+  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | total ${formatDuration(run.durationMs)}${source ? ` | ${source}` : ""}`;
 }
 
 function formatDeleteItem(run: ReportRunSummary): string {
@@ -1324,11 +1327,19 @@ function contextFooter(run: ReportRunSummary | undefined, state: ReportBrowserSt
 
 function runContextLabel(run: ReportRunSummary): string {
   return [
+    sourceRunLabel(run),
     run.provider ?? "provider n/a",
     `model ${run.model ?? "n/a"}`,
     `reasoning ${run.reasoning ?? "n/a"}`,
     run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`
-  ].join(" | ");
+  ].filter(Boolean).join(" | ");
+}
+
+function sourceRunLabel(run: ReportRunSummary): string | undefined {
+  if (!run.source) {
+    return undefined;
+  }
+  return `source ${run.source.repository}@${run.source.ref ?? run.source.defaultBranch ?? run.source.commit.slice(0, 12)}`;
 }
 
 function matchPositionLabel(state: ReportBrowserState, matchCount: number): string {

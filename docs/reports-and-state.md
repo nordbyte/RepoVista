@@ -13,6 +13,11 @@ Each audit writes a timestamped run directory under the selected output root:
   locks/
   patches/
   project-map.json
+  sources/
+    github/
+      owner/
+        repo/
+          <commit>/
   2026-05-18T14-57-32-123Z/
     00-inventory.md
     01-architecture-report.md
@@ -36,7 +41,7 @@ Each audit writes a timestamped run directory under the selected output root:
     logs/
 ```
 
-`index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, collapsible findings, evidence snippets, full Markdown report sections, previous-run comparison, phase-quality diagnostics, suppressed findings, and artifact download links.
+`index.md` is the Markdown entry point. `report.html` is the browser-first dashboard with severity/status counts, collapsible findings, evidence snippets, full Markdown report sections, previous-run comparison, phase-quality diagnostics, suppressed findings, and artifact download links. When `--github-repo` is used, `sources/github/` stores the commit-pinned checkout used for analysis, while the generated run remains in the local output root.
 
 Use `repovista reports` to browse completed runs in the terminal, select a run, and navigate the full combined report, generated finding/evidence views, each Markdown section, a report-health panel, or grouped comparison with the previous run. Successful interactive audits open this same browser on the newly created run instead of ending at the run-directory message. The report list is sorted by run creation time with the newest run first and shows the total run duration after the exit code. Section lists show line count and generation duration where metadata is available.
 
@@ -52,9 +57,9 @@ The report viewer highlights Markdown headings, bold spans, inline code, links, 
 | `03-risk-and-bug-report.md` | Risk, bug, and security finding report. |
 | `04-feature-roadmap.md` | Feature and improvement roadmap. |
 | `index.md` | Summary entry point linking all phase outputs. |
-| `meta.json` | Run metadata, provider/model/reasoning/fast mode, snapshot/drift state, total and per-report durations, phase status, quality, cache, workspace, and analytics. Analytics include estimated prompt tokens and provider-reported token/cost telemetry when the provider output exposes it. |
-| `summary.json` | Machine-readable run summary. |
-| `report.json` | Complete machine-readable run artifact. |
+| `meta.json` | Run metadata, source repository when applicable, provider/model/reasoning/fast mode, snapshot/drift state, total and per-report durations, phase status, quality, cache, workspace, and analytics. Analytics include estimated prompt tokens and provider-reported token/cost telemetry when the provider output exposes it. |
+| `summary.json` | Machine-readable run summary, including source metadata when applicable. |
+| `report.json` | Complete machine-readable run artifact, including source metadata when applicable. |
 | `structured-reports.json` | Normalized structured phase reports. |
 | `prompt-manifest.json` | Prompt context manifest, file hashes, inclusion reasons, omissions, diff scope, and token estimates. |
 | `findings.json` | Active structured findings. |

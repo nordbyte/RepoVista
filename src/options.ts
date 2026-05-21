@@ -475,6 +475,12 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "resume":
       options.resumeDir = requireNonEmpty(name, value);
       break;
+    case "github-repo":
+      options.githubRepo = requireNonEmpty(name, value);
+      break;
+    case "github-ref":
+      options.githubRef = requireNonEmpty(name, value);
+      break;
     case "model":
       options.model = requireNonEmpty(name, value);
       break;

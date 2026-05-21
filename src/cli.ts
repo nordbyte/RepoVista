@@ -192,6 +192,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(await runOpenPrCommand(optionsWithSettings.options));
       return 0;
     }
+    if (optionsWithSettings.options.githubRepo && optionsWithSettings.options.workspaceMatrix) {
+      throw new CliUsageError("--github-repo cannot be combined with --workspace-matrix yet.");
+    }
     if (optionsWithSettings.options.workspaceMatrix) {
       const abortController = new AbortController();
       const onInterrupt = (signal: NodeJS.Signals) => {

@@ -50,6 +50,8 @@ export interface AuditOptions {
   parallel: ParallelMode;
   outDir: string;
   resumeDir?: string;
+  githubRepo?: string;
+  githubRef?: string;
   model?: string;
   profile?: string;
   reasoning?: string;
@@ -243,6 +245,19 @@ export interface EvidencePack {
   };
 }
 
+export interface GithubSourceInfo {
+  type: "github";
+  repository: string;
+  owner: string;
+  repo: string;
+  url: string;
+  ref?: string;
+  defaultBranch?: string;
+  commit: string;
+  cloneDir: string;
+  fetchedAt: string;
+}
+
 export interface StructuredFinding {
   id: string;
   source: string;
@@ -377,6 +392,8 @@ export interface AuditMeta {
     parallel: ParallelMode;
     outDir: string;
     resumeDir?: string;
+    githubRepo?: string;
+    githubRef?: string;
     since?: string;
     prMode?: boolean;
     baseRef?: string;
@@ -419,6 +436,7 @@ export interface AuditMeta {
     allWorkspaces?: boolean;
     incremental?: boolean;
   };
+  source?: GithubSourceInfo;
   codex: {
     model: string;
     profile: string;

@@ -20,6 +20,7 @@ import {
   gitSnapshotFromEvidence,
   primaryRepositoryDriftWarning
 } from "./git-drift.js";
+import { prepareGithubSource } from "./github-source.js";
 import { createProjectInventory } from "./inventory.js";
 import { Logger, type AuditProviderProgress, type LoggerSink } from "./logger.js";
 import { PHASE_SCHEMA_VERSION, extractStructuredPhaseReport } from "./phase-schema.js";
@@ -97,22 +98,34 @@ type RunPhaseFunction = typeof runProviderPhase;
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
   const runStartedAtMs = Date.now();
   options = applyAuditProfile(options);
+  if (options.githubRepo && !options.runChecksExplicit) {
+    options = {
+      ...options,
+      runChecks: false
+    };
+  }
   const outputProjectRoot = dependencies.cwd ?? process.cwd();
   const now = dependencies.now ?? new Date();
   const version = dependencies.version ?? "0.0.0";
-  const workspaceScope = await resolveWorkspaceScope(outputProjectRoot, options);
-  options = {
-    ...options,
-    includes: workspaceIncludes(options, workspaceScope)
-  };
   const logger = new Logger(options.progress, dependencies.loggerSink);
   const abortSignal = dependencies.abortSignal;
   const createLogs = options.keepLogs || options.json;
   const paths = await createRunPaths(outputProjectRoot, options, now, createLogs);
+  throwIfCancelled(abortSignal);
+  const githubSource = await prepareGithubSource(outputProjectRoot, paths.outRoot, options, {
+    runCommand: dependencies.runCommand,
+    now
+  });
   let snapshot: PreparedAuditSnapshot | undefined;
-  let projectRoot = outputProjectRoot;
+  let projectRoot = githubSource?.cloneDir ?? outputProjectRoot;
+  if (githubSource) {
+    logger.info(`GitHub source: ${githubSource.repository}@${githubSource.commit.slice(0, 12)} (${githubSource.cloneDir})`);
+    if (!options.runChecksExplicit) {
+      logger.info("Local check commands are disabled by default for --github-repo. Use --run-checks to run checks inside the cloned repository.");
+    }
+  }
   if (options.snapshot && !options.resumeDir) {
-    snapshot = await prepareAuditSnapshot(outputProjectRoot, paths.runDir, [options.outDir], now);
+    snapshot = await prepareAuditSnapshot(projectRoot, paths.runDir, [options.outDir], now);
     projectRoot = snapshot.meta.analysisRoot;
     logger.info(`Snapshot audit enabled at ${snapshot.meta.commit?.slice(0, 12) ?? "HEAD"}: ${snapshot.meta.analysisRoot}`);
     for (const warning of snapshot.meta.warnings) {
@@ -129,12 +142,20 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     model: options.model ?? effectiveSettings.modelArgument,
     reasoning: options.reasoning ?? effectiveSettings.reasoning
   };
+  const workspaceScope = await resolveWorkspaceScope(projectRoot, options);
+  options = {
+    ...options,
+    includes: workspaceIncludes(options, workspaceScope)
+  };
 
-  const meta = createInitialMeta(outputProjectRoot, paths, options, version, now, {
+  const meta = createInitialMeta(projectRoot, paths, options, version, now, {
     model: effectiveSettings.model,
     reasoning: effectiveSettings.reasoning,
     profile: effectiveSettings.providerProfile
   });
+  if (githubSource) {
+    meta.source = githubSource;
+  }
   meta.workspace = workspaceScope;
   if (snapshot) {
     meta.snapshot = snapshot.meta;
@@ -151,7 +172,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     }
 
     logger.step("Preflight checks");
-    const preflight = await runPreflight(projectRoot, paths.runDir, options, dependencies);
+    const preflight = await runPreflight(projectRoot, paths.runDir, options, dependencies, { outputProjectRoot });
     throwIfCancelled(abortSignal);
     meta.preflight = preflight;
     for (const warning of preflight.warnings) {
@@ -163,7 +184,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     throwIfCancelled(abortSignal);
     meta.evidence = evidence;
     meta.repositoryDrift = createInitialRepositoryDriftState(gitSnapshotFromEvidence(evidence, undefined, [options.outDir]));
-    repositoryDriftMonitor = startRepositoryDriftMonitor(outputProjectRoot, meta, logger, dependencies.runCommand);
+    repositoryDriftMonitor = startRepositoryDriftMonitor(projectRoot, meta, logger, dependencies.runCommand);
     if (hasFailedChecks(evidence)) {
       logger.warn("One or more local check commands failed. The report will include the check output.");
     }
@@ -234,10 +255,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     }));
     const selectedPhases = expandSelectedPhases(options.phases ?? []);
     const runPhase = dependencies.runProvider ?? dependencies.runCodex ?? runProviderPhase;
-    const parallel = await resolveParallelMeta(outputProjectRoot, options, logger, {
-      ...featureMap,
-      projectRoot: outputProjectRoot
-    });
+    const parallel = await resolveParallelMeta(projectRoot, outputProjectRoot, options, logger, featureMap);
     meta.parallel = parallel;
     const phaseFingerprints = buildPhaseCacheEntries(projectScan.files, options, {
       reuseKey,
@@ -825,7 +843,8 @@ function sortPromptManifestPhases(manifest: PromptManifest): void {
 }
 
 async function resolveParallelMeta(
-  projectRoot: string,
+  analysisProjectRoot: string,
+  outputProjectRoot: string,
   options: AuditOptions,
   logger: Logger,
   currentMap?: Awaited<ReturnType<typeof createProjectMap>>
@@ -834,14 +853,19 @@ async function resolveParallelMeta(
   if (mode === "off" || mode === 1) {
     return undefined;
   }
-  let loaded = await loadProjectMap(projectRoot, options.outDir);
+  let loaded = await loadProjectMap(outputProjectRoot, options.outDir);
   if (!loaded && mode === "auto" && currentMap) {
-    const mapPath = await saveProjectMap(projectRoot, options, currentMap);
+    const mapPath = await saveProjectMap(outputProjectRoot, options, currentMap);
     loaded = { map: currentMap, mapPath };
     logger.info(`Initialized RepoVista project map for parallel auto mode: ${mapPath}`);
   }
   if (!loaded) {
     throw new PreflightError("Parallel audit requires an initialized RepoVista project map. Run `repovista init` first or use `--parallel off`.");
+  }
+  if (loaded.map.projectRoot !== analysisProjectRoot && currentMap) {
+    const mapPath = await saveProjectMap(outputProjectRoot, options, currentMap);
+    loaded = { map: currentMap, mapPath };
+    logger.info(`Refreshed RepoVista project map for current analysis source: ${mapPath}`);
   }
   const meta = createParallelExecutionMeta(loaded.map, loaded.mapPath, mode);
   for (const warning of meta.warnings) {

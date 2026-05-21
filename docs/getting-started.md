@@ -76,6 +76,17 @@ repovista audit
 
 This already collects local check results, applies strict report quality gates, lets the provider repair reports that miss required depth, and writes the default exports. Use `--no-run-checks`, `--no-strict-reports`, `--no-repair-reports`, or `--no-parallel` only when a repository needs a lighter run.
 
+## Public GitHub Repository Audit
+
+You can create a report for a public GitHub repository without cloning it manually:
+
+```sh
+repovista audit --github-repo nordbyte/RepoVista
+repovista audit --github-repo https://github.com/nordbyte/RepoVista --github-ref v0.4.0
+```
+
+RepoVista resolves the default branch or requested branch/tag/commit, clones that exact commit under `.repovista/sources/github/<owner>/<repo>/<commit>/`, and writes the report run under your current directory's `.repovista/`. Local check commands are disabled by default for `--github-repo` unless `--run-checks` is set explicitly.
+
 ## Provider Examples
 
 ```sh

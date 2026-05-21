@@ -40,6 +40,10 @@ test("explicit audit command parses supported options", () => {
     "3",
     "--out",
     "reports",
+    "--github-repo",
+    "nordbyte/RepoVista",
+    "--github-ref",
+    "main",
     "--model=gpt-5.5",
     "--profile",
     "review",
@@ -88,6 +92,8 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.provider, "claude");
   assert.equal(parsed.options.parallel, 3);
   assert.equal(parsed.options.outDir, "reports");
+  assert.equal(parsed.options.githubRepo, "nordbyte/RepoVista");
+  assert.equal(parsed.options.githubRef, "main");
   assert.equal(parsed.options.model, "gpt-5.5");
   assert.equal(parsed.options.profile, "review");
   assert.equal(parsed.options.reasoning, "high");

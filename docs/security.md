@@ -20,9 +20,13 @@ RepoVista is read-only by default. It is designed to help humans audit repositor
 
 The selected provider CLI can read the repository and may send source code to its configured AI service. Use RepoVista only when you have permission and privacy clearance for that provider.
 
+## Public GitHub Sources
+
+`--github-repo` accepts only public `https://github.com/owner/repo` URLs or `owner/repo` shorthand, rejects embedded credentials, resolves the requested branch/tag/commit with `git ls-remote`, and analyzes a commit-pinned clone under the local report output root. Local check commands are disabled by default for GitHub-sourced audits unless `--run-checks` is set explicitly.
+
 ## Local Check Commands
 
-`--run-checks` is opt-in because check commands can execute repository scripts and may create artifacts.
+Local audits run detected checks by default because they operate in a checkout you already selected. For GitHub-sourced audits, `--run-checks` is opt-in because check commands can execute repository scripts and may create artifacts.
 
 ```sh
 repovista audit --run-checks --check "npm test"

@@ -216,6 +216,98 @@ test("audit auto-initializes the project map for default parallel mode", async (
   }
 });
 
+test("audit can analyze a public GitHub repository into the local report root", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-github-"));
+  const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  try {
+    const providerRoots = [];
+    const cloneCalls = [];
+    const result = await runAudit({
+      ...DEFAULT_OPTIONS,
+      githubRepo: "nordbyte/example",
+      phases: ["summary"],
+      strictReports: false,
+      repairReports: false,
+      progress: false
+    }, {
+      cwd: root,
+      now: new Date("2026-05-21T10:15:00.000Z"),
+      version: "0.4.0",
+      commandExists: async () => true,
+      resolveProviderDefaultModel: async () => "gpt-test-default",
+      runCommand: async (command, args, options) => {
+        if (command === "npm" && args[0] === "--version") {
+          return commandOk(command, args, "10.0.0\n");
+        }
+        if (command === "codex") {
+          return commandOk(command, args, "codex 0.1.0\n");
+        }
+        if (command !== "git") {
+          return commandOk(command, args, "");
+        }
+        if (args[0] === "ls-remote" && args.includes("--symref")) {
+          return commandOk(command, args, `ref: refs/heads/main\tHEAD\n${sha}\tHEAD\n`);
+        }
+        if (args[0] === "clone") {
+          const cloneDir = args.at(-1);
+          cloneCalls.push({ args, cwd: options.cwd, cloneDir });
+          await mkdir(path.join(cloneDir, "src"), { recursive: true });
+          await mkdir(path.join(cloneDir, ".git"), { recursive: true });
+          await writeFile(path.join(cloneDir, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+          await writeFile(path.join(cloneDir, "README.md"), "# Remote Example\n", "utf8");
+          await writeFile(path.join(cloneDir, "package.json"), JSON.stringify({ name: "remote-example" }), "utf8");
+          await writeFile(path.join(cloneDir, "src", "index.ts"), "export const remote = true;\n", "utf8");
+          return commandOk(command, args, "");
+        }
+        if (args[0] === "rev-parse" && args[1] === "--is-inside-work-tree") {
+          return commandOk(command, args, "true\n");
+        }
+        if (args[0] === "rev-parse" && args[1] === "HEAD") {
+          return commandOk(command, args, `${sha}\n`);
+        }
+        if (args[0] === "branch" && args[1] === "--show-current") {
+          return commandOk(command, args, "main\n");
+        }
+        if (args[0] === "status") {
+          return commandOk(command, args, "");
+        }
+        if (args[0] === "remote") {
+          return commandOk(command, args, "https://github.com/nordbyte/example.git\n");
+        }
+        return commandOk(command, args, "");
+      },
+      runProvider: async (request) => {
+        providerRoots.push(request.projectRoot);
+        await writeFile(request.reportPath, "# Summary\n\nRemote repository summary.\n", "utf8");
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 5,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.paths.outRoot, path.join(root, ".repovista"));
+    assert.equal(result.meta.source.repository, "nordbyte/example");
+    assert.equal(result.meta.source.defaultBranch, "main");
+    assert.equal(result.meta.source.commit, sha);
+    assert.equal(result.meta.projectRoot, path.join(root, ".repovista", "sources", "github", "nordbyte", "example", sha.slice(0, 12)));
+    assert.equal(result.meta.options.runChecks, false);
+    assert.equal(result.meta.evidence.projectRoot, result.meta.projectRoot);
+    assert.equal(providerRoots.every((item) => item === result.meta.projectRoot), true);
+    assert.equal(cloneCalls.length, 1);
+    assert.ok(await readFile(path.join(result.paths.runDir, "meta.json"), "utf8"));
+
+    const projectMap = JSON.parse(await readFile(path.join(root, ".repovista", "project-map.json"), "utf8"));
+    assert.equal(projectMap.projectRoot, result.meta.projectRoot);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("audit can split shardable phases across parallel provider sessions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-audit-parallel-"));
   try {
@@ -1393,4 +1485,14 @@ async function git(cwd, args) {
   });
   assert.equal(result.exitCode, 0, `git ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
   return result;
+}
+
+function commandOk(command, args, stdout) {
+  return {
+    command: [command, ...args].join(" "),
+    exitCode: 0,
+    durationMs: 1,
+    timedOut: false,
+    stdout
+  };
 }

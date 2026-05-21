@@ -29,6 +29,8 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("parallel", undefined, flag("no-parallel", "Disable saved parallel default")),
   entry("outDir", ".repovista", value("out", "Report output directory (default: .repovista)"), setting("outDir", "string", "Default report output directory"), "outDir"),
   entry("resumeDir", undefined, value("resume", "Resume or complete an existing RepoVista run directory")),
+  entry("githubRepo", undefined, value("github-repo", "Audit a public GitHub repository by owner/repo or https://github.com/owner/repo")),
+  entry("githubRef", undefined, value("github-ref", "Branch, tag, or full commit SHA to audit when --github-repo is used")),
   entry("since", undefined, value("since", "Focus the audit on files changed since the given Git ref")),
   entry("prMode", undefined, flag("pr", "PR mode; default diff base is origin/main unless --base is set")),
   entry("prMode", undefined, flag("no-pr", "Disable saved PR mode")),
