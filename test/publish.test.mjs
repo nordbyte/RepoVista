@@ -33,6 +33,50 @@ test("publish renders a dry-run GitHub issue from a GitHub source run", async ()
   }
 });
 
+test("publish applies repository contribution guidelines to issue previews", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-issue-policy-"));
+  try {
+    await writeGithubRun(root, {
+      policyFiles: {
+        "CONTRIBUTING.md": [
+          "# Contributing",
+          "Please include real behavior proof and clear steps to reproduce.",
+          "AI-assisted contributions should disclose AI assistance."
+        ].join("\n"),
+        ".github/ISSUE_TEMPLATE/bug_report.md": [
+          "# Bug Report",
+          "## Steps to reproduce",
+          "## Expected behavior",
+          "## Actual behavior"
+        ].join("\n")
+      }
+    });
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "issue",
+      dryRun: true
+    }, root);
+
+    assert.match(output, /Contribution policy: enforce/);
+    assert.match(output, /Contribution sources: .*CONTRIBUTING\.md/);
+    assert.match(output, /Contribution Guidelines/);
+    assert.match(output, /Sources reviewed: .*\.github\/ISSUE_TEMPLATE\/bug_report\.md/);
+    assert.match(output, /Behavior proof: include reproduction/);
+    assert.match(output, /Issue Template Fields/);
+    assert.match(output, /Steps to reproduce/);
+    assert.match(output, /Expected behavior/);
+
+    const artifact = JSON.parse(await readFile(path.join(root, ".repovista", RUN_ID, "contribution-policy.json"), "utf8"));
+    assert.equal(artifact.bundle.repository, "creativeprofit22/contract-and-flow");
+    assert.ok(artifact.bundle.documents.some((document) => document.path === "CONTRIBUTING.md"));
+    assert.ok(artifact.bundle.issueTemplates.some((template) => template.path === ".github/ISSUE_TEMPLATE/bug_report.md"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publish translates non-English report findings to English GitHub issues by default", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-issue-language-"));
   try {
@@ -135,6 +179,69 @@ test("publish creates a GitHub issue in the source repository and records the li
   }
 });
 
+test("publish blocks public security issues when repository security policy requests private disclosure", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-security-policy-"));
+  try {
+    await writeGithubRun(root, {
+      finding: {
+        ...findingFixture(),
+        title: "Secret token is exposed",
+        severity: "critical",
+        category: "security",
+        labels: ["security"]
+      },
+      policyFiles: {
+        "SECURITY.md": "Please report vulnerabilities privately by email security@example.com. Do not open public issues.\n"
+      }
+    });
+
+    await assert.rejects(() => runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "issue"
+    }, root, {
+      execFile: async () => {
+        throw new Error("gh should not be called when contribution policy blocks publish");
+      }
+    }), /private security disclosure/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("publish can downgrade contribution policy blockers to warnings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-policy-warn-"));
+  try {
+    await writeGithubRun(root, {
+      finding: {
+        ...findingFixture(),
+        title: "Secret token is exposed",
+        severity: "critical",
+        category: "security",
+        labels: ["security"]
+      },
+      policyFiles: {
+        "SECURITY.md": "Please report vulnerabilities privately by email security@example.com. Do not open public issues.\n"
+      }
+    });
+    const output = await runPublishCommand({
+      ...DEFAULT_OPTIONS,
+      findingRunId: RUN_ID,
+      findingId: "fnd_test",
+      publishTarget: "issue",
+      contributionPolicy: "warn",
+      dryRun: true
+    }, root);
+
+    assert.match(output, /Contribution policy: warn/);
+    assert.match(output, /Contribution blockers: none/);
+    assert.match(output, /Would block in enforce mode: Security-sensitive findings/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("publish translates non-English report findings to English pull request plans by default", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-pr-language-"));
   try {
@@ -170,8 +277,19 @@ test("publish translates non-English report findings to English pull request pla
 test("publish creates a fork-backed pull request for a selected finding", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "repovista-publish-pr-"));
   try {
-    await writeGithubRun(root);
+    await writeGithubRun(root, {
+      policyFiles: {
+        "CONTRIBUTING.md": "AI-assisted contributions should disclose AI assistance.\n",
+        ".github/PULL_REQUEST_TEMPLATE.md": [
+          "# Pull Request",
+          "## Summary",
+          "## Tests",
+          "## Checklist"
+        ].join("\n")
+      }
+    });
     const calls = [];
+    const providerRequests = [];
     const output = await runPublishCommand({
       ...DEFAULT_OPTIONS,
       findingRunId: RUN_ID,
@@ -228,6 +346,7 @@ test("publish creates a fork-backed pull request for a selected finding", async 
         return { stdout: "" };
       },
       runProvider: async (request) => {
+        providerRequests.push(request);
         await writeFile(path.join(request.projectRoot, "README.md"), "after\n", "utf8");
         await writeFile(request.reportPath, "# Fix\n\nUpdated README.\n", "utf8");
         return {
@@ -247,7 +366,15 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     assert.equal(prCall.args[prCall.args.indexOf("--head") + 1], "tester:repovista/fix-fnd-test");
     const prBody = prCall.args[prCall.args.indexOf("--body") + 1];
     assert.match(prBody, /Hi,\n\nI opened this PR to address a RepoVista finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);
+    assert.match(prBody, /Contribution Guidelines/);
+    assert.match(prBody, /AI disclosure: RepoVista helped identify and prepare this publication/);
+    assert.match(prBody, /Pull Request Template Fields/);
+    assert.match(prBody, /### Summary/);
+    assert.match(prBody, /### Tests/);
     assert.match(prBody, /_Found with \[RepoVista\]\(https:\/\/github\.com\/nordbyte\/RepoVista\)\._/);
+    assert.equal(providerRequests.length, 1);
+    assert.match(providerRequests[0].prompt, /Repository contribution guidelines discovered by RepoVista/);
+    assert.match(providerRequests[0].prompt, /PR template sections to satisfy: Pull Request, Summary, Tests, Checklist/);
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.name RepoVista Bot"));
     assert.ok(calls.some((call) => call.command === "git" && call.args.join(" ") === "config user.email 12345+tester@users.noreply.github.com"));
     const patchFiles = await readdir(path.join(root, ".repovista", "patches"));
@@ -268,6 +395,11 @@ async function writeGithubRun(root, options = {}) {
   await mkdir(runDir, { recursive: true });
   await mkdir(cloneDir, { recursive: true });
   await writeFile(path.join(cloneDir, "README.md"), "line 1\nline 2\n", "utf8");
+  for (const [relativePath, content] of Object.entries(options.policyFiles ?? {})) {
+    const absolutePath = path.join(cloneDir, relativePath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, `${content.trimEnd()}\n`, "utf8");
+  }
   const meta = {
     tool: { name: "RepoVista", version: "0.4.0" },
     projectRoot: cloneDir,

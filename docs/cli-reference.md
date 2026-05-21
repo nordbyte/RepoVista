@@ -26,7 +26,7 @@ repovista show <finding-id>
 repovista triage <finding-id|--all> --status <status> [--note <text>]
 repovista revalidate <finding-id|--all> [--provider-revalidate]
 repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues]
-repovista publish <finding-id|--all> --run <run-id|dir> --as issue|pr [--dry-run] [--fork] [--publish-language <name>]
+repovista publish <finding-id|--all> --run <run-id|dir> --as issue|pr [--dry-run] [--fork] [--publish-language <name>] [--contribution-policy enforce|warn|off]
 repovista fix <finding-id[,finding-id...]> [--dry-run] [--check <command>] [--no-isolate]
 repovista patches [patch-id] [--json] [--dry-run]
 repovista rollback <patch-id> [--dry-run]
@@ -104,6 +104,7 @@ repovista version
 | `--sandbox <mode>` | `read-only` or `workspace-write`. |
 | `--language <name>` | Report language, default `English`. |
 | `--publish-language <name>` | GitHub issue/PR language for published findings, default `English` even when the report uses another language. |
+| `--contribution-policy <mode>` | GitHub publish contribution-guideline handling: `enforce` blocks policy conflicts, `warn` reports conflicts but allows publishing, `off` skips guideline application. |
 | `--json` | Store metadata, JSON provider events, or emit JSON where supported. |
 | `--include <patterns>` | Additional include patterns. |
 | `--ignore <patterns>` | Additional ignore patterns. |

@@ -1,6 +1,6 @@
 import { RepoVistaError } from "./errors.js";
 import { settingDefinitions } from "./option-registry.js";
-import { parseParallelMode, validateProvider, validateSandbox } from "./options.js";
+import { parseParallelMode, validateContributionPolicyMode, validateProvider, validateSandbox } from "./options.js";
 import type { RepoVistaSettings } from "./settings-config.js";
 import type { ReportExportFormat } from "./types.js";
 
@@ -51,6 +51,8 @@ export function parseSettingValue(key: keyof RepoVistaSettings, rawValue: string
       return parseAuditProfile(rawValue);
     case "reviewMode":
       return parseReviewMode(rawValue);
+    case "contributionPolicy":
+      return validateContributionPolicyMode(rawValue);
     case "includes":
     case "ignores":
     case "checkCommands":

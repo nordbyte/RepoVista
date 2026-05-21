@@ -19,9 +19,9 @@ import {
   renderTuiTerminalFrame,
   shouldUseColor
 } from "./tui.js";
-import type { AiProviderId, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
+import type { AiProviderId, ContributionPolicyMode, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
-export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
+export type MenuScreen = "main" | "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "contributionPolicy" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout";
 
 interface MenuState {
   screen: MenuScreen;
@@ -36,7 +36,7 @@ interface MenuState {
 }
 
 type MainItem =
-  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
+  | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "contributionPolicy" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
   | { id: "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "snapshot" | "failOnDrift" | "failOnWeakEvidence" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
@@ -47,6 +47,7 @@ const CHECK_TIMEOUT_OPTIONS = [60, 300, 600, 900, 1800, 3600];
 const PHASE_TIMEOUT_OPTIONS = [900, 1800, 3600, 5400, 7200];
 const PARALLEL_OPTIONS: ParallelMode[] = ["off", "auto", 2, 3, 4, 5];
 const REVIEW_MODE_OPTIONS: ReviewMode[] = ["default", "deslopify", "security", "test-gaps"];
+const CONTRIBUTION_POLICY_OPTIONS: ContributionPolicyMode[] = ["enforce", "warn", "off"];
 const EXPORT_FORMAT_OPTIONS: ReportExportFormat[] = ["sarif", "html", "jsonl", "github"];
 const FAST_MODE_OPTIONS = ["on", "off"] as const;
 const DEFAULT_AUDIT_PROFILE_LABEL = "Default full audit";
@@ -61,6 +62,11 @@ const EXPORT_FORMAT_DESCRIPTIONS: Record<ReportExportFormat, string> = {
   html: "browser dashboard",
   jsonl: "line-oriented findings",
   github: "GitHub annotations"
+};
+const CONTRIBUTION_POLICY_DESCRIPTIONS: Record<ContributionPolicyMode, string> = {
+  enforce: "block GitHub publish when guidelines require it",
+  warn: "show guideline conflicts but allow publish",
+  off: "do not apply repository contribution guidelines"
 };
 const RENDER_DEBOUNCE_MS = 16;
 
@@ -193,6 +199,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Codex fast mode: ${effectiveBoolean(settings, "fastMode") ? "on" : "off"}`,
     `Sandbox: ${settings.sandbox ?? DEFAULT_OPTIONS.sandbox}`,
     `Language: ${settings.language ?? DEFAULT_OPTIONS.language}`,
+    `Contribution policy: ${formatContributionPolicy(settings.contributionPolicy ?? DEFAULT_OPTIONS.contributionPolicy)}`,
     `Output directory: ${settings.outDir ?? DEFAULT_OPTIONS.outDir}`,
     `Prompt file: ${settings.promptFile ?? "none"}`,
     `Workspace: ${settings.workspace ?? "all"}`,
@@ -275,6 +282,7 @@ function activateCurrentItem(state: MenuState): void {
     case "fastMode":
     case "sandbox":
     case "language":
+    case "contributionPolicy":
     case "checkTimeout":
     case "phaseTimeout":
     case "checkCommands":
@@ -395,6 +403,12 @@ function toggleCurrentSelection(state: MenuState): void {
   if (state.screen === "language") {
     const selected = LANGUAGE_OPTIONS[state.cursor];
     state.settings.language = selected === DEFAULT_OPTIONS.language || state.settings.language === selected ? undefined : selected;
+    return;
+  }
+
+  if (state.screen === "contributionPolicy") {
+    const selected = CONTRIBUTION_POLICY_OPTIONS[state.cursor];
+    state.settings.contributionPolicy = selected === DEFAULT_OPTIONS.contributionPolicy || state.settings.contributionPolicy === selected ? undefined : selected;
     return;
   }
 
@@ -521,6 +535,8 @@ function screenTitle(screen: MenuScreen): string {
       return "Sandbox";
     case "language":
       return "Language";
+    case "contributionPolicy":
+      return "Contribution policy";
     case "checkCommands":
       return "Check commands";
     case "exportFormats":
@@ -558,6 +574,8 @@ function currentItems(state: MenuState): string[] {
       return SANDBOX_OPTIONS.map((sandbox) => checkbox(sandbox === (state.settings.sandbox ?? DEFAULT_OPTIONS.sandbox), formatSandbox(sandbox)));
     case "language":
       return LANGUAGE_OPTIONS.map((language) => checkbox(language === (state.settings.language ?? DEFAULT_OPTIONS.language), language));
+    case "contributionPolicy":
+      return CONTRIBUTION_POLICY_OPTIONS.map((mode) => checkbox(mode === (state.settings.contributionPolicy ?? DEFAULT_OPTIONS.contributionPolicy), formatContributionPolicy(mode)));
     case "checkCommands":
       return state.checkCommandOptions.map((command) => checkbox(Boolean(state.settings.checkCommands?.includes(command)), command));
     case "exportFormats":
@@ -778,6 +796,10 @@ function formatExportFormat(format: ReportExportFormat): string {
   return `${format} (${EXPORT_FORMAT_DESCRIPTIONS[format]})`;
 }
 
+function formatContributionPolicy(mode: ContributionPolicyMode): string {
+  return `${mode} (${CONTRIBUTION_POLICY_DESCRIPTIONS[mode]})`;
+}
+
 const MAIN_ITEMS: readonly MainItem[] = [
   { id: "provider", type: "submenu", label: (settings) => `Provider: ${getReportProvider(selectedProvider(settings)).displayName}` },
   { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(effectiveParallel(settings))}` },
@@ -807,6 +829,7 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "failOnDrift", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnDrift"), "Fail on repository drift (exit 2)") },
   { id: "failOnWeakEvidence", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "failOnWeakEvidence"), "Fail on weak evidence (exit 2)") },
   { id: "exportFormats", type: "submenu", label: (settings) => `Export formats: ${formatArray(effectiveExportFormats(settings))}` },
+  { id: "contributionPolicy", type: "submenu", label: (settings) => `Contribution policy: ${formatContributionPolicy(settings.contributionPolicy ?? DEFAULT_OPTIONS.contributionPolicy)}` },
   { id: "json", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "json"), "JSON metadata and provider logs") },
   { id: "keepLogs", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "keepLogs"), "Keep technical logs") },
   { id: "progress", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "progress"), "Progress TUI and post-audit report browser") },

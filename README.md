@@ -65,11 +65,13 @@ repovista findings-ui
 repovista next
 repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --dry-run
 repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --publish-language German
+repovista publish fnd_abc123def456 --run .repovista/run-id --as pr --contribution-policy warn
 repovista fix fnd_abc123def456 --dry-run
 repovista ci init --template security --dry-run
 ```
 
 GitHub issues and pull request descriptions published from findings default to English, even when the report was generated in another language. Use `--publish-language <name>` to publish them in a different language.
+For `--github-repo` reports, `repovista publish` also reads repository contribution guidelines, security policy, and issue/PR templates from the analyzed checkout. The default `--contribution-policy enforce` blocks public security disclosures and guideline conflicts; use `warn` to allow publishing with visible warnings or `off` to skip guideline handling.
 
 ## Documentation
 

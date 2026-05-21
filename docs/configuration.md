@@ -42,6 +42,8 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `reasoning` | `xhigh` |
 | `sandbox` | `read-only` |
 | `language` | `English` |
+| `publishLanguage` | `English` |
+| `contributionPolicy` | `enforce` |
 | `outDir` | `.repovista` |
 | `runChecks` | `true` |
 | `strictReports` | `true` |
@@ -65,6 +67,8 @@ A fresh install has no persisted settings file yet, so RepoVista falls back to b
 | `fastMode` | boolean | Use fast provider tier where supported. |
 | `sandbox` | enum | Default sandbox intent. |
 | `language` | string | Report language. |
+| `publishLanguage` | string | Default GitHub issue/PR language for published findings. |
+| `contributionPolicy` | enum | GitHub publish contribution-guideline handling: `enforce`, `warn`, or `off`. |
 | `outDir` | string | Report output directory. |
 | `includes` | list | Additional include patterns. |
 | `ignores` | list | Additional ignore patterns. |

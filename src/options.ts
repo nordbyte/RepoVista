@@ -2,7 +2,7 @@ import { CliUsageError } from "./errors.js";
 import { BOOLEAN_OPTION_NAMES, renderCliHelp, VALUE_OPTION_NAMES } from "./cli-schema.js";
 import { createDefaultAuditOptions } from "./option-registry.js";
 import { isReportProviderId, REPORT_PROVIDER_IDS } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, FindingStatus, ParallelMode, PublishTarget, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, AuditProfileId, CliParseResult, CompareFormat, ContributionPolicyMode, FindingStatus, ParallelMode, PublishTarget, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export const DEFAULT_OPTIONS: AuditOptions = createDefaultAuditOptions();
 
@@ -524,6 +524,9 @@ function applyValueOption(options: AuditOptions, name: string, value: string): v
     case "publish-language":
       options.publishLanguage = requireNonEmpty(name, value);
       break;
+    case "contribution-policy":
+      options.contributionPolicy = validateContributionPolicyMode(value);
+      break;
     case "include":
       options.includes.push(...splitPatterns(value));
       break;
@@ -851,6 +854,14 @@ function validatePublishTarget(value: string): PublishTarget {
     return normalized;
   }
   throw new CliUsageError("Option --as must be issue or pr.");
+}
+
+export function validateContributionPolicyMode(value: string): ContributionPolicyMode {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "enforce" || normalized === "warn" || normalized === "off") {
+    return normalized;
+  }
+  throw new CliUsageError("Option --contribution-policy must be enforce, warn, or off.");
 }
 
 export function renderHelp(): string {

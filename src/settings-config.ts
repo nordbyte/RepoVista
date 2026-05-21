@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isReportProviderId } from "./providers/index.js";
-import type { AiProviderId, AuditOptions, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
+import type { AiProviderId, AuditOptions, ContributionPolicyMode, ParallelMode, ReportExportFormat, ReviewMode, SandboxMode } from "./types.js";
 
 export interface RepoVistaSettings {
   provider?: AiProviderId;
@@ -14,6 +14,7 @@ export interface RepoVistaSettings {
   sandbox?: SandboxMode;
   language?: string;
   publishLanguage?: string;
+  contributionPolicy?: ContributionPolicyMode;
   outDir?: string;
   includes?: string[];
   ignores?: string[];
@@ -89,6 +90,7 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     sandbox: settings.sandbox ?? defaults.sandbox,
     language: settings.language ?? defaults.language,
     publishLanguage: settings.publishLanguage ?? defaults.publishLanguage,
+    contributionPolicy: settings.contributionPolicy ?? defaults.contributionPolicy,
     json: settings.json ?? defaults.json,
     keepLogs: settings.keepLogs ?? defaults.keepLogs,
     progress: settings.progress ?? defaults.progress,
@@ -168,6 +170,14 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     settings.reviewMode === "test-gaps"
   ) {
     sanitized.reviewMode = settings.reviewMode;
+  }
+
+  if (
+    settings.contributionPolicy === "enforce" ||
+    settings.contributionPolicy === "warn" ||
+    settings.contributionPolicy === "off"
+  ) {
+    sanitized.contributionPolicy = settings.contributionPolicy;
   }
 
   for (const key of ["includes", "ignores", "checkCommands"] as const) {

@@ -36,7 +36,7 @@ export const CLI_COMMANDS: readonly CliCommandDefinition[] = [
   { usage: "repovista triage <finding-id|--all> --status <status> [--note <text>]", name: "triage", help: "Update the lifecycle status of one finding" },
   { usage: "repovista revalidate <finding-id|--all> [--provider-revalidate]", name: "revalidate", help: "Re-check finding evidence against the current checkout" },
   { usage: "repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues]", name: "issue", help: "Create, update, or sync GitHub issues for findings through gh" },
-  { usage: "repovista publish <finding-id|--all> --run <run-id|dir> --as issue|pr [--dry-run] [--fork]", name: "publish", help: "Publish selected findings from a GitHub-source run as issues or pull requests" },
+  { usage: "repovista publish <finding-id|--all> --run <run-id|dir> --as issue|pr [--dry-run] [--fork] [--publish-language <name>] [--contribution-policy enforce|warn|off]", name: "publish", help: "Publish selected findings from a GitHub-source run as issues or pull requests" },
   { usage: "repovista fix <finding-id[,finding-id...]> [--dry-run] [--check <command>]", name: "fix", help: "Create an isolated patch attempt for one or more findings" },
   { usage: "repovista patches [patch-id] [--json] [--dry-run]", name: "patches", help: "List or preview RepoVista patch attempts" },
   { usage: "repovista rollback <patch-id> [--dry-run]", name: "rollback", help: "Reverse a recorded RepoVista patch diff" },

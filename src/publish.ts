@@ -2,6 +2,16 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import {
+  assertContributionPolicyAllowsPublish,
+  prepareContributionPolicy,
+  renderContributionPolicyDryRunSummary,
+  renderContributionPolicyIssueSection,
+  renderContributionPolicyPrompt,
+  renderContributionPolicyPullRequestSection,
+  type ContributionPolicyBundle,
+  type ContributionPolicyEvaluation
+} from "./contribution-policy.js";
 import { RepoVistaError } from "./errors.js";
 import { evidenceReferencesForFinding } from "./evidence-validation.js";
 import { loadStoredFindings, rewriteFindingStateAtomic } from "./finding-store.js";
@@ -88,10 +98,22 @@ export async function runPublishCommand(
     throw new RepoVistaError("No RepoVista findings selected for publishing.");
   }
   const publishFindings = await preparePublishFindings({ context, github, findings: selected, options, dependencies });
+  const contributionPolicy = await prepareContributionPolicy({
+    runDir: context.runDir,
+    meta: context.meta,
+    github,
+    mode: options.contributionPolicy ?? "enforce",
+    target,
+    findings: publishFindings.map((selection) => selection.display),
+    validationCommands: options.checkCommands ?? [],
+    runChecks: options.runChecks,
+    force: options.force,
+    now: dependencies.now
+  });
 
   return target === "issue"
-    ? publishIssues({ projectRoot, context, github, findings: publishFindings, options, dependencies })
-    : publishPullRequest({ projectRoot, context, github, findings: publishFindings, options, dependencies });
+    ? publishIssues({ projectRoot, context, github, findings: publishFindings, options, dependencies, contributionPolicy })
+    : publishPullRequest({ projectRoot, context, github, findings: publishFindings, options, dependencies, contributionPolicy });
 }
 
 async function publishIssues(input: {
@@ -101,19 +123,21 @@ async function publishIssues(input: {
   findings: PublishFindingSelection[];
   options: AuditOptions;
   dependencies: PublishDependencies;
+  contributionPolicy: ContributionPolicyEvaluation;
 }): Promise<string> {
   const now = input.dependencies.now ?? new Date();
   const exec = input.dependencies.execFile ?? defaultExecFile;
   if (input.options.dryRun) {
-    return `RepoVista publish dry run: ${input.findings.length} GitHub issue(s) for ${input.github.repository}\n\n${input.findings.map((selection) => renderIssuePreview(selection.display, input.github, input.context.meta, input.options)).join("\n\n---\n\n")}\n`;
+    return `RepoVista publish dry run: ${input.findings.length} GitHub issue(s) for ${input.github.repository}\n\n${renderContributionPolicyDryRunSummary(input.contributionPolicy)}\n\n${input.findings.map((selection) => renderIssuePreview(selection.display, input.github, input.context.meta, input.options, input.contributionPolicy.bundle)).join("\n\n---\n\n")}\n`;
   }
 
+  assertContributionPolicyAllowsPublish(input.contributionPolicy);
   const rows: string[] = [];
   const updates = new Map<string, StructuredFinding>();
   for (const selection of input.findings) {
     const finding = selection.original;
     const displayFinding = selection.display;
-    const body = renderIssueBody(displayFinding, input.github, input.context.meta);
+    const body = renderIssueBody(displayFinding, input.github, input.context.meta, input.contributionPolicy.bundle);
     const existing = await findExistingIssue(exec, input.context.meta.projectRoot, input.github.repository, finding.id);
     if (existing && !input.options.issueUpdateExisting && !input.options.issueSync) {
       const linked = issueLinkedFinding(finding, existing, existing.state ?? "unknown", input.options, now, "Existing GitHub issue detected.");
@@ -171,6 +195,7 @@ async function publishPullRequest(input: {
   findings: PublishFindingSelection[];
   options: AuditOptions;
   dependencies: PublishDependencies;
+  contributionPolicy: ContributionPolicyEvaluation;
 }): Promise<string> {
   const now = input.dependencies.now ?? new Date();
   const exec = input.dependencies.execFile ?? defaultExecFile;
@@ -194,10 +219,13 @@ async function publishPullRequest(input: {
 - Findings: ${originalFindings.map((finding) => finding.id).join(", ")}
 - Worktree: ${worktree}
 
+${renderContributionPolicyDryRunSummary(input.contributionPolicy)}
+
 ${buildFixPlan(displayFindings)}
 `;
   }
 
+  assertContributionPolicyAllowsPublish(input.contributionPolicy);
   await rm(publishRoot, { recursive: true, force: true });
   await mkdir(patchDir, { recursive: true });
   await mkdir(path.dirname(worktree), { recursive: true });
@@ -242,7 +270,7 @@ ${buildFixPlan(displayFindings)}
     provider: input.options.provider ?? "codex",
     phaseId: `publish-pr-${patchAttemptId}`,
     phaseTitle: `Publish PR for ${originalFindings.map((finding) => finding.id).join(", ")}`,
-    prompt: buildFixPrompt(originalFindings, input.options.checkCommands ?? [], input.github, input.context.meta),
+    prompt: buildFixPrompt(originalFindings, input.options.checkCommands ?? [], input.github, input.context.meta, input.contributionPolicy.bundle),
     projectRoot: worktree,
     reportPath: providerReportPath,
     model: input.options.model,
@@ -300,7 +328,7 @@ ${buildFixPlan(displayFindings)}
   await exec("git", ["commit", "-m", title], { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
   const commitSha = await gitHead(exec, worktree);
   const push = await pushBranch(exec, worktree, input.github.repository, branch, Boolean(input.options.publishFork));
-  const body = renderPatchPrBody(updated, input.github, input.context.meta);
+  const body = renderPatchPrBody(updated, input.github, input.context.meta, input.contributionPolicy.bundle);
   const pr = await exec("gh", ["pr", "create", "-R", input.github.repository, "--base", input.options.baseRef ?? input.github.defaultBranch ?? "main", "--head", push.head, "--title", title, "--body", body], {
     cwd: worktree,
     timeout: 120_000,
@@ -562,7 +590,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function renderIssuePreview(finding: StructuredFinding, github: GithubPublishTarget, meta: AuditMeta, options: AuditOptions): string {
+function renderIssuePreview(finding: StructuredFinding, github: GithubPublishTarget, meta: AuditMeta, options: AuditOptions, contributionPolicy?: ContributionPolicyBundle): string {
   return `Title: ${issueTitle(finding)}
 Repository: ${github.repository}
 Labels: ${combinedIssueLabels(finding, options).join(", ") || "n/a"}
@@ -570,14 +598,14 @@ Assignees: ${(options.issueAssignees ?? []).join(", ") || "n/a"}
 Update existing: ${options.issueUpdateExisting || options.issueSync ? "yes" : "no"}
 Reopen linked: ${options.issueReopen ? "yes" : "no"}
 
-${renderIssueBody(finding, github, meta)}`;
+${renderIssueBody(finding, github, meta, contributionPolicy)}`;
 }
 
 function issueTitle(finding: StructuredFinding): string {
   return `[RepoVista] ${finding.severity.toUpperCase()}: ${finding.title}`;
 }
 
-function renderIssueBody(finding: StructuredFinding, github: GithubPublishTarget, meta: AuditMeta): string {
+function renderIssueBody(finding: StructuredFinding, github: GithubPublishTarget, meta: AuditMeta, contributionPolicy?: ContributionPolicyBundle): string {
   return `${renderIssueIntro(finding, github)}
 
 ## RepoVista Finding
@@ -615,6 +643,7 @@ ${finding.recommendation ?? "n/a"}
 
 ${finding.suggestedRegressionTest ?? "n/a"}
 
+${contributionPolicy ? renderContributionPolicyIssueSection(contributionPolicy, finding) : ""}
 ${renderRepoVistaFooter()}
 `;
 }
@@ -799,7 +828,7 @@ Recommended fix: ${finding.recommendation ?? "n/a"}
 Suggested regression test: ${finding.suggestedRegressionTest ?? "n/a"}`).join("\n\n");
 }
 
-function buildFixPrompt(findings: StructuredFinding[], validationCommands: string[], github: GithubPublishTarget, meta: AuditMeta): string {
+function buildFixPrompt(findings: StructuredFinding[], validationCommands: string[], github: GithubPublishTarget, meta: AuditMeta, contributionPolicy?: ContributionPolicyBundle): string {
   return `You are fixing ${findings.length === 1 ? "one RepoVista finding" : `${findings.length} related RepoVista findings`} for ${github.repository}.
 
 The analyzed RepoVista run was ${meta.runId} at commit ${github.commit}.
@@ -812,6 +841,8 @@ ${JSON.stringify(findings, null, 2)}
 
 Expected validation commands:
 ${validationCommands.length ? validationCommands.map((command) => `- ${command}`).join("\n") : "- none provided by the user; do not invent destructive checks"}
+
+${contributionPolicy ? renderContributionPolicyPrompt(contributionPolicy) : "Repository contribution guidelines: none discovered by RepoVista."}
 
 Return a concise Markdown fix report.`;
 }
@@ -898,7 +929,7 @@ function numericText(value: string | undefined): string | undefined {
   return value && /^\d+$/.test(value) ? value : undefined;
 }
 
-function renderPatchPrBody(patch: PatchAttempt, github: GithubPublishTarget, meta: AuditMeta): string {
+function renderPatchPrBody(patch: PatchAttempt, github: GithubPublishTarget, meta: AuditMeta, contributionPolicy?: ContributionPolicyBundle): string {
   return `${renderPatchPrIntro(patch, github)}
 
 ## RepoVista Patch Attempt
@@ -934,6 +965,7 @@ ${patch.scopeGate ? [
 
 ${patch.commandsRun.length ? patch.commandsRun.map((command) => `- ${command.command}: ${command.exitCode ?? "unknown"}${command.timedOut ? " (timed out)" : ""}`).join("\n") : "- No validation commands recorded."}
 
+${contributionPolicy ? renderContributionPolicyPullRequestSection(contributionPolicy, patch) : ""}
 ${renderRepoVistaFooter()}
 `;
 }

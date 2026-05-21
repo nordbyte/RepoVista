@@ -7,6 +7,7 @@ export { BOOLEAN_OPTION_NAMES, CLI_COMMANDS, CLI_OPTIONS, VALUE_OPTION_NAMES } f
 export { buildCodexExecArgs, runCodexPhase } from "./codex-runner.js";
 export { buildClaudeExecArgs } from "./providers/claude.js";
 export { buildRunComparison, compareGateViolations, compareHasRegression, runCompareCommand, renderRunComparison, renderRunComparisonHtml } from "./compare.js";
+export { prepareContributionPolicy, renderContributionPolicyDryRunSummary } from "./contribution-policy.js";
 export { loadCodexConfigDefaults, loadCodexModels, parseCodexConfigDefaults, parseCodexModelCatalog, reasoningOptionsForModel, resolveCodexDefaultModel } from "./codex-models.js";
 export { loadProviderModels, reasoningOptionsForProviderModel, resolveProviderDefaultModel } from "./provider-models.js";
 export { runProviderPhase } from "./provider-runner.js";
@@ -60,7 +61,7 @@ export { collectDiffScope } from "./git-diff.js";
 export { normalizeGithubRepository, prepareGithubSource, validateGithubRef } from "./github-source.js";
 export { createIgnoreMatcher, globToRegExp, matchesPattern } from "./ignore.js";
 export { createProjectInventory } from "./inventory.js";
-export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateProvider, validateSandbox } from "./options.js";
+export { DEFAULT_OPTIONS, parseCliArgs, parseParallelMode, renderHelp, validateContributionPolicyMode, validateProvider, validateSandbox } from "./options.js";
 export { OPTION_REGISTRY, cliOptionDefinitions, createDefaultAuditOptions, menuItemIdsFromRegistry, settingDefinitions } from "./option-registry.js";
 export { runPreflight } from "./preflight.js";
 export { prepareRunDirectory, useExistingRunDirectory, validateReportRoot, writeMeta } from "./reports.js";
@@ -87,6 +88,7 @@ export type {
   CliAction,
   CliParseResult,
   CompareFormat,
+  ContributionPolicyMode,
   CodexRunRequest,
   CodexRunResult,
   DiffScope,

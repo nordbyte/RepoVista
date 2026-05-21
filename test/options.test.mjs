@@ -21,6 +21,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.options.sandbox, "read-only");
   assert.equal(parsed.options.language, "English");
   assert.equal(parsed.options.publishLanguage, "English");
+  assert.equal(parsed.options.contributionPolicy, "enforce");
   assert.equal(parsed.options.reasoning, "xhigh");
   assert.equal(parsed.options.fastMode, false);
   assert.equal(parsed.options.runChecks, true);
@@ -57,6 +58,8 @@ test("explicit audit command parses supported options", () => {
     "English",
     "--publish-language",
     "German",
+    "--contribution-policy",
+    "warn",
     "--json",
     "--include",
     "src/**,README.md",
@@ -104,6 +107,7 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.sandbox, "workspace-write");
   assert.equal(parsed.options.language, "English");
   assert.equal(parsed.options.publishLanguage, "German");
+  assert.equal(parsed.options.contributionPolicy, "warn");
   assert.equal(parsed.options.json, true);
   assert.deepEqual(parsed.options.includes, ["src/**", "README.md"]);
   assert.deepEqual(parsed.options.ignores, ["fixtures/**"]);
@@ -269,18 +273,20 @@ test("new operational commands and options are recognized", () => {
   assert.equal(openPr.options.patchBranch, "repovista/fix");
   assert.equal(openPr.options.patchTitle, "Fix");
 
-  const publish = parseCliArgs(["publish", "fnd_123", "--run", "2026-run", "--as", "pr", "--fork", "--dry-run"]);
+  const publish = parseCliArgs(["publish", "fnd_123", "--run", "2026-run", "--as", "pr", "--fork", "--dry-run", "--contribution-policy", "off"]);
   assert.equal(publish.action, "publish");
   assert.equal(publish.options.findingId, "fnd_123");
   assert.equal(publish.options.findingRunId, "2026-run");
   assert.equal(publish.options.publishTarget, "pr");
   assert.equal(publish.options.publishFork, true);
   assert.equal(publish.options.dryRun, true);
+  assert.equal(publish.options.contributionPolicy, "off");
 
   assert.equal(parseCliArgs(["findings-ui"]).action, "findings-ui");
   assert.equal(parseCliArgs(["reports"]).action, "reports");
   assert.throws(() => parseCliArgs(["reports-ui"]), /Unknown command/);
   assert.throws(() => parseCliArgs(["publish", "fnd_123", "--as", "comment"]), /--as/);
+  assert.throws(() => parseCliArgs(["publish", "fnd_123", "--contribution-policy", "strict"]), /--contribution-policy/);
 });
 
 test("audit profiles, workspaces, issue metadata, and incremental mode parse", () => {

@@ -8,6 +8,7 @@ export type CompareFormat = "markdown" | "json" | "html";
 export type AuditProfileId = "quick" | "security" | "pr-review" | "release-readiness" | "architecture";
 export type ReviewMode = "default" | "deslopify" | "security" | "test-gaps";
 export type PublishTarget = "issue" | "pr";
+export type ContributionPolicyMode = "enforce" | "warn" | "off";
 
 export type CliAction =
   | "audit"
@@ -61,6 +62,7 @@ export interface AuditOptions {
   sandbox: SandboxMode;
   language: string;
   publishLanguage?: string;
+  contributionPolicy: ContributionPolicyMode;
   json: boolean;
   includes: string[];
   ignores: string[];
