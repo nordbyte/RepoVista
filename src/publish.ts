@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { evidenceReferencesForFinding } from "./evidence-validation.js";
 import { loadStoredFindings, rewriteFindingStateAtomic } from "./finding-store.js";
+import { defaultPullRequestTitleForFindings } from "./pr-title.js";
 import { publishFindingJsonSchema } from "./provider-schema.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
@@ -179,7 +180,7 @@ async function publishPullRequest(input: {
   const primary = originalFindings[0];
   const patchAttemptId = stableId("pat", [input.context.meta.runId, originalFindings.map((finding) => finding.id).join(","), now.toISOString()]);
   const branch = input.options.patchBranch ?? safeBranchName(`repovista/fix-${primary.id}-${patchAttemptId}`);
-  const title = input.options.patchTitle ?? `RepoVista: fix ${originalFindings.map((finding) => finding.id).join(", ")}`;
+  const title = input.options.patchTitle ?? defaultPullRequestTitleForFindings(displayFindings);
   const patchDir = path.join(input.context.outRoot, "patches");
   const publishRoot = path.join(input.context.outRoot, "publish", input.context.meta.runId, patchAttemptId);
   const worktree = path.join(publishRoot, "worktree");

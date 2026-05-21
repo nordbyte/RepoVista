@@ -243,6 +243,7 @@ test("publish creates a fork-backed pull request for a selected finding", async 
     assert.match(output, /https:\/\/github.com\/creativeprofit22\/contract-and-flow\/pull\/34/);
     const prCall = calls.find((call) => call.command === "gh" && call.args[0] === "pr" && call.args[1] === "create");
     assert.ok(prCall);
+    assert.equal(prCall.args[prCall.args.indexOf("--title") + 1], "fix: audit-only command allows writes");
     assert.equal(prCall.args[prCall.args.indexOf("--head") + 1], "tester:repovista/fix-fnd-test");
     const prBody = prCall.args[prCall.args.indexOf("--body") + 1];
     assert.match(prBody, /Hi,\n\nI opened this PR to address a RepoVista finding in creativeprofit22\/contract-and-flow: Audit-only command allows writes\./);

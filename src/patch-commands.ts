@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { runRevalidateFindingCommand } from "./finding-state.js";
 import { loadStoredFindings } from "./finding-store.js";
+import { defaultPullRequestTitleForPatch } from "./pr-title.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
 import { stableId } from "./stable-id.js";
@@ -201,7 +202,7 @@ export async function runOpenPrCommand(options: AuditOptions, projectRoot = proc
   }
   const base = options.baseRef ?? "main";
   const branch = options.patchBranch ?? `repovista/${patch.patchAttemptId}`;
-  const title = options.patchTitle ?? `RepoVista: fix ${patch.findingIds.join(", ")}`;
+  const title = options.patchTitle ?? defaultPullRequestTitleForPatch(patch);
   const body = renderPatchPrBody(patch);
   if (options.dryRun) {
     return `RepoVista open-pr dry run:

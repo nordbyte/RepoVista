@@ -11,6 +11,7 @@ import {
   runNextFindingCommand,
   runCreateIssueCommand,
   runFixFindingCommand,
+  runOpenPrCommand,
   runRollbackPatchCommand,
   runRevalidateFindingCommand,
   runShowFindingCommand,
@@ -353,6 +354,41 @@ test("patch rollback reverses a recorded patch diff", async () => {
     await runRollbackPatchCommand({ outDir: ".repovista", patchId }, root, new Date("2026-05-18T11:00:00.000Z"));
     const content = await readFile(path.join(root, "src", "index.ts"), "utf8");
     assert.equal(content, "export const value = 1;\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("open-pr default title summarizes the patch instead of using finding ids", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-open-pr-title-"));
+  try {
+    const patchDir = path.join(root, ".repovista", "patches");
+    await mkdir(patchDir, { recursive: true });
+    await writeFile(path.join(patchDir, "pat_title.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      patchAttemptId: "pat_title",
+      findingIds: ["fnd_260bc40fe1ef"],
+      featureIds: [],
+      status: "applied",
+      plan: "Finding: fnd_260bc40fe1ef - Watchdog menubar indicator imports a nonexistent function and swallows the error\nSeverity: medium",
+      filesChanged: ["collectors/watchdog.py"],
+      preDiff: "",
+      postDiff: "",
+      commandsRun: [],
+      provider: { id: "codex" },
+      git: {},
+      createdAt: "2026-05-21T10:00:00.000Z",
+      updatedAt: "2026-05-21T10:00:00.000Z"
+    }, null, 2)}\n`, "utf8");
+
+    const output = await runOpenPrCommand({
+      outDir: ".repovista",
+      patchId: "pat_title",
+      dryRun: true
+    }, root);
+
+    assert.match(output, /- title: fix: watchdog menubar indicator imports a nonexistent function and swallows the error/);
+    assert.doesNotMatch(output, /RepoVista: fix fnd_260bc40fe1ef/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
