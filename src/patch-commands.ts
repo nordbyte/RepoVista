@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import { RepoVistaError } from "./errors.js";
 import { runRevalidateFindingCommand } from "./finding-state.js";
 import { loadStoredFindings } from "./finding-store.js";
+import { parseGitStatusFiles } from "./git-status.js";
+import { evaluatePatchScope } from "./patch-scope.js";
 import { defaultPullRequestTitleForPatch } from "./pr-title.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
 import { validateReportRoot } from "./reports.js";
@@ -96,17 +98,21 @@ export async function runFixFindingCommand(
     timeoutSeconds: options.phaseTimeoutSeconds ?? 1800
   }, dependencies.spawnAdapter);
 
-  const filesChanged = await gitChangedFiles(projectRoot);
+  let filesChanged = await gitChangedFiles(projectRoot);
+  let scopeGate = evaluatePatchScope(findings, filesChanged, options.patchMaxFiles ?? 12);
+  const missingValidation = options.runChecks === true && !(options.checkCommands ?? []).length;
+  const commandsRun = result.success && filesChanged.length > 0 && scopeGate.passed && !missingValidation ? await runValidationCommands(projectRoot, options.checkCommands ?? [], options.checkTimeoutSeconds ?? 300) : [];
+  const failedCommand = commandsRun.find((command) => command.exitCode !== 0 || command.timedOut);
+  if (commandsRun.length) {
+    filesChanged = await gitChangedFiles(projectRoot);
+    scopeGate = evaluatePatchScope(findings, filesChanged, options.patchMaxFiles ?? 12);
+  }
   const postDiff = await gitDiff(projectRoot);
   const fullDiff = await gitFullDiff(projectRoot);
   const diffPath = fullDiff ? path.join(patchDir, `${patchAttemptId}.diff`) : undefined;
   if (diffPath) {
     await writeFile(diffPath, `${fullDiff.trimEnd()}\n`, "utf8");
   }
-  const scopeGate = evaluatePatchScope(findings, filesChanged, options.patchMaxFiles ?? 12);
-  const missingValidation = options.runChecks === true && !(options.checkCommands ?? []).length;
-  const commandsRun = result.success && scopeGate.passed && !missingValidation ? await runValidationCommands(projectRoot, options.checkCommands ?? [], options.checkTimeoutSeconds ?? 300) : [];
-  const failedCommand = commandsRun.find((command) => command.exitCode !== 0 || command.timedOut);
   const revalidation = result.success && scopeGate.passed && !missingValidation && !failedCommand && options.fixPostRevalidate && findings.length === 1
     ? await runPostFixRevalidation(options, projectRoot, primaryFinding.id, now)
     : { status: "not-run" as const };
@@ -351,12 +357,12 @@ async function runValidationCommands(projectRoot: string, commands: string[], ti
 
 async function gitChangedFiles(projectRoot: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync("git", ["diff", "--name-only"], {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
       cwd: projectRoot,
       timeout: 30_000,
       maxBuffer: 1024 * 1024
     });
-    return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return parseGitStatusFiles(stdout);
   } catch {
     return [];
   }
@@ -480,36 +486,6 @@ function renderPatchSummary(patch: PatchAttempt): string {
 function truncateDiff(diff: string): string {
   const limit = 20_000;
   return diff.length <= limit ? diff : `${diff.slice(0, limit)}\n... diff truncated ...`;
-}
-
-function evaluatePatchScope(
-  findings: StructuredFinding[],
-  filesChanged: string[],
-  maxFiles: number
-): NonNullable<PatchAttempt["scopeGate"]> {
-  const allowedPaths = Array.from(new Set(findings.flatMap((finding) => finding.paths ?? []))).filter(Boolean);
-  const violations: string[] = [];
-  if (filesChanged.length > maxFiles) {
-    violations.push(`changed ${filesChanged.length} files, max is ${maxFiles}`);
-  }
-  if (allowedPaths.length) {
-    const outside = filesChanged.filter((file) => !allowedPaths.some((allowed) => file === allowed || file.startsWith(`${allowed.replace(/\/+$/g, "")}/`) || sameTopLevel(file, allowed)));
-    if (outside.length) {
-      violations.push(`changed files outside finding scope: ${outside.join(", ")}`);
-    }
-  }
-  return {
-    passed: violations.length === 0,
-    maxFiles,
-    allowedPaths,
-    violations
-  };
-}
-
-function sameTopLevel(left: string, right: string): boolean {
-  const [leftTop] = left.split("/");
-  const [rightTop] = right.split("/");
-  return Boolean(leftTop && rightTop && leftTop === rightTop && (leftTop === "test" || leftTop === "tests"));
 }
 
 async function runPostFixRevalidation(

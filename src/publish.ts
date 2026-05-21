@@ -15,6 +15,8 @@ import {
 import { RepoVistaError } from "./errors.js";
 import { evidenceReferencesForFinding } from "./evidence-validation.js";
 import { loadStoredFindings, rewriteFindingStateAtomic } from "./finding-store.js";
+import { parseGitStatusFiles } from "./git-status.js";
+import { evaluatePatchScope } from "./patch-scope.js";
 import { defaultPullRequestTitleForFindings } from "./pr-title.js";
 import { publishFindingJsonSchema } from "./provider-schema.js";
 import { runProviderPhase, type SpawnAdapter } from "./provider-runner.js";
@@ -26,6 +28,7 @@ import type {
   EvidenceCommandResult,
   FindingPullRequestLink,
   PatchAttempt,
+  ProviderRunProgressEvent,
   PublishTarget,
   StructuredFinding
 } from "./types.js";
@@ -84,6 +87,11 @@ interface PublishFindingTranslation {
   reproduction: string;
   suggestedRegressionTest: string;
   minimumFixScope: string;
+}
+
+interface PublishProgress {
+  step(message: string): void;
+  providerEvent(event: ProviderRunProgressEvent): void;
 }
 
 export async function runPublishCommand(
@@ -201,6 +209,7 @@ async function publishPullRequest(input: {
   const now = input.dependencies.now ?? new Date();
   const exec = input.dependencies.execFile ?? defaultExecFile;
   const runProvider = input.dependencies.runProvider ?? runProviderPhase;
+  const progress = createPublishProgress(input.options, Boolean(input.dependencies.runProvider));
   const originalFindings = input.findings.map((selection) => selection.original);
   const displayFindings = input.findings.map((selection) => selection.display);
   const primary = originalFindings[0];
@@ -227,6 +236,7 @@ ${buildFixPlan(displayFindings)}
   }
 
   assertContributionPolicyAllowsPublish(input.contributionPolicy);
+  progress.step(`Preparing PR worktree for ${input.github.repository}`);
   await rm(publishRoot, { recursive: true, force: true });
   await mkdir(patchDir, { recursive: true });
   await mkdir(path.dirname(worktree), { recursive: true });
@@ -267,6 +277,7 @@ ${buildFixPlan(displayFindings)}
   };
   await writePatchAttempt(patchDir, initial);
 
+  progress.step(`Running ${input.options.provider ?? "codex"} patch provider for ${originalFindings.map((finding) => finding.id).join(", ")}`);
   const providerResult = await runProvider({
     provider: input.options.provider ?? "codex",
     phaseId: `publish-pr-${patchAttemptId}`,
@@ -281,22 +292,29 @@ ${buildFixPlan(displayFindings)}
     sandbox: "workspace-write",
     jsonEvents: input.options.json,
     keepLogs: input.options.keepLogs,
-    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800
+    timeoutSeconds: input.options.phaseTimeoutSeconds ?? 1800,
+    onProgress: (event) => progress.providerEvent(event)
   }, input.dependencies.spawnAdapter);
 
-  const filesChanged = await gitChangedFiles(exec, worktree);
+  progress.step("Evaluating patch scope");
+  let filesChanged = await gitChangedFiles(exec, worktree);
+  let scopeGate = evaluatePatchScope(originalFindings, filesChanged, input.options.patchMaxFiles ?? 12);
+  const missingValidation = input.options.runChecks === true && !(input.options.checkCommands ?? []).length;
+  const commandsRun = providerResult.success && filesChanged.length > 0 && scopeGate.passed && !missingValidation
+    ? await runValidationCommandsWithProgress(exec, worktree, input.options.checkCommands ?? [], input.options.checkTimeoutSeconds ?? 300, progress)
+    : [];
+  const failedCommand = commandsRun.find((command) => command.exitCode !== 0 || command.timedOut);
+  if (commandsRun.length) {
+    progress.step("Re-evaluating patch scope after validation");
+    filesChanged = await gitChangedFiles(exec, worktree);
+    scopeGate = evaluatePatchScope(originalFindings, filesChanged, input.options.patchMaxFiles ?? 12);
+  }
   const postDiff = await gitDiff(exec, worktree, "stat");
   const fullDiff = await gitDiff(exec, worktree, "binary");
   const diffPath = fullDiff ? path.join(patchDir, `${patchAttemptId}.diff`) : undefined;
   if (diffPath) {
     await writeFile(diffPath, `${fullDiff.trimEnd()}\n`, "utf8");
   }
-  const scopeGate = evaluatePatchScope(originalFindings, filesChanged, input.options.patchMaxFiles ?? 12);
-  const missingValidation = input.options.runChecks === true && !(input.options.checkCommands ?? []).length;
-  const commandsRun = providerResult.success && scopeGate.passed && !missingValidation
-    ? await runValidationCommands(exec, worktree, input.options.checkCommands ?? [], input.options.checkTimeoutSeconds ?? 300)
-    : [];
-  const failedCommand = commandsRun.find((command) => command.exitCode !== 0 || command.timedOut);
   let updated: PatchAttempt = {
     ...initial,
     status: providerResult.success && filesChanged.length > 0 && scopeGate.passed && !missingValidation && !failedCommand ? "applied" : "failed",
@@ -324,12 +342,15 @@ ${buildFixPlan(displayFindings)}
     throw new RepoVistaError(updated.error ?? `Patch attempt ${patchAttemptId} did not pass publication gates.`);
   }
 
+  progress.step(`Committing ${filesChanged.length} changed file(s)`);
   await exec("git", ["add", ...filesChanged], { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
   await configureGithubNoreplyCommitIdentity(exec, worktree);
   await exec("git", ["commit", "-m", title], { cwd: worktree, timeout: 30_000, maxBuffer: 1024 * 1024 });
   const commitSha = await gitHead(exec, worktree);
+  progress.step(`Pushing branch ${branch}`);
   const push = await pushBranch(exec, worktree, input.github.repository, branch, Boolean(input.options.publishFork));
   const body = renderPatchPrBody(updated, input.github, input.context.meta, input.contributionPolicy.bundle);
+  progress.step("Creating GitHub pull request");
   const pr = await exec("gh", ["pr", "create", "-R", input.github.repository, "--base", input.options.baseRef ?? input.github.defaultBranch ?? "main", "--head", push.head, "--title", title, "--body", body], {
     cwd: worktree,
     timeout: 120_000,
@@ -363,6 +384,7 @@ ${buildFixPlan(displayFindings)}
     })
   } satisfies StructuredFinding]));
   await persistFindingUpdates(input.projectRoot, input.options.outDir, input.context, updates);
+  progress.step(`Created pull request ${prUrl ?? ""}`.trimEnd());
   return `RepoVista published pull request for ${input.github.repository}:\n${prUrl ?? "PR URL not returned by gh"}\nPatch attempt: ${patchAttemptId}\nBranch: ${push.remote}/${branch}\n`;
 }
 
@@ -886,8 +908,10 @@ function buildFixPrompt(findings: StructuredFinding[], validationCommands: strin
 
 The analyzed RepoVista run was ${meta.runId} at commit ${github.commit}.
 You may edit files in this generated worktree only. Keep the fix minimal and limited to the finding evidence.
+If this command contains one finding, fix only that finding. Do not intentionally fix adjacent findings from the same report; mention them in the summary instead of changing unrelated files.
+Prefer the listed affected paths, files named in minimumFixScope, the smallest helper files needed by those paths, and focused regression tests. Avoid broad drive-by refactors, unrelated docs, generated output, or dependency lockfile changes.
 Do not push, publish, create issues, create pull requests, or create releases. RepoVista will handle GitHub publishing after your patch.
-After editing, summarize the change and mention any validation you ran.
+After editing, summarize the change and mention any validation you ran. RepoVista may run the expected validation commands after your patch; do not run dependency install/update commands if they modify lockfiles or generated output.
 
 Findings:
 ${JSON.stringify(findings, null, 2)}
@@ -1085,39 +1109,84 @@ async function runValidationCommands(
   return results;
 }
 
-function evaluatePatchScope(
-  findings: StructuredFinding[],
-  filesChanged: string[],
-  maxFiles: number
-): NonNullable<PatchAttempt["scopeGate"]> {
-  const allowedPaths = Array.from(new Set(findings.flatMap((finding) => finding.paths ?? []))).filter(Boolean);
-  const violations: string[] = [];
-  if (filesChanged.length > maxFiles) {
-    violations.push(`changed ${filesChanged.length} files, max is ${maxFiles}`);
-  }
-  if (allowedPaths.length) {
-    const outside = filesChanged.filter((file) => !allowedPaths.some((allowed) => file === allowed || file.startsWith(`${allowed.replace(/\/+$/g, "")}/`) || sameTopLevel(file, allowed)));
-    if (outside.length) {
-      violations.push(`changed files outside finding scope: ${outside.join(", ")}`);
+async function runValidationCommandsWithProgress(
+  exec: NonNullable<PublishDependencies["execFile"]>,
+  cwd: string,
+  commands: string[],
+  timeoutSeconds: number,
+  progress: PublishProgress
+): Promise<EvidenceCommandResult[]> {
+  const results: EvidenceCommandResult[] = [];
+  for (const command of commands) {
+    progress.step(`Running validation: ${command}`);
+    const [result] = await runValidationCommands(exec, cwd, [command], timeoutSeconds);
+    if (result) {
+      results.push(result);
+      progress.step(`Validation finished: ${command} -> ${result.exitCode ?? "unknown"}${result.timedOut ? " (timed out)" : ""}`);
     }
   }
+  return results;
+}
+
+function createPublishProgress(options: AuditOptions, mockedProvider: boolean): PublishProgress {
+  const enabled = Boolean(options.progress) && !options.json && !mockedProvider;
+  const providerHeartbeats = new Map<string, { startedAt?: number; bytes: number; lastReportedAt: number; stream?: "stdout" | "stderr" }>();
   return {
-    passed: violations.length === 0,
-    maxFiles,
-    allowedPaths,
-    violations
+    step(message: string) {
+      if (enabled) {
+        process.stderr.write(`RepoVista publish: ${message}\n`);
+      }
+    },
+    providerEvent(event: ProviderRunProgressEvent) {
+      if (!enabled) {
+        return;
+      }
+      const heartbeat = providerHeartbeats.get(event.phaseId) ?? { bytes: 0, lastReportedAt: 0 };
+      const timestamp = Date.parse(event.at);
+      const now = Number.isFinite(timestamp) ? timestamp : Date.now();
+      if (event.kind === "spawned") {
+        heartbeat.startedAt = now;
+        providerHeartbeats.set(event.phaseId, heartbeat);
+        process.stderr.write(`RepoVista publish: provider spawned pid ${event.pid ?? "unknown"}\n`);
+        return;
+      }
+      if (event.kind === "closed") {
+        providerHeartbeats.delete(event.phaseId);
+        process.stderr.write(`RepoVista publish: provider finished with exit ${event.exitCode ?? "unknown"}${event.signal ? ` signal ${event.signal}` : ""}\n`);
+        return;
+      }
+      heartbeat.bytes += event.bytes ?? 0;
+      heartbeat.stream = event.stream;
+      providerHeartbeats.set(event.phaseId, heartbeat);
+      if (now - heartbeat.lastReportedAt < 60_000) {
+        return;
+      }
+      heartbeat.lastReportedAt = now;
+      const elapsed = heartbeat.startedAt ? ` for ${formatProgressDuration(now - heartbeat.startedAt)}` : "";
+      const stream = heartbeat.stream ? ` (${heartbeat.stream})` : "";
+      process.stderr.write(`RepoVista publish: provider active${elapsed}: ${formatProgressBytes(heartbeat.bytes)} diagnostics${stream}\n`);
+    }
   };
 }
 
-function sameTopLevel(left: string, right: string): boolean {
-  const [leftTop] = left.split("/");
-  const [rightTop] = right.split("/");
-  return Boolean(leftTop && rightTop && leftTop === rightTop && (leftTop === "test" || leftTop === "tests"));
+function formatProgressDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
+}
+
+function formatProgressBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes}B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 102.4) / 10}KB`;
+  }
+  return `${Math.round(bytes / (1024 * 102.4)) / 10}MB`;
 }
 
 async function gitChangedFiles(exec: NonNullable<PublishDependencies["execFile"]>, cwd: string): Promise<string[]> {
-  const { stdout } = await exec("git", ["diff", "--name-only"], { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 });
-  return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const { stdout } = await exec("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 });
+  return parseGitStatusFiles(stdout);
 }
 
 async function gitStatusShort(exec: NonNullable<PublishDependencies["execFile"]>, cwd: string): Promise<string[]> {

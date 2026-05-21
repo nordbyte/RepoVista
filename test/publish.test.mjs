@@ -394,6 +394,9 @@ test("publish creates a fork-backed pull request for a selected finding", async 
         if (command === "git" && args[0] === "branch") {
           return { stdout: "main\n" };
         }
+        if (command === "git" && args[0] === "status" && args.includes("--porcelain=v1")) {
+          return { stdout: " M README.md\n" };
+        }
         if (command === "git" && args[0] === "status") {
           return { stdout: "" };
         }
