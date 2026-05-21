@@ -44,8 +44,9 @@ export function buildCodexExecArgs(request: ProviderRunRequest): string[] {
     args.push("--model", request.model);
   }
 
-  if (request.profile) {
-    args.push("--profile", request.profile);
+  const profile = codexProfileArg(request.profile);
+  if (profile) {
+    args.push("--profile", profile);
   }
 
   if (request.reasoning) {
@@ -62,6 +63,14 @@ export function buildCodexExecArgs(request: ProviderRunRequest): string[] {
 
   args.push("-");
   return args;
+}
+
+function codexProfileArg(profile: string | undefined): string | undefined {
+  const value = profile?.trim();
+  if (!value || value === "none") {
+    return undefined;
+  }
+  return value;
 }
 
 function classifyCodexError(stderrText: string, code: number | null): string {

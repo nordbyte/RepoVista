@@ -102,6 +102,25 @@ test("codex args use read-only sandbox, target cwd and output-last-message", () 
   assert.ok(args.includes('service_tier="fast"'));
 });
 
+test("codex args omit recorded none profile sentinel", () => {
+  const args = buildCodexExecArgs({
+    phaseId: "publish-language-fnd_test",
+    phaseTitle: "Publish Language",
+    prompt: "prompt",
+    projectRoot: "/repo",
+    reportPath: "/repo/.repovista/run/publish-language/fnd.json",
+    sandbox: "read-only",
+    jsonEvents: false,
+    keepLogs: false,
+    profile: "none",
+    fastMode: false,
+    timeoutSeconds: 60
+  });
+
+  assert.ok(!args.includes("--profile"));
+  assert.ok(!args.includes("none"));
+});
+
 test("claude args use print mode, model, effort and non-persistent sessions", () => {
   const args = buildClaudeExecArgs({
     provider: "claude",
