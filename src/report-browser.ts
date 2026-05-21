@@ -4,6 +4,15 @@ import path from "node:path";
 import type { ReadStream, WriteStream } from "node:tty";
 import { runCompareCommand } from "./compare.js";
 import { runPublishCommand } from "./publish.js";
+import {
+  findingPublishReadiness,
+  findingQueueMarker,
+  findingWorkflowFilterLabel,
+  matchesFindingWorkflowFilter,
+  nextFindingWorkflowFilter,
+  renderStructuredFindingDetail,
+  type FindingWorkflowFilter
+} from "./finding-view.js";
 import { resolveProviderDefaultModel } from "./provider-models.js";
 import { validateReportRoot } from "./reports.js";
 import {
@@ -114,7 +123,9 @@ export interface ReportBrowserState {
   bookmarkedSections?: Set<string>;
   markedFindingIds?: Set<string>;
   publishTarget?: PublishTarget;
+  publishTargets?: Record<string, PublishTarget>;
   publishOutput?: string;
+  publishFilter?: FindingWorkflowFilter;
   severityFilter?: ReportSeverityFilter;
   statusFilter?: ReportStatusFilter;
 }
@@ -198,7 +209,8 @@ export function createReportBrowserState(
     findingSort: "severity",
     layout: "normal",
     severityFilter: "all",
-    statusFilter: "all"
+    statusFilter: "all",
+    publishFilter: "all"
   };
 }
 
@@ -238,18 +250,18 @@ export function renderReportsMenuFrame(
   const section = run?.sections[state.sectionCursor];
   const markedRuns = selectedMarkedRuns(runs, state);
   if (state.screen === "confirm-publish" && run) {
-    const findings = selectedFindingsForPublish(run, state);
+    const selections = queuedFindingsForPublish(run, state);
     return renderTuiListFrame({
       title: "RepoVista Reports",
       help: "Enter publishes | d dry-run preview | Esc cancels | q exits",
-      sectionTitle: `Publish ${findings.length} finding(s) as ${state.publishTarget ?? "issue"} to ${run.source?.repository ?? "n/a"}`,
-      items: findings.map((finding) => `${finding.severity.toUpperCase()} | ${finding.id} | ${finding.title}`),
+      sectionTitle: `Publish ${selections.length} queued finding(s) to ${run.source?.repository ?? "n/a"}`,
+      items: selections.map(({ finding, target }) => `${target.toUpperCase()} | ${finding.severity.toUpperCase()} | ${finding.id} | ${finding.title} | ${findingPublishReadiness(finding, Boolean(run.source))}`),
       cursor: -1,
       columns: options.columns,
       rows: options.rows,
       color: options.color,
-      emptyMessage: "No findings selected. Mark findings with Space or select one finding first.",
-      footer: `${contextFooter(run, state)} | ${state.publishTarget === "pr" ? "PR creates a patch attempt and branch" : "Issue creates or updates GitHub issues"}`
+      emptyMessage: "No findings queued. Use i for issue or p for PR in the finding list.",
+      footer: `${contextFooter(run, state)} | d previews all queued groups`
     });
   }
 
@@ -379,10 +391,10 @@ export function renderReportsMenuFrame(
   }
 
   if (state.screen === "findings-list" && run) {
-    const findings = sortedFilteredFindings(run.findings, state);
+    const findings = sortedFilteredFindings(run.findings, state, run);
     return renderTuiListFrame({
       title: "RepoVista Reports",
-      help: "Enter details | Space mark | i issue | p PR | 1-5 triage | s/f/t | e evidence | b bookmark | Esc returns",
+      help: "Enter details | Space queue | i issue | p PR | c publish | 1-5 triage | s/f/t/r | e evidence | b bookmark",
       sectionTitle: `${run.runId} findings`,
       items: findings.map((finding) => formatFindingListItem(run, finding, state)),
       cursor: state.findingCursor ?? 0,
@@ -390,7 +402,7 @@ export function renderReportsMenuFrame(
       rows: options.rows,
       color: options.color,
       emptyMessage: "No findings match the current filters.",
-      footer: `${contextFooter(run, state)} | sort ${state.findingSort ?? "severity"}`
+      footer: `${contextFooter(run, state)} | sort ${state.findingSort ?? "severity"} | queued ${queuedFindingsForPublish(run, state).length}`
     });
   }
 
@@ -549,21 +561,17 @@ async function handleReportBrowserKey(
       state.notice = "Publish cancelled.";
     } else if ((key.name === "return" || key.name === "enter" || key.name === "d") && run) {
       const dryRun = key.name === "d";
-      const findings = selectedFindingsForPublish(run, state);
-      if (!findings.length) {
-        state.notice = "No findings selected for publishing.";
+      const selections = queuedFindingsForPublish(run, state);
+      if (!selections.length) {
+        state.notice = "No findings queued for publishing.";
         return;
       }
       try {
-        const output = await runPublishCommand({
-          ...options,
-          findingRunId: run.runDir,
-          findingId: findings.map((finding) => finding.id).join(","),
-          publishTarget: state.publishTarget ?? "issue",
-          dryRun
-        }, projectRoot);
+        const output = await publishQueuedReportFindings(run, selections, options, projectRoot, dryRun);
         if (!dryRun) {
           state.markedFindingIds?.clear();
+          state.publishTargets = {};
+          await reloadReportRuns(runs, run.runDir, state, projectRoot, options);
         }
         state.publishOutput = output;
         state.notice = dryRun ? "Dry-run preview generated." : firstLine(output);
@@ -723,6 +731,9 @@ async function handleReportBrowserKey(
     } else if (key.name === "t") {
       state.statusFilter = nextStatusFilter(state.statusFilter ?? "all");
       selectSectionById(run, state, "findings");
+    } else if (key.name === "r") {
+      state.publishFilter = nextFindingWorkflowFilter(state.publishFilter);
+      selectSectionById(run, state, "findings");
     } else if (key.name === "e") {
       selectSectionById(run, state, "evidence-refs");
     } else if (key.name === "c") {
@@ -789,7 +800,7 @@ async function handleReportBrowserKey(
   }
 
   if (state.screen === "findings-list") {
-    const findings = sortedFilteredFindings(run.findings, state);
+    const findings = sortedFilteredFindings(run.findings, state, run);
     if (key.name === "escape" || key.name === "left" || key.name === "backspace") {
       state.screen = "sections";
       selectSectionById(run, state, "findings");
@@ -806,10 +817,15 @@ async function handleReportBrowserKey(
     } else if (key.name === "t") {
       state.statusFilter = nextStatusFilter(state.statusFilter ?? "all");
       state.findingCursor = 0;
+    } else if (key.name === "r") {
+      state.publishFilter = nextFindingWorkflowFilter(state.publishFilter);
+      state.findingCursor = 0;
     } else if (key.name === "space" && findings.length) {
-      toggleMarkedFinding(findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
+      toggleQueuedFinding(findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
     } else if ((key.name === "i" || key.name === "p") && findings.length) {
-      beginPublish(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state, key.name === "p" ? "pr" : "issue");
+      queueFindingForPublish(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state, key.name === "p" ? "pr" : "issue");
+    } else if (key.name === "c") {
+      beginPublish(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], state);
     } else if (isTriageKey(key) && findings.length) {
       await triageFinding(run, findings[clampCursor(state.findingCursor ?? 0, findings.length)], triageStatusForKey(key));
       state.notice = `Status set to ${triageStatusForKey(key)}.`;
@@ -845,9 +861,11 @@ async function handleReportBrowserKey(
     } else if (key.name === "b" && finding) {
       toggleFindingBookmark(run, finding, state);
     } else if (key.name === "space" && finding) {
-      toggleMarkedFinding(finding, state);
+      toggleQueuedFinding(finding, state);
     } else if ((key.name === "i" || key.name === "p") && finding) {
-      beginPublish(run, finding, state, key.name === "p" ? "pr" : "issue");
+      queueFindingForPublish(run, finding, state, key.name === "p" ? "pr" : "issue");
+    } else if (key.name === "c" && finding) {
+      beginPublish(run, finding, state);
     } else if (key.name === "o" && finding) {
       state.notice = openFindingEvidenceInEditor(run, finding, state);
     } else if (isTriageKey(key) && finding) {
@@ -932,6 +950,9 @@ async function handleReportBrowserKey(
       state.scroll = 0;
     } else if (key.name === "t") {
       state.statusFilter = nextStatusFilter(state.statusFilter ?? "all");
+      state.scroll = 0;
+    } else if (key.name === "r") {
+      state.publishFilter = nextFindingWorkflowFilter(state.publishFilter);
       state.scroll = 0;
     } else if (key.name === "e") {
       selectSectionById(run, state, "evidence-refs");
@@ -1115,10 +1136,10 @@ function renderSectionContent(run: ReportRunSummary, section: ReportSection, sta
     return renderReportHealthSection(run.meta, run.findings);
   }
   if (section.id === "findings") {
-    return renderFindingsSection(sortedFilteredFindings(run.findings, state), run);
+    return renderFindingsSection(sortedFilteredFindings(run.findings, state, run), run);
   }
   if (section.id === "evidence-refs") {
-    return renderEvidenceRefsSection(sortedFilteredFindings(run.findings, state), run);
+    return renderEvidenceRefsSection(sortedFilteredFindings(run.findings, state, run), run);
   }
   if (section.id === "compare-previous" && run.compareGroups) {
     return renderCompareGroupsSection(run.compareGroups);
@@ -1126,19 +1147,20 @@ function renderSectionContent(run: ReportRunSummary, section: ReportSection, sta
   return section.content;
 }
 
-function filteredFindings(findings: StructuredFinding[], state: ReportBrowserState): StructuredFinding[] {
+function filteredFindings(findings: StructuredFinding[], state: ReportBrowserState, run?: ReportRunSummary): StructuredFinding[] {
   const severity = state.severityFilter ?? "all";
   const status = state.statusFilter ?? "all";
   const query = state.searchQuery?.trim().toLowerCase();
   return findings.filter((finding) =>
     (severity === "all" || finding.severity === severity) &&
     (status === "all" || (finding.status ?? "open") === status) &&
+    matchesFindingWorkflowFilter(finding, state.publishFilter, { publishable: Boolean(run?.source) }) &&
     (!query || findingSearchText(finding).includes(query))
   );
 }
 
-function sortedFilteredFindings(findings: StructuredFinding[], state: ReportBrowserState): StructuredFinding[] {
-  return [...filteredFindings(findings, state)].sort((left, right) => compareFindings(left, right, state.findingSort ?? "severity"));
+function sortedFilteredFindings(findings: StructuredFinding[], state: ReportBrowserState, run?: ReportRunSummary): StructuredFinding[] {
+  return [...filteredFindings(findings, state, run)].sort((left, right) => compareFindings(left, right, state.findingSort ?? "severity"));
 }
 
 function renderFindingsSection(findings: StructuredFinding[], run?: ReportRunSummary): string {
@@ -1411,7 +1433,7 @@ function formatViewerFooter(section: ReportSection, state: ReportBrowserState, m
 }
 
 function filterLabel(state: ReportBrowserState): string {
-  return `severity ${state.severityFilter ?? "all"} | status ${state.statusFilter ?? "all"}`;
+  return `severity ${state.severityFilter ?? "all"} | status ${state.statusFilter ?? "all"} | ${findingWorkflowFilterLabel(state.publishFilter)}`;
 }
 
 function contextFooter(run: ReportRunSummary | undefined, state: ReportBrowserState, suffix?: string): string {
@@ -1475,109 +1497,42 @@ function searchMatchCount(content: string, query: string): number {
 }
 
 function currentFinding(run: ReportRunSummary, state: ReportBrowserState): StructuredFinding | undefined {
-  const findings = sortedFilteredFindings(run.findings, state);
+  const findings = sortedFilteredFindings(run.findings, state, run);
   return findings[clampCursor(state.findingCursor ?? 0, findings.length)];
 }
 
 function selectFinding(run: ReportRunSummary, state: ReportBrowserState, finding: StructuredFinding): void {
-  const findings = sortedFilteredFindings(run.findings, state);
+  const findings = sortedFilteredFindings(run.findings, state, run);
   const index = findings.findIndex((item) => item.id === finding.id);
   state.findingCursor = index >= 0 ? index : 0;
 }
 
 function formatFindingListItem(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
   const bookmarked = findingBookmarks(state).has(findingBookmarkKey(run, finding)) ? "*" : " ";
-  const marked = markedFindingIds(state).has(finding.id) ? "x" : " ";
+  const queued = findingQueueMarker(queuedPublishTarget(state, finding.id));
   const diff = run.compareGroups ? `${findingDiffLabel(run, finding)} | ` : "";
   const owner = finding.owner ?? "owner n/a";
   const confidence = finding.confidence ? ` | confidence ${finding.confidence}` : "";
   const sla = finding.sla?.dueAt ? ` | SLA ${finding.sla.dueAt}${finding.sla.overdue ? " overdue" : ""}` : "";
   const pathLabel = finding.paths[0] ?? "path n/a";
+  const readiness = ` | ${findingPublishReadiness(finding, Boolean(run.source))}`;
   if ((state.layout ?? "normal") === "compact") {
-    return `[${marked}]${bookmarked} ${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${finding.title}`;
+    return `[${queued}]${bookmarked} ${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${finding.title}`;
   }
   if (state.layout === "detailed") {
-    return `[${marked}]${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner}${confidence}${sla} | ${pathLabel} | ${finding.title}`;
+    return `[${queued}]${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner}${confidence}${sla} | ${pathLabel} | ${finding.title}${readiness}`;
   }
-  return `[${marked}]${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner} | ${pathLabel} | ${finding.title}`;
+  return `[${queued}]${bookmarked} ${diff}${finding.severity.toUpperCase()} | ${finding.status ?? "open"} | ${owner} | ${pathLabel} | ${finding.title}${readiness}`;
 }
 
 function renderFindingDetail(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
-  const references = findingEvidenceReferences(finding);
-  const lines = [
-    `# ${finding.title}`,
-    "",
-    `- ID: ${finding.id}`,
-    `- Severity: ${finding.severity}`,
-    `- Status: ${finding.status ?? "open"}`,
-    `- Diff: ${findingDiffLabel(run, finding)}`,
-    `- Category: ${finding.category ?? "n/a"}`,
-    `- Confidence: ${finding.confidence ?? "n/a"}`,
-    `- Owner: ${finding.owner ?? "n/a"}`,
-    `- Labels: ${finding.labels?.join(", ") || "n/a"}`,
-    `- SLA: ${finding.sla ? `${finding.sla.dueAt}${finding.sla.overdue ? " (overdue)" : ""}` : "n/a"}`,
-    `- First seen: ${finding.firstSeenRunId ?? finding.createdAt ?? "n/a"}`,
-    `- Last seen: ${finding.lastSeenRunId ?? finding.updatedAt ?? "n/a"}`,
-    "",
-    "## Paths",
-    "",
-    ...(finding.paths.length ? finding.paths.map((item) => `- ${item}`) : ["- n/a"]),
-    "",
-    "## Evidence",
-    "",
-    finding.evidence ?? "n/a"
-  ];
-
-  if ((state.layout ?? "normal") !== "compact") {
-    lines.push(
-      "",
-      "## Recommendation",
-      "",
-      finding.recommendation ?? "n/a",
-      "",
-      "## Problem Rationale",
-      "",
-      finding.problemRationale ?? "n/a",
-      "",
-      "## Reproduction",
-      "",
-      finding.reproduction ?? "n/a",
-      "",
-      "## Suggested Regression Test",
-      "",
-      finding.suggestedRegressionTest ?? "n/a"
-    );
-  }
-
-  if (state.layout === "detailed") {
-    lines.push(
-      "",
-      "## Minimum Fix Scope",
-      "",
-      finding.minimumFixScope ?? "n/a",
-      "",
-      "## Issue",
-      "",
-      finding.issue?.url ?? "n/a",
-      "",
-      "## Pull Request",
-      "",
-      finding.pullRequest?.url ?? "n/a",
-      "",
-      "## History",
-      "",
-      ...(finding.history?.length ? finding.history.map((entry) => `- ${entry.createdAt}: ${entry.kind} -> ${entry.status ?? "n/a"}${entry.note ? ` (${entry.note})` : ""}`) : ["- n/a"])
-    );
-  }
-
-  lines.push(
-    "",
-    "## Evidence References",
-    "",
-    ...(references.length ? references.map((reference, index) => `${index + 1}. ${formatEvidenceReference(reference)}${reference.quote ? ` - ${reference.quote}` : ""}`) : ["n/a"])
-  );
-
-  return lines.join("\n");
+  return renderStructuredFindingDetail(finding, {
+    diffLabel: findingDiffLabel(run, finding),
+    layout: state.layout ?? "normal",
+    publishable: Boolean(run.source),
+    sourceLabel: run.source?.repository,
+    queueTarget: queuedPublishTarget(state, finding.id)
+  }).join("\n");
 }
 
 function renderFindingEvidenceDetail(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState): string {
@@ -1836,39 +1791,105 @@ function toggleFindingBookmark(run: ReportRunSummary, finding: StructuredFinding
   }
 }
 
-function beginPublish(run: ReportRunSummary, fallbackFinding: StructuredFinding, state: ReportBrowserState, target: PublishTarget): void {
+function beginPublish(run: ReportRunSummary, fallbackFinding: StructuredFinding | undefined, state: ReportBrowserState): void {
   if (!run.source) {
     state.notice = "Publishing requires a report generated with --github-repo.";
     return;
   }
-  if (!markedFindingIds(state).size) {
-    markedFindingIds(state).add(fallbackFinding.id);
+  if (fallbackFinding && !queuedFindingsForPublish(run, state).length) {
+    queueFindingForPublish(run, fallbackFinding, state, "issue");
+  }
+  if (!queuedFindingsForPublish(run, state).length) {
+    state.notice = "No findings queued for publishing.";
+    return;
   }
   state.previousScreen = state.screen;
-  state.publishTarget = target;
   state.screen = "confirm-publish";
   state.notice = undefined;
 }
 
-function selectedFindingsForPublish(run: ReportRunSummary, state: ReportBrowserState): StructuredFinding[] {
+function queuedFindingsForPublish(run: ReportRunSummary, state: ReportBrowserState): Array<{ finding: StructuredFinding; target: PublishTarget }> {
+  const targets = publishTargets(state);
+  const legacyTarget = state.publishTarget;
   const marked = markedFindingIds(state);
-  return run.findings.filter((finding) => marked.has(finding.id));
+  return run.findings.flatMap((finding) => {
+    const target = targets[finding.id] ?? (marked.has(finding.id) ? legacyTarget ?? "issue" : undefined);
+    return target ? [{ finding, target }] : [];
+  });
 }
 
-function toggleMarkedFinding(finding: StructuredFinding, state: ReportBrowserState): void {
-  const marked = markedFindingIds(state);
-  if (marked.has(finding.id)) {
-    marked.delete(finding.id);
-    state.notice = `Unmarked finding: ${finding.id}.`;
+function queueFindingForPublish(run: ReportRunSummary, finding: StructuredFinding, state: ReportBrowserState, target: PublishTarget): void {
+  if (!run.source) {
+    state.notice = "Publishing requires a report generated with --github-repo.";
+    return;
+  }
+  publishTargets(state)[finding.id] = target;
+  markedFindingIds(state).add(finding.id);
+  state.notice = `Queued ${finding.id} as ${target}.`;
+}
+
+function toggleQueuedFinding(finding: StructuredFinding, state: ReportBrowserState): void {
+  const targets = publishTargets(state);
+  if (targets[finding.id]) {
+    delete targets[finding.id];
+    markedFindingIds(state).delete(finding.id);
+    state.notice = `Removed from publish queue: ${finding.id}.`;
   } else {
-    marked.add(finding.id);
-    state.notice = `Marked finding: ${finding.id}.`;
+    targets[finding.id] = "issue";
+    markedFindingIds(state).add(finding.id);
+    state.notice = `Queued ${finding.id} as issue.`;
   }
 }
 
 function markedFindingIds(state: ReportBrowserState): Set<string> {
   state.markedFindingIds ??= new Set<string>();
   return state.markedFindingIds;
+}
+
+function publishTargets(state: ReportBrowserState): Record<string, PublishTarget> {
+  state.publishTargets ??= {};
+  return state.publishTargets;
+}
+
+function queuedPublishTarget(state: ReportBrowserState, findingId: string): PublishTarget | undefined {
+  return publishTargets(state)[findingId] ?? (markedFindingIds(state).has(findingId) ? state.publishTarget ?? "issue" : undefined);
+}
+
+async function publishQueuedReportFindings(
+  run: ReportRunSummary,
+  selections: Array<{ finding: StructuredFinding; target: PublishTarget }>,
+  options: AuditOptions,
+  projectRoot: string,
+  dryRun: boolean
+): Promise<string> {
+  const outputs: string[] = [];
+  for (const target of ["issue", "pr"] as const) {
+    const ids = selections.filter((selection) => selection.target === target).map((selection) => selection.finding.id);
+    if (!ids.length) {
+      continue;
+    }
+    outputs.push(await runPublishCommand({
+      ...options,
+      findingRunId: run.runDir,
+      findingId: ids.join(","),
+      publishTarget: target,
+      dryRun
+    }, projectRoot));
+  }
+  return outputs.join("\n");
+}
+
+async function reloadReportRuns(
+  runs: ReportRunSummary[],
+  currentRunDir: string,
+  state: ReportBrowserState,
+  projectRoot: string,
+  options: AuditOptions
+): Promise<void> {
+  const refreshed = await listReportRuns(projectRoot, options.outDir);
+  runs.splice(0, runs.length, ...refreshed);
+  const nextRunCursor = refreshed.findIndex((run) => run.runDir === currentRunDir);
+  state.runCursor = nextRunCursor >= 0 ? nextRunCursor : clampCursor(state.runCursor, refreshed.length);
 }
 
 function removeBookmark(item: BookmarkItem, state: ReportBrowserState): void {
@@ -1893,9 +1914,10 @@ function openBookmark(item: BookmarkItem, runs: ReportRunSummary[], state: Repor
     const run = runs[item.runIndex];
     state.severityFilter = "all";
     state.statusFilter = "all";
+    state.publishFilter = "all";
     state.screen = "findings-list";
     if (run && item.findingId) {
-      const findings = sortedFilteredFindings(run.findings, state);
+      const findings = sortedFilteredFindings(run.findings, state, run);
       state.findingCursor = Math.max(0, findings.findIndex((finding) => finding.id === item.findingId));
     } else {
       state.findingCursor = 0;
@@ -1920,11 +1942,11 @@ async function exportCurrentView(
 ): Promise<string> {
   const base = path.join(run.runDir, `tui-export-current.${format === "markdown" ? "md" : format}`);
   if (format === "json") {
-    await writeFile(base, JSON.stringify(sortedFilteredFindings(run.findings, state), null, 2), "utf8");
+    await writeFile(base, JSON.stringify(sortedFilteredFindings(run.findings, state, run), null, 2), "utf8");
     return base;
   }
   if (format === "sarif") {
-    await writeFile(base, JSON.stringify(renderSarif(run, sortedFilteredFindings(run.findings, state)), null, 2), "utf8");
+    await writeFile(base, JSON.stringify(renderSarif(run, sortedFilteredFindings(run.findings, state, run)), null, 2), "utf8");
     return base;
   }
   const content = currentViewMarkdown(run, state);
@@ -1948,7 +1970,7 @@ function currentViewMarkdown(run: ReportRunSummary, state: ReportBrowserState): 
       : renderFindingDetail(run, finding, state);
   }
   if (screen === "findings-list") {
-    return renderFindingsSection(sortedFilteredFindings(run.findings, state), run);
+    return renderFindingsSection(sortedFilteredFindings(run.findings, state, run), run);
   }
   const section = run.sections[state.sectionCursor];
   return section ? renderSectionContent(run, section, state) : "# Current View\n\nNo section selected.\n";
@@ -2116,6 +2138,7 @@ function helpLines(screen: ReportBrowserScreen): string[] {
     "- `h`: report health panel",
     "- `f`: cycle severity filter",
     "- `t`: cycle status filter",
+    "- `r`: cycle workflow/readiness filter",
     "- `e`: evidence references",
     "- `c`: grouped compare with previous run",
     "- `b`: bookmark current section",
@@ -2124,8 +2147,9 @@ function helpLines(screen: ReportBrowserScreen): string[] {
     "",
     "- Enter: finding detail",
     "- Space: mark finding for GitHub publishing",
-    "- `i`: publish selected GitHub-source findings as issues",
-    "- `p`: publish selected GitHub-source findings as pull requests",
+    "- `i`: queue finding as GitHub issue",
+    "- `p`: queue finding as GitHub pull request",
+    "- `c`: review queued GitHub publishing",
     "- `s`: cycle finding sort",
     "- `1`: open, `2`: uncertain, `3`: fixed, `4`: false-positive, `5`: wont-fix",
     "- `e`: evidence preview",

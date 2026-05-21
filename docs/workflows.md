@@ -18,7 +18,9 @@ repovista triage fnd_abc123def456 --status fixed --note "validated"
 repovista triage --all --status uncertain --note "needs review"
 ```
 
-`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories newest-first by creation time, opens a selected run, and lets you navigate the full combined report, generated sections, report health, findings, evidence previews, grouped compare, global search, bookmarks, and current-view exports. Markdown headings, bold spans, inline code, links, blockquotes, lists, code blocks, search hits, and aligned Markdown tables are rendered in color-capable terminals. In finding views, Space marks findings, `i` prepares GitHub issues, and `p` prepares pull requests for reports created with `--github-repo`. In the run list, Space marks runs for deletion, and `d` opens a confirmation screen before RepoVista removes the marked run directories.
+`repovista reports` opens the shared RepoVista TUI shell for completed audit reports. It lists existing run directories newest-first by creation time, opens a selected run, and lets you navigate the full combined report, generated sections, report health, findings, evidence previews, grouped compare, global search, bookmarks, and current-view exports. Markdown headings, bold spans, inline code, links, blockquotes, lists, code blocks, search hits, and aligned Markdown tables are rendered in color-capable terminals. In finding views, Space queues a finding, `i` queues it as a GitHub issue, `p` queues it as a pull request, `0` skips it, and `c` opens a publish review. `r` cycles workflow filters such as open, critical/high, without issue, without PR, overdue, and publishable. In the run list, Space marks runs for deletion, and `d` opens a confirmation screen before RepoVista removes the marked run directories.
+
+`repovista findings-ui` is the cross-run persistent finding manager. It uses the same detailed finding layout and publish readiness labels as `repovista reports`, shows whether GitHub publishing is available, whether an issue or PR is already linked, and whether evidence refs are present. It supports per-finding mixed queues, so one finding can be queued as an issue while another is queued as a PR. If a persisted finding appears in multiple `--github-repo` runs, the TUI asks which source run should be used before publishing.
 
 Supported statuses:
 
@@ -87,7 +89,7 @@ Issue publishing targets the repository recorded in `meta.source.repository`, no
 
 Pull request publishing creates a separate generated worktree under `.repovista/publish/<run-id>/<patch-id>/worktree`, asks the configured provider to patch the selected finding(s), applies the patch scope gate, records a patch attempt under `.repovista/patches/`, commits the patch, and opens a PR against the source repository. RepoVista first tries to push a branch to the source remote; if that fails, or if `--fork` is set, it uses `gh repo fork` and opens the PR from the fork.
 
-Inside `repovista reports`, open a GitHub-source run, enter the Findings view, mark findings with Space, then press `i` for issues or `p` for PRs. The confirmation screen shows the selected findings and supports `d` for a dry-run preview before Enter publishes.
+Inside `repovista reports`, open a GitHub-source run, enter the Findings view, then use Space, `i`, `p`, and `0` to build a per-finding publish queue. Press `c` to review the queue. The confirmation screen shows every target and supports `d` for a dry-run preview before Enter publishes. Inside `repovista findings-ui`, the same queue is available across persisted findings; when more than one GitHub-source run matches a finding, RepoVista shows a run selector first. After publishing, both TUIs reload finding state so issue and PR links are visible immediately.
 
 ## Fix Workflow
 

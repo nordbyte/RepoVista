@@ -149,6 +149,8 @@ test("report browser lists report runs and renders sections", async () => {
     assert.match(findingsFrame, /sort severity/);
     assert.match(findingsFrame, /i issue/);
     assert.match(findingsFrame, /p PR/);
+    assert.match(findingsFrame, /c publish/);
+    assert.match(findingsFrame, /github ok \| no issue \| no PR/);
 
     const publishFrame = renderReportsMenuFrame(runs, {
       screen: "confirm-publish",
@@ -158,8 +160,8 @@ test("report browser lists report runs and renders sections", async () => {
       publishTarget: "issue",
       markedFindingIds: new Set(["fnd_test"])
     }, { columns: 140, rows: 50, color: false });
-    assert.match(publishFrame, /Publish 1 finding\(s\) as issue to nordbyte\/RepoVista/);
-    assert.match(publishFrame, /HIGH \| fnd_test \| Fixture finding/);
+    assert.match(publishFrame, /Publish 1 queued finding\(s\) to nordbyte\/RepoVista/);
+    assert.match(publishFrame, /ISSUE \| HIGH \| fnd_test \| Fixture finding/);
 
     const publishOutputFrame = renderReportsMenuFrame(runs, {
       screen: "publish-output",

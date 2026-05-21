@@ -59,7 +59,7 @@ repovista version
 | `suppress` | Shortcut for `baseline add`. |
 | `clean-locks` | Remove stale feature locks. |
 | `findings` | List persisted findings, emit JSON, or export findings. |
-| `findings-ui` | Open an interactive finding triage TUI. |
+| `findings-ui` | Open an interactive finding management TUI with triage, filters, publish readiness, and issue/PR queues. |
 | `reports` | Browse, navigate, mark, and delete completed report runs in a TUI. |
 | `next` | Show the next prioritized finding. |
 | `show` | Show one finding with evidence and lifecycle history. |

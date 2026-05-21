@@ -34,6 +34,7 @@ repovista doctor
 repovista plan
 repovista audit
 repovista reports
+repovista findings-ui
 ```
 
 The main report entry point is written to:
@@ -42,7 +43,7 @@ The main report entry point is written to:
 .repovista/<run-id>/index.md
 ```
 
-Use `repovista reports` to open the terminal report browser, select a generated run, search inside one section or across runs, filter/sort findings, open finding details with evidence previews, triage statuses, compare with the previous run, bookmark sections/findings, export the current view, and navigate the full report or individual sections.
+Use `repovista reports` to open the terminal report browser, select a generated run, search inside one section or across runs, filter/sort findings, open finding details with evidence previews, triage statuses, compare with the previous run, bookmark sections/findings, queue GitHub issues or PRs for selected findings, export the current view, and navigate the full report or individual sections. Use `repovista findings-ui` for the same persistent finding management view across runs, including publish readiness, workflow filters, and mixed issue/PR queues.
 
 During an interactive audit, RepoVista shows a live progress TUI with the current step and elapsed counters. Press `q` or `Ctrl+C` to cancel; RepoVista sends `SIGINT` to the provider process group so the provider can cancel cleanly, then escalates to `SIGTERM` and `SIGKILL` if it does not exit.
 
@@ -60,6 +61,7 @@ repovista audit --since origin/main
 repovista audit --ci --json --fail-on-critical
 repovista compare .repovista/old-run .repovista/new-run
 repovista findings
+repovista findings-ui
 repovista next
 repovista publish fnd_abc123def456 --run .repovista/run-id --as issue --dry-run
 repovista fix fnd_abc123def456 --dry-run

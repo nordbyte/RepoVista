@@ -142,4 +142,4 @@ repovista audit --owner-rule 'packages/api/**=team-api' --label-rule 'packages/a
 repovista issue --all --sync-issues --update-existing --reopen-issues --label repovista
 ```
 
-Rules are matched against affected finding paths. Matching owners, labels, SLA due dates, and GitHub issue links are stored in `.repovista/findings/` and shown by `repovista findings`, `repovista show`, `repovista findings-ui`, `repovista reports`, and the HTML dashboard.
+Rules are matched against affected finding paths. Matching owners, labels, SLA due dates, and GitHub issue/PR links are stored in `.repovista/findings/` and shown by `repovista findings`, `repovista show`, `repovista findings-ui`, `repovista reports`, and the HTML dashboard. The terminal finding views also expose workflow filters for open, critical/high, without issue, without PR, overdue, and GitHub-publishable findings.
