@@ -138,8 +138,8 @@ export class Logger {
     }
     heartbeat.lastReportedAt = timestamp;
     const elapsed = heartbeat.startedAt ? ` for ${formatDuration(timestamp - heartbeat.startedAt)}` : "";
-    const stream = heartbeat.lastStream ? ` on ${heartbeat.lastStream}` : "";
-    process.stderr.write(`.. ${event.providerId} active${elapsed}: ${formatBytes(heartbeat.bytes)} provider output${stream}\n`);
+    const stream = heartbeat.lastStream ? ` (${heartbeat.lastStream})` : "";
+    process.stderr.write(`.. ${event.providerId} active${elapsed}: ${formatBytes(heartbeat.bytes)} provider diagnostics${stream}\n`);
   }
 
   providerFinished(provider: AuditProviderProgress): void {
