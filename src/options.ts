@@ -200,6 +200,12 @@ export function parseCliArgs(argv: string[], defaults: AuditOptions = DEFAULT_OP
       case "no-pr":
         options.prMode = false;
         break;
+      case "bug-findings":
+        options.bugFindingsOnly = true;
+        break;
+      case "no-bug-findings":
+        options.bugFindingsOnly = false;
+        break;
       case "version":
         wantsVersion = true;
         break;

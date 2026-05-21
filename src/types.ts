@@ -68,6 +68,7 @@ export interface AuditOptions {
   includes: string[];
   ignores: string[];
   phases: string[];
+  bugFindingsOnly?: boolean;
   runChecks: boolean;
   runChecksExplicit?: boolean;
   checkCommands: string[];
@@ -438,6 +439,7 @@ export interface AuditMeta {
     includes: string[];
     ignores: string[];
     phases: string[];
+    bugFindingsOnly?: boolean;
     runChecks: boolean;
     checkCommands: string[];
     checkTimeoutSeconds: number;

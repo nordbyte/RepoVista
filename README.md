@@ -56,6 +56,8 @@ repovista audit --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
 repovista audit --github-repo nordbyte/RepoVista
 repovista audit --github-repo https://github.com/nordbyte/RepoVista --github-ref v0.4.0
+repovista audit --bug-findings
+repovista audit --github-repo nordbyte/RepoVista --bug-findings
 repovista audit --no-parallel
 repovista audit --since origin/main
 repovista audit --ci --json --fail-on-critical
@@ -72,6 +74,7 @@ repovista ci init --template security --dry-run
 ```
 
 GitHub issues and pull request descriptions published from findings default to English, even when the report was generated in another language. Use `--publish-language <name>` to publish them in a different language.
+Use `--bug-findings` when you only need the Risk/Bug findings report plus the supporting artifacts needed for finding review, issue publishing, or PR publishing. This works for local repositories and `--github-repo` source audits.
 For `--github-repo` reports, `repovista publish` also reads repository contribution guidelines, security policy, and issue/PR templates from the analyzed checkout. The default `--contribution-policy enforce` blocks public security disclosures and guideline conflicts; use `warn` to allow publishing with visible warnings or `off` to skip guideline handling.
 Use `repovista github-status` or the `g`/`G` keys in the report and findings TUIs to refresh linked issue and PR state. Remote GitHub status is stored separately from RepoVista finding lifecycle status, so a merged PR does not silently mark a finding fixed.
 

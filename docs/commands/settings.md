@@ -20,6 +20,7 @@ repovista settings get model
 repovista settings set model gpt-5.5
 repovista settings set reasoning xhigh
 repovista settings set fastMode on
+repovista settings set bugFindingsOnly on
 repovista settings set exportFormats sarif,html
 repovista settings reset reasoning
 repovista settings reset

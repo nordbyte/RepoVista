@@ -29,6 +29,8 @@ This page mirrors the current option registry used by `repovista --help`.
 | --- | --- | --- |
 | `--audit-profile <value>` | `quick`, `security`, `pr-review`, `release-readiness`, `architecture` | Built-in audit profile. |
 | `--review-mode <value>` | `default`, `deslopify`, `security`, `test-gaps` | Risk review focus. |
+| `--bug-findings` | flag | Run only the Risk/Bug findings report needed for findings, issues, and PRs. |
+| `--no-bug-findings` | flag | Disable a saved bug-findings-only default. |
 | `--prompt-file <value>` | file path | Append extra read-only reviewer guidance from a file. |
 | `--model <value>` | provider model id | Override provider model. |
 | `--profile <value>` | provider profile | Use a provider configuration profile. |

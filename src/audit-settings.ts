@@ -12,6 +12,7 @@ export interface EffectiveAuditSettings {
   fastMode: boolean;
   providerProfile: string;
   sandbox: string;
+  mode: string;
   auditProfile: string;
   reviewMode: string;
   phases: string;
@@ -58,6 +59,7 @@ export function createEffectiveAuditSettings(
     fastMode: Boolean(options.fastMode),
     providerProfile: firstText(options.profile, "none") ?? "none",
     sandbox: firstText(options.sandbox, "read-only") ?? "read-only",
+    mode: options.bugFindingsOnly ? "bug-findings" : "full audit",
     auditProfile: auditProfileLabel(options.auditProfile),
     reviewMode: reviewModeLabel(options.reviewMode),
     phases: phasesLabel(options.phases),
@@ -87,7 +89,7 @@ export function createAuditSettingsSummary(settings: EffectiveAuditSettings): Au
     lines: [
       `Provider: ${settings.providerDisplayName} (${settings.providerId}) | executable: ${settings.providerExecutable}`,
       `Model: ${settings.model} | reasoning: ${settings.reasoning} | fast mode: ${onOff(settings.fastMode)} | profile: ${settings.providerProfile} | sandbox: ${settings.sandbox}`,
-      `Report: audit profile: ${settings.auditProfile} | review: ${settings.reviewMode} | phases: ${settings.phases} | parallel: ${settings.parallel} | workspace matrix: ${onOff(settings.workspaceMatrix)}`,
+      `Report: mode: ${settings.mode} | audit profile: ${settings.auditProfile} | review: ${settings.reviewMode} | phases: ${settings.phases} | parallel: ${settings.parallel} | workspace matrix: ${onOff(settings.workspaceMatrix)}`,
       `Scope: ${settings.scope}`,
       `Quality: checks: ${settings.runChecks} | strict gates: ${onOff(settings.strictReports)} | repair: ${settings.repairReports} | weak evidence gate: ${onOff(settings.failOnWeakEvidence)} | min quality: ${settings.minQualityScore ?? "off"}`,
       `Execution: snapshot: ${onOff(settings.snapshot)} | drift gate: ${onOff(settings.failOnDrift)} | deep review: ${onOff(settings.deepReview)} | incremental: ${onOff(settings.incremental)}`,

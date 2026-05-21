@@ -4,6 +4,8 @@ A run directory is created below `.repovista/` by default.
 
 ## Typical run layout
 
+Full audits include all phase Markdown files below. `--bug-findings` runs include `00-inventory.md`, `03-risk-and-bug-report.md`, and the supporting JSON/state/export artifacts, but intentionally skip the other phase Markdown reports.
+
 | File | Purpose |
 | --- | --- |
 | `index.md` | Combined human-readable report. |

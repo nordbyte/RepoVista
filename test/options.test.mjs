@@ -29,6 +29,7 @@ test("default command runs audit with safe defaults", () => {
   assert.equal(parsed.options.repairReports, true);
   assert.equal(parsed.options.incremental, true);
   assert.equal(parsed.options.snapshot, false);
+  assert.equal(parsed.options.bugFindingsOnly, false);
   assert.deepEqual(parsed.options.exportFormats, ["sarif", "html", "jsonl"]);
   assert.equal(parsed.options.progress, true);
 });
@@ -60,6 +61,7 @@ test("explicit audit command parses supported options", () => {
     "German",
     "--contribution-policy",
     "warn",
+    "--bug-findings",
     "--json",
     "--include",
     "src/**,README.md",
@@ -108,6 +110,7 @@ test("explicit audit command parses supported options", () => {
   assert.equal(parsed.options.language, "English");
   assert.equal(parsed.options.publishLanguage, "German");
   assert.equal(parsed.options.contributionPolicy, "warn");
+  assert.equal(parsed.options.bugFindingsOnly, true);
   assert.equal(parsed.options.json, true);
   assert.deepEqual(parsed.options.includes, ["src/**", "README.md"]);
   assert.deepEqual(parsed.options.ignores, ["fixtures/**"]);
@@ -257,6 +260,9 @@ test("new operational commands and options are recognized", () => {
 
   const plugin = parseCliArgs(["audit", "--allow-repo-provider-plugin"]);
   assert.equal(plugin.options.allowRepoProviderPlugin, true);
+
+  assert.equal(parseCliArgs(["audit", "--bug-findings"]).options.bugFindingsOnly, true);
+  assert.equal(parseCliArgs(["audit", "--no-bug-findings"], { ...DEFAULT_OPTIONS, bugFindingsOnly: true }).options.bugFindingsOnly, false);
 
   const patches = parseCliArgs(["patches", "pat_123"]);
   assert.equal(patches.action, "patches");

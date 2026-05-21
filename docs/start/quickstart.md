@@ -36,10 +36,14 @@ repovista audit --model gpt-5.5
 repovista audit --provider claude --model sonnet --reasoning high
 repovista audit --github-repo nordbyte/RepoVista
 repovista audit --github-repo https://github.com/nordbyte/RepoVista --github-ref v0.4.0
+repovista audit --bug-findings
+repovista audit --github-repo nordbyte/RepoVista --bug-findings
 repovista audit --no-parallel
 repovista audit --since origin/main
 repovista audit --ci --json --fail-on-critical
 ```
+
+Use `--bug-findings` when you only want the Risk/Bug findings report and the supporting artifacts needed for findings, GitHub issues, and GitHub PRs.
 
 ## Open reports
 

@@ -98,6 +98,7 @@ type RunPhaseFunction = typeof runProviderPhase;
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = {}): Promise<AuditResult> {
   const runStartedAtMs = Date.now();
   options = applyAuditProfile(options);
+  options = applyBugFindingsMode(options);
   if (options.githubRepo && !options.runChecksExplicit) {
     options = {
       ...options,
@@ -364,11 +365,13 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     await repositoryDriftMonitor?.checkNow();
     meta.exitCode = determineExitCode(options, meta, previousReports["03-risk-and-bug-report.md"], findings, evidence);
     await appendRunQualityStatus(paths, meta, previousReports);
-    const structuredReports = ANALYSIS_PHASES.map((phase) => extractStructuredPhaseReport(
-      previousReports[phase.reportFile] ?? "",
-      phase.id,
-      phase.reportFile
-    ));
+    const structuredReports = ANALYSIS_PHASES
+      .filter((phase) => (previousReports[phase.reportFile] ?? "").trim())
+      .map((phase) => extractStructuredPhaseReport(
+        previousReports[phase.reportFile] ?? "",
+        phase.id,
+        phase.reportFile
+      ));
     completeRunTiming(meta, runStartedAtMs);
     await updateFeatureRecordsFromFindings(outputProjectRoot, options.outDir, findings, paths.runId, now);
     await writeStructuredOutputs(paths, meta, findings, evidence, promptManifest, featuresPath, structuredReports, suppressedFindings, outputProjectRoot);
@@ -399,6 +402,17 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     paths,
     meta,
     exitCode: meta.exitCode
+  };
+}
+
+function applyBugFindingsMode(options: AuditOptions): AuditOptions {
+  if (!options.bugFindingsOnly) {
+    return options;
+  }
+  return {
+    ...options,
+    phases: ["risk-and-bug"],
+    deepReview: false
   };
 }
 
@@ -527,6 +541,7 @@ async function runPhaseWithLifecycle(
       since: input.diffScope,
       features: input.featureMap.features,
       reviewMode: input.options.reviewMode ?? "default",
+      bugFindingsOnly: Boolean(input.options.bugFindingsOnly),
       additionalGuidance: input.promptGuidance
     };
     const prompt = phase.buildPrompt(context);
@@ -1290,6 +1305,7 @@ function auditCacheContext(
     phaseTimeoutSeconds: options.phaseTimeoutSeconds,
     strictReports: Boolean(options.strictReports),
     repairReports: Boolean(options.repairReports),
+    bugFindingsOnly: Boolean(options.bugFindingsOnly),
     deepReview: Boolean(options.deepReview),
     snapshot: Boolean(options.snapshot),
     reviewMode: options.reviewMode ?? "default",
@@ -1411,6 +1427,7 @@ function phaseCacheOptions(options: AuditOptions, phaseId: string): Record<strin
     auditProfile: options.auditProfile ?? null,
     strictReports: Boolean(options.strictReports),
     repairReports: Boolean(options.repairReports),
+    bugFindingsOnly: Boolean(options.bugFindingsOnly),
     deepReview: Boolean(options.deepReview),
     promptFile: options.promptFile ?? null,
     phases: options.phases
@@ -1430,6 +1447,7 @@ function promptManifestInputFingerprint(input: {
     qualityGateVersion: QUALITY_GATES_VERSION,
     language: input.options.language,
     phases: input.options.phases,
+    bugFindingsOnly: Boolean(input.options.bugFindingsOnly),
     reviewMode: input.options.reviewMode ?? "default",
     auditProfile: input.options.auditProfile ?? null,
     promptFileHash: input.promptGuidance ? stableCacheFingerprint(input.promptGuidance) : null,

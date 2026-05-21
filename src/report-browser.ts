@@ -1406,10 +1406,11 @@ async function readText(filePath: string): Promise<string | undefined> {
 function formatRunItem(run: ReportRunSummary, marked: boolean): string {
   const when = compactRunTime(run.startedAt ?? run.runId ?? run.completedAt);
   const source = sourceRunLabel(run);
+  const mode = runModeLabel(run);
   const model = `model: ${run.model ?? "n/a"}`;
   const reasoning = `reasoning: ${run.reasoning ?? "n/a"}`;
   const exit = run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`;
-  return `${marked ? "[x]" : "[ ]"} ${when} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | total ${formatDuration(run.durationMs)}${source ? ` | ${source}` : ""}`;
+  return `${marked ? "[x]" : "[ ]"} ${when}${mode ? ` | ${mode}` : ""} | ${model} | ${reasoning} | ${run.findingCount} finding(s) | ${exit} | total ${formatDuration(run.durationMs)}${source ? ` | ${source}` : ""}`;
 }
 
 function formatDeleteItem(run: ReportRunSummary): string {
@@ -1460,11 +1461,16 @@ function contextFooter(run: ReportRunSummary | undefined, state: ReportBrowserSt
 function runContextLabel(run: ReportRunSummary): string {
   return [
     sourceRunLabel(run),
+    runModeLabel(run),
     run.provider ?? "provider n/a",
     `model ${run.model ?? "n/a"}`,
     `reasoning ${run.reasoning ?? "n/a"}`,
     run.exitCode === undefined ? "exit n/a" : `exit ${run.exitCode}`
   ].filter(Boolean).join(" | ");
+}
+
+function runModeLabel(run: ReportRunSummary): string | undefined {
+  return run.meta?.options?.bugFindingsOnly ? "mode: bug-findings" : undefined;
 }
 
 function sourceRunLabel(run: ReportRunSummary): string | undefined {

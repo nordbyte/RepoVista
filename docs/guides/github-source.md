@@ -5,6 +5,7 @@ Use `--github-repo` to audit a public GitHub repository without manually cloning
 ```sh
 repovista audit --github-repo nordbyte/RepoVista
 repovista audit --github-repo https://github.com/nordbyte/RepoVista --github-ref v0.4.0
+repovista audit --github-repo nordbyte/RepoVista --bug-findings
 ```
 
 ## Accepted repository values
@@ -19,6 +20,8 @@ repovista audit --github-repo https://github.com/nordbyte/RepoVista --github-ref
 ## Output
 
 RepoVista stores cloned source and report output below the local output root. Run metadata records the source repository and analyzed commit, which later publishing commands use for GitHub permalinks.
+
+Add `--bug-findings` when the goal is to review publishable bug/security/reliability findings without generating the full architecture, quality, roadmap, and summary reports.
 
 ## Publishing back to GitHub
 

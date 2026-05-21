@@ -37,6 +37,7 @@ test("settings sanitize persisted defaults", () => {
     repairReports: true,
     repairAttempts: 2,
     deepReview: true,
+    bugFindingsOnly: true,
     reviewMode: "deslopify",
     promptFile: " review.md ",
     exportFormats: ["sarif", "invalid", "html"],
@@ -68,6 +69,7 @@ test("settings sanitize persisted defaults", () => {
     repairReports: true,
     repairAttempts: 2,
     deepReview: true,
+    bugFindingsOnly: true,
     reviewMode: "deslopify",
     promptFile: "review.md",
     exportFormats: ["sarif", "html"],
@@ -95,6 +97,7 @@ test("settings apply to audit defaults while preserving include and ignore array
     strictReports: true,
     repairReports: true,
     deepReview: true,
+    bugFindingsOnly: true,
     reviewMode: "security",
     promptFile: "review.md",
     exportFormats: ["sarif"]
@@ -114,6 +117,7 @@ test("settings apply to audit defaults while preserving include and ignore array
   assert.equal(options.strictReports, true);
   assert.equal(options.repairReports, true);
   assert.equal(options.deepReview, true);
+  assert.equal(options.bugFindingsOnly, true);
   assert.equal(options.reviewMode, "security");
   assert.equal(options.promptFile, "review.md");
   assert.deepEqual(options.exportFormats, ["sarif"]);
@@ -159,6 +163,7 @@ test("settings summary reflects built-in first-run defaults", () => {
   assert.ok(summary.includes("Parallel mode: auto"));
   assert.ok(summary.includes("Audit profile: Default full audit"));
   assert.ok(summary.includes("Review mode: default (general risk and quality review)"));
+  assert.ok(summary.includes("Bug findings only: off"));
   assert.ok(summary.includes("Reasoning: xhigh"));
   assert.ok(summary.includes("Incremental scan cache: on"));
   assert.ok(summary.includes("Run checks: on"));
@@ -182,6 +187,7 @@ test("settings menu frame renders only the menu with ANSI styling", () => {
   assert.match(plain, /Model: gpt-5\.5/);
   assert.match(plain, /Fast mode: on/);
   assert.match(plain, /Review mode: default \(general risk and quality review\)/);
+  assert.match(plain, /\[ \] Bug findings only \(risk\/bug report for issues and PRs\)/);
   assert.equal(plain.match(/Provider: Codex CLI/g)?.length, 1);
   assert.equal(plain.match(/Reasoning: xhigh/g)?.length, 1);
   assert.ok(plain.indexOf("Reasoning: xhigh") < plain.indexOf("Fast mode: on"));
@@ -200,10 +206,11 @@ test("settings fast mode renders as on off selection", () => {
 });
 
 test("settings default selections are visible without persisted overrides", () => {
-  const mainFrame = renderSettingsMenuFrame({}, { columns: 100, rows: 24 });
+  const mainFrame = renderSettingsMenuFrame({}, { columns: 100, rows: 40 });
   assert.match(mainFrame, /Parallel mode: auto/);
   assert.match(mainFrame, /Audit profile: Default full audit/);
   assert.match(mainFrame, /Review mode: default \(general risk and quality review\)/);
+  assert.match(mainFrame, /\[ \] Bug findings only \(risk\/bug report for issues and PRs\)/);
   assert.match(mainFrame, /Reasoning: xhigh/);
   assert.match(mainFrame, /\[x\] Incremental scan cache/);
   assert.match(mainFrame, /\[x\] Run local checks before analysis/);

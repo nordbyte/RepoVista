@@ -87,9 +87,72 @@ test("audit creates the full report structure with mocked Codex phases", async (
     const settingsText = [auditSettings[0].title, ...auditSettings[0].lines].join("\n");
     assert.match(settingsText, /Provider: Codex CLI \(codex\).*executable: codex/);
     assert.match(settingsText, /Model: gpt-test-default.*reasoning: xhigh.*fast mode: off.*sandbox: read-only/);
-    assert.match(settingsText, /Report: audit profile: full audit.*review: general risk and quality.*phases: all phases/);
+    assert.match(settingsText, /Report: mode: full audit.*audit profile: full audit.*review: general risk and quality.*phases: all phases/);
     assert.match(settingsText, /Quality: checks: off.*strict gates: off.*repair: off/);
     assert.doesNotMatch(settingsText, /configured default|model default/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bug findings mode runs only the risk report needed for findings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "repovista-bug-findings-"));
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), "{}", "utf8");
+    await writeFile(path.join(root, "src", "index.ts"), "export const value = 1;\n", "utf8");
+
+    const seen = [];
+    const result = await runAudit({
+      ...DEFAULT_OPTIONS,
+      outDir: ".repovista",
+      bugFindingsOnly: true,
+      deepReview: true,
+      runChecks: false,
+      strictReports: false,
+      repairReports: false,
+      progress: false,
+      exportFormats: []
+    }, {
+      cwd: root,
+      now: new Date("2026-05-18T14:57:32.123Z"),
+      version: "0.1.0",
+      commandExists: async () => true,
+      runCodex: async (request) => {
+        seen.push(request.phaseId);
+        assert.match(request.prompt, /Bug-findings mode/);
+        assert.doesNotMatch(request.prompt, /Previous findings/);
+        await writeFile(
+          request.reportPath,
+          riskReportWithFinding("Bug-only finding", "src/index.ts", "export const value = 1;"),
+          "utf8"
+        );
+        return {
+          phaseId: request.phaseId,
+          success: true,
+          reportPath: request.reportPath,
+          durationMs: 5,
+          exitCode: 0
+        };
+      }
+    });
+
+    assert.deepEqual(seen, ["risk-and-bug"]);
+    assert.equal(result.meta.options.bugFindingsOnly, true);
+    assert.deepEqual(result.meta.options.phases, ["risk-and-bug"]);
+    assert.equal(result.meta.options.deepReview, false);
+    assert.equal(result.meta.phases.find((phase) => phase.id === "risk-and-bug").status, "success");
+    assert.equal(result.meta.phases.find((phase) => phase.id === "architecture").status, "skipped");
+    assert.equal(result.meta.findings.length, 1);
+    assert.ok(await readFile(path.join(result.paths.runDir, "03-risk-and-bug-report.md"), "utf8"));
+    await assert.rejects(readFile(path.join(result.paths.runDir, "01-architecture-report.md"), "utf8"), /ENOENT/);
+    await assert.rejects(readFile(path.join(result.paths.runDir, "02-code-quality-report.md"), "utf8"), /ENOENT/);
+    await assert.rejects(readFile(path.join(result.paths.runDir, "04-feature-roadmap.md"), "utf8"), /ENOENT/);
+    await assert.rejects(readFile(path.join(result.paths.runDir, "index.md"), "utf8"), /ENOENT/);
+    const structuredReports = JSON.parse(await readFile(path.join(result.paths.runDir, "structured-reports.json"), "utf8"));
+    assert.deepEqual(structuredReports.map((report) => report.phaseId), ["risk-and-bug"]);
+    const promptManifest = JSON.parse(await readFile(path.join(result.paths.runDir, "prompt-manifest.json"), "utf8"));
+    assert.deepEqual(promptManifest.phases.map((phase) => phase.phaseId), ["risk-and-bug"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

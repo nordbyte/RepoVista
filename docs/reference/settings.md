@@ -11,6 +11,7 @@ Use `repovista settings` for the interactive editor, or `settings get`, `setting
 | `outDir` | string | Default report output directory. |
 | `auditProfile` | enum | Built-in audit profile. |
 | `reviewMode` | enum | Risk review focus. |
+| `bugFindingsOnly` | boolean | Run only the bug finding report needed for findings, issues, and PRs. |
 | `promptFile` | string | Default prompt guidance file. |
 | `workspace` | string | Default workspace name or path. |
 | `allWorkspaces` | boolean | Include all detected workspaces. |

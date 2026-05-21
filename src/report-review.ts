@@ -17,6 +17,7 @@ const REPORT_FILES = [
   ["feature-roadmap", "04-feature-roadmap.md"],
   ["summary", "index.md"]
 ] as const;
+type ReportFileEntry = typeof REPORT_FILES[number];
 
 export interface ReviewedRun {
   runDir: string;
@@ -92,7 +93,8 @@ export async function reviewRunDirectory(projectRoot: string, runDirectory: stri
   ]);
   const normalizedFindings = await findingsForReview(projectRoot, meta, promptManifest, findings);
   const normalizedStructuredReports = Array.isArray(structuredReports) ? structuredReports : [];
-  const reportReviews = await Promise.all(REPORT_FILES.map(async ([phaseId, fileName]) => {
+  const expectedReports = reportFilesForRun(meta);
+  const reportReviews = await Promise.all(expectedReports.map(async ([phaseId, fileName]) => {
     const filePath = path.join(runDir, fileName);
     const content = await readText(filePath);
     if (content === undefined) {
@@ -238,13 +240,13 @@ async function inspectArtifactHealth(
       name: "Structured Reports JSON",
       fileName: "structured-reports.json",
       required: true,
-      validate: (content) => validateStructuredReportsJson(content, structuredReports)
+      validate: (content) => validateStructuredReportsJson(content, structuredReports, meta)
     },
     {
       name: "Prompt Manifest",
       fileName: "prompt-manifest.json",
       required: true,
-      validate: validatePromptManifestJson
+      validate: (content) => validatePromptManifestJson(content, meta)
     },
     {
       name: "SARIF Export",
@@ -363,7 +365,7 @@ function validateFindingsJson(content: string, meta: AuditMeta | undefined, find
   return warnings;
 }
 
-function validateStructuredReportsJson(content: string, structuredReports: StructuredPhaseReport[]): string[] {
+function validateStructuredReportsJson(content: string, structuredReports: StructuredPhaseReport[], meta?: AuditMeta): string[] {
   const parsed = parseJson(content);
   if (!parsed.ok) {
     return [`structured-reports.json is not valid JSON: ${parsed.error}`];
@@ -375,13 +377,14 @@ function validateStructuredReportsJson(content: string, structuredReports: Struc
   if (parsed.value.length !== structuredReports.length) {
     warnings.push(`structured-reports.json parsed count changed during review (${parsed.value.length} vs ${structuredReports.length}).`);
   }
-  if (structuredReports.length < REPORT_FILES.length) {
-    warnings.push(`structured-reports.json contains ${structuredReports.length} phase report(s); expected ${REPORT_FILES.length}.`);
+  const expectedReports = reportFilesForRun(meta);
+  if (structuredReports.length < expectedReports.length) {
+    warnings.push(`structured-reports.json contains ${structuredReports.length} phase report(s); expected ${expectedReports.length}.`);
   }
   return warnings;
 }
 
-function validatePromptManifestJson(content: string): string[] {
+function validatePromptManifestJson(content: string, meta?: AuditMeta): string[] {
   const parsed = parseJson(content);
   if (!parsed.ok) {
     return [`prompt-manifest.json is not valid JSON: ${parsed.error}`];
@@ -393,10 +396,18 @@ function validatePromptManifestJson(content: string): string[] {
   if (!Array.isArray(manifest.phases)) {
     return ["prompt-manifest.json is missing a phases array."];
   }
-  if (manifest.phases.length < REPORT_FILES.length) {
-    return [`prompt-manifest.json contains ${manifest.phases.length} phase manifest(s); expected ${REPORT_FILES.length}.`];
+  const expectedReports = reportFilesForRun(meta);
+  if (manifest.phases.length < expectedReports.length) {
+    return [`prompt-manifest.json contains ${manifest.phases.length} phase manifest(s); expected ${expectedReports.length}.`];
   }
   return [];
+}
+
+function reportFilesForRun(meta?: AuditMeta): readonly ReportFileEntry[] {
+  if (meta?.options?.bugFindingsOnly) {
+    return REPORT_FILES.filter(([phaseId]) => phaseId === "risk-and-bug");
+  }
+  return REPORT_FILES;
 }
 
 function validateSarifJson(content: string): string[] {

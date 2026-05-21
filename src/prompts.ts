@@ -23,6 +23,7 @@ export interface PromptContext {
     trustBoundaries: string[];
   }>;
   reviewMode?: "default" | "deslopify" | "security" | "test-gaps";
+  bugFindingsOnly?: boolean;
   additionalGuidance?: string;
 }
 
@@ -36,7 +37,7 @@ export interface PhaseDefinition {
   buildPrompt(context: PromptContext): string;
 }
 
-export const PROMPT_CONTEXT_VERSION = 2;
+export const PROMPT_CONTEXT_VERSION = 3;
 
 const CONTEXT_LIMIT = 18000;
 const PREVIOUS_REPORT_CONTEXT_LIMIT = 14000;
@@ -197,12 +198,16 @@ ${structuredSchemaInstructions("code-quality")}
 }
 
 function buildRiskPrompt(context: PromptContext): string {
-  return `${baseInstructions(context, "defensive application-security and bug-audit reviewer")}
-
-Previous findings:
+  const previousContext = context.bugFindingsOnly
+    ? bugFindingsOnlyContext()
+    : `Previous findings:
 
 ${renderPrevious(context, ["01-architecture-report.md"], "risk-and-bug")}
-${renderOptionalPrevious(context, ["02-code-quality-report.md"], "risk-and-bug")}
+${renderOptionalPrevious(context, ["02-code-quality-report.md"], "risk-and-bug")}`;
+
+  return `${baseInstructions(context, "defensive application-security and bug-audit reviewer")}
+
+${previousContext}
 
 Task: Identify potential bugs, security risks, and robust failure modes. Stay defensive; do not provide exploit instructions against real external targets.
 
@@ -292,6 +297,15 @@ If there are no findings, use '"findings": []' and still say explicitly in each 
 
 ${structuredSchemaInstructions("risk-and-bug")}
 `;
+}
+
+function bugFindingsOnlyContext(): string {
+  return `Bug-findings mode:
+- RepoVista is intentionally not generating architecture, code-quality, roadmap, or summary reports for this run.
+- Use the inventory, evidence pack, semantic feature map, optional diff scope, and source files directly.
+- Produce only actionable bug, security, reliability, data-loss, or regression findings suitable for GitHub issues and pull requests.
+- Avoid roadmap or broad code-quality recommendations unless they are necessary to explain a concrete bug finding.
+- Do not mention missing previous phase reports as a report limitation.`;
 }
 
 function buildRoadmapPrompt(context: PromptContext): string {

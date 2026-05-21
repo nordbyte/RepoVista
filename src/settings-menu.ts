@@ -37,7 +37,7 @@ interface MenuState {
 
 type MainItem =
   | { id: "provider" | "parallel" | "auditProfile" | "reviewMode" | "model" | "reasoning" | "fastMode" | "sandbox" | "language" | "contributionPolicy" | "checkCommands" | "exportFormats" | "checkTimeout" | "phaseTimeout"; type: "submenu"; label: (settings: RepoVistaSettings) => string }
-  | { id: "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "snapshot" | "failOnDrift" | "failOnWeakEvidence" | "allWorkspaces" | "incremental"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
+  | { id: "runChecks" | "json" | "keepLogs" | "progress" | "ci" | "failOnCritical" | "strictReports" | "repairReports" | "deepReview" | "snapshot" | "failOnDrift" | "failOnWeakEvidence" | "allWorkspaces" | "incremental" | "bugFindingsOnly"; type: "toggle"; label: (settings: RepoVistaSettings) => string }
   | { id: "profile" | "workspace" | "outDir" | "promptFile" | "includes" | "ignores"; type: "text"; label: (settings: RepoVistaSettings) => string }
   | { id: "save" | "exit"; type: "command"; label: () => string };
 
@@ -193,6 +193,7 @@ export function summarizeSettings(settings: RepoVistaSettings): string[] {
     `Parallel mode: ${formatParallel(effectiveParallel(settings))}`,
     `Audit profile: ${formatAuditProfile(settings.auditProfile)}`,
     `Review mode: ${formatReviewMode(effectiveReviewMode(settings))}`,
+    `Bug findings only: ${effectiveBoolean(settings, "bugFindingsOnly") ? "on" : "off"}`,
     `Model: ${settings.model ?? `${provider.displayName} default`}`,
     `Reasoning: ${effectiveReasoning(settings) ?? "model default"}`,
     `Codex profile: ${settings.profile ?? "none"}`,
@@ -304,6 +305,7 @@ function activateCurrentItem(state: MenuState): void {
     case "failOnWeakEvidence":
     case "allWorkspaces":
     case "incremental":
+    case "bugFindingsOnly":
       toggleBoolean(state, item.id);
       break;
     case "profile":
@@ -805,6 +807,7 @@ const MAIN_ITEMS: readonly MainItem[] = [
   { id: "parallel", type: "submenu", label: (settings) => `Parallel mode: ${formatParallel(effectiveParallel(settings))}` },
   { id: "auditProfile", type: "submenu", label: (settings) => `Audit profile: ${formatAuditProfile(settings.auditProfile)}` },
   { id: "reviewMode", type: "submenu", label: (settings) => `Review mode: ${formatReviewMode(effectiveReviewMode(settings))}` },
+  { id: "bugFindingsOnly", type: "toggle", label: (settings) => checkbox(effectiveBoolean(settings, "bugFindingsOnly"), "Bug findings only (risk/bug report for issues and PRs)") },
   { id: "model", type: "submenu", label: (settings) => `Model: ${settings.model ?? `${getReportProvider(selectedProvider(settings)).displayName} default`}` },
   { id: "reasoning", type: "submenu", label: (settings) => `Reasoning: ${effectiveReasoning(settings) ?? "model default"}` },
   { id: "fastMode", type: "submenu", label: (settings) => `Fast mode: ${effectiveBoolean(settings, "fastMode") ? "on" : "off"}` },

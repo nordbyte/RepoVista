@@ -24,6 +24,8 @@ An audit is split into focused phases:
 
 Use `--phase <id>` to run selected phases.
 
+Bug-findings mode, enabled with `--bug-findings` or the `bugFindingsOnly` setting, intentionally runs only `risk-and-bug`. It still collects inventory, evidence, feature map, metadata, findings, exports, and publish-ready state, but skips architecture, code-quality, roadmap, summary, and feature-sliced deep-review reports.
+
 ## Finding
 
 A finding is a structured risk item with a stable id, severity, category, affected paths, evidence references, rationale, recommended fix, reproduction guidance, regression-test suggestion, lifecycle status, linked GitHub issue or PR status, and lifecycle history.

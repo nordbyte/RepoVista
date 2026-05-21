@@ -17,6 +17,7 @@ repovista settings get
 repovista settings get model
 repovista settings set model gpt-5.5
 repovista settings set reasoning xhigh
+repovista settings set bugFindingsOnly on
 repovista settings set exportFormats sarif,html
 repovista settings reset reasoning
 repovista settings reset
@@ -46,7 +47,7 @@ REPOVISTA_CONFIG=/path/to/settings.json repovista settings get
 | `repairAttempts` | `2` |
 | `incremental` | `true` |
 | `exportFormats` | `sarif`, `html`, `jsonl` |
-| `fastMode`, `deepReview`, `snapshot`, `json`, `keepLogs`, `ci`, `failOnCritical`, `failOnDrift`, `failOnWeakEvidence` | `false` |
+| `fastMode`, `deepReview`, `bugFindingsOnly`, `snapshot`, `json`, `keepLogs`, `ci`, `failOnCritical`, `failOnDrift`, `failOnWeakEvidence` | `false` |
 
 `parallel=auto` creates `.repovista/project-map.json` during the first audit when the project has not been initialized yet.
 

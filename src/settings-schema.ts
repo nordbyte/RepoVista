@@ -46,6 +46,7 @@ export function parseSettingValue(key: keyof RepoVistaSettings, rawValue: string
     case "failOnCritical":
     case "allWorkspaces":
     case "incremental":
+    case "bugFindingsOnly":
       return parseBoolean(rawValue, key);
     case "auditProfile":
       return parseAuditProfile(rawValue);

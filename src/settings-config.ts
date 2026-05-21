@@ -34,6 +34,7 @@ export interface RepoVistaSettings {
   maxHigh?: number;
   maxMedium?: number;
   reviewMode?: ReviewMode;
+  bugFindingsOnly?: boolean;
   promptFile?: string;
   exportFormats?: ReportExportFormat[];
   json?: boolean;
@@ -120,6 +121,7 @@ export function applySettingsToDefaults(defaults: AuditOptions, settings: RepoVi
     maxHigh: settings.maxHigh ?? defaults.maxHigh,
     maxMedium: settings.maxMedium ?? defaults.maxMedium,
     reviewMode: settings.reviewMode ?? defaults.reviewMode,
+    bugFindingsOnly: settings.bugFindingsOnly ?? defaults.bugFindingsOnly,
     promptFile: settings.promptFile ?? defaults.promptFile,
     exportFormats: settings.exportFormats !== undefined ? [...settings.exportFormats] : [...defaults.exportFormats],
     exportFormatsExplicit: settings.exportFormats !== undefined ? true : defaults.exportFormatsExplicit,
@@ -206,7 +208,7 @@ export function sanitizeSettings(settings: RepoVistaSettings): RepoVistaSettings
     }
   }
 
-  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "deepReview", "snapshot", "failOnDrift", "failOnWeakEvidence", "allWorkspaces", "incremental"] as const) {
+  for (const key of ["fastMode", "json", "keepLogs", "progress", "ci", "failOnCritical", "runChecks", "strictReports", "repairReports", "deepReview", "snapshot", "failOnDrift", "failOnWeakEvidence", "allWorkspaces", "incremental", "bugFindingsOnly"] as const) {
     if (typeof settings[key] === "boolean") {
       sanitized[key] = settings[key];
     }

@@ -37,6 +37,8 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("baseRef", undefined, value("base", "Base ref for --pr or diff-focused audits")),
   entry("auditProfile", undefined, value("audit-profile", "Built-in audit profile: quick, security, pr-review, release-readiness, architecture"), setting("auditProfile", "enum", "Built-in audit profile"), "auditProfile"),
   entry("reviewMode", "default", value("review-mode", "Review mode: default, deslopify, security, or test-gaps"), setting("reviewMode", "enum", "Default review mode"), "reviewMode"),
+  entry("bugFindingsOnly", false, flag("bug-findings", "Run only the Risk/Bug findings report needed for findings, issues, and PRs"), setting("bugFindingsOnly", "boolean", "Run only the bug finding report needed for findings, issues, and PRs"), "bugFindingsOnly"),
+  entry("bugFindingsOnly", undefined, flag("no-bug-findings", "Disable saved bug-findings-only mode")),
   entry("promptFile", undefined, value("prompt-file", "Append extra read-only reviewer guidance from a file"), setting("promptFile", "string", "Default prompt guidance file"), "promptFile"),
   entry("workspace", undefined, value("workspace", "Limit the audit to a detected workspace by name or path"), setting("workspace", "string", "Default workspace name or path"), "workspace"),
   entry("allWorkspaces", undefined, flag("all-workspaces", "Record and include all detected workspaces"), setting("allWorkspaces", "boolean", "Include all detected workspaces"), "allWorkspaces"),

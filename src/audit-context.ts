@@ -55,6 +55,7 @@ export function createInitialMeta(
       includes: options.includes,
       ignores: options.ignores,
       phases: options.phases ?? [],
+      bugFindingsOnly: Boolean(options.bugFindingsOnly),
       runChecks: Boolean(options.runChecks),
       checkCommands: options.checkCommands ?? [],
       checkTimeoutSeconds: options.checkTimeoutSeconds ?? 300,
