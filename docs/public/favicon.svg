@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="RepoVista">
+  <defs>
+    <linearGradient id="folder" x1="11" y1="9" x2="53" y2="55" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#34d17d"/>
+      <stop offset="1" stop-color="#064b2c"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 14a6 6 0 0 1 6-6h16l8 7h15a6 6 0 0 1 6 6v28a6 6 0 0 1-6 6H12a6 6 0 0 1-6-6V20a6 6 0 0 1 6-6Z" fill="url(#folder)"/>
+  <path d="M10 24a6 6 0 0 1 6-6h41a6 6 0 0 1 6 6v25a6 6 0 0 1-6 6H12a6 6 0 0 1-6-6V30a6 6 0 0 1 4-6Z" fill="#064b2c"/>
+  <path d="m24 29-8 8 8 8m16-16 8 8-8 8" fill="none" stroke="#f8fafc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m31 43 4-18" fill="none" stroke="#34d17d" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="48" cy="46" r="10" fill="#f8fafc" stroke="#17221b" stroke-width="3"/>
+  <path d="m55 53 6 6" fill="none" stroke="#17221b" stroke-width="5" stroke-linecap="round"/>
+  <path d="M42 48v-3m5 3v-7m5 7V37" fill="none" stroke="#2aa66e" stroke-width="3" stroke-linecap="round"/>
+</svg>
