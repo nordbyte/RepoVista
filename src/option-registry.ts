@@ -112,7 +112,7 @@ export const OPTION_REGISTRY: readonly OptionRegistryEntry[] = [
   entry("fixPostRevalidate", undefined, flag("post-revalidate", "Revalidate the fixed finding after repovista fix")),
   entry("patchMaxFiles", undefined, value("max-files", "Maximum changed files allowed for repovista fix scope gate")),
   entry("ciTemplate", undefined, value("template", "CI template for ci init: pr-light, security, release-readiness, scheduled-audit")),
-  entry("force", undefined, flag("force", "Overwrite generated files where supported")),
+  entry("force", undefined, flag("force", "Overwrite generated files or override guarded cleanup, fix, and PR preconditions where supported")),
   entry(undefined, undefined, flag("version", "Show version")),
   entry(undefined, undefined, flag("help", "Show help"))
 ];

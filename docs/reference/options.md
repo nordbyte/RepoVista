@@ -116,6 +116,6 @@ This page mirrors the current option registry used by `repovista --help`.
 | `--post-revalidate` | flag | Revalidate the fixed finding after `fix`. |
 | `--max-files <value>` | `1`-`100` | Maximum changed files allowed by the fix scope gate. |
 | `--template <value>` | `pr-light`, `security`, `release-readiness`, `scheduled-audit` | CI template for `ci init`. |
-| `--force` | flag | Overwrite generated files or force cleanup where supported. |
+| `--force` | flag | Overwrite generated files or override guarded cleanup, fix, and PR preconditions where supported. |
 | `--version` | flag | Show version. |
 | `--help` | flag | Show help. |

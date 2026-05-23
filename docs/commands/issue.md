@@ -5,7 +5,7 @@ Create, update, or sync GitHub issues for findings through the GitHub CLI.
 ## Usage
 
 ```sh
-repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues]
+repovista issue <finding-id|--all> [--dry-run] [--label <name>] [--assignee <login>] [--update-existing] [--sync-issues] [--reopen-issues]
 ```
 
 ## Options

@@ -39,7 +39,9 @@ Use `repovista settings` for the interactive editor, or `settings get`, `setting
 | `failOnDrift` | boolean | Fail when repository drift is detected. |
 | `failOnWeakEvidence` | boolean | Fail when findings contain weak evidence. |
 | `minQualityScore` | number | Minimum phase quality score. |
-| `maxCritical`, `maxHigh`, `maxMedium` | number | Maximum current findings by severity. |
+| `maxCritical` | number | Maximum current critical findings before a gate failure. |
+| `maxHigh` | number | Maximum current high findings before a gate failure. |
+| `maxMedium` | number | Maximum current medium findings before a gate failure. |
 | `exportFormats` | list | Default finding export formats. |
 | `keepLogs` | boolean | Keep technical provider logs. |
 | `progress` | boolean | Show progress TUI and post-audit browser. |

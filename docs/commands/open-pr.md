@@ -5,7 +5,7 @@ Create a pull request for a completed patch attempt.
 ## Usage
 
 ```sh
-repovista open-pr <patch-id> [--dry-run] [--base <branch>] [--branch <branch>] [--title <title>]
+repovista open-pr <patch-id> [--dry-run] [--base <branch>] [--branch <branch>] [--title <title>] [--force]
 ```
 
 ## Options
@@ -16,6 +16,7 @@ repovista open-pr <patch-id> [--dry-run] [--base <branch>] [--branch <branch>] [
 | `--base <branch>` | Base branch for the PR. |
 | `--branch <branch>` | Branch name to use. |
 | `--title <title>` | Pull request title. |
+| `--force` | Allow opening a PR for a patch attempt with no recorded changed files. |
 
 ## Examples
 
@@ -26,4 +27,4 @@ repovista open-pr pat_abc123def456 --base main --branch repovista/fix-abc --titl
 
 ## Requirements
 
-This command uses Git and the GitHub CLI.
+This command creates a commit, pushes the selected branch, and opens the pull request with the GitHub CLI.
