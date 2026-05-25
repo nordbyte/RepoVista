@@ -37,7 +37,7 @@ function allowedPatchScopePaths(findings: StructuredFinding[]): string[] {
     }
     const text = findingScopeTextFields(finding).join("\n");
     const roots = sourceRoots(finding.paths ?? []);
-    if (/\b(regression test|tests?|spec|coverage)\b/i.test(text)) {
+    if (/\b(regression[-\s]?test|tests?|spec|coverage|integrationstest|regressionstest|testfall|testfälle)\b/i.test(text)) {
       for (const root of roots) {
         addNormalizedPath(allowed, `${root}/__tests__/`);
         addNormalizedPath(allowed, `${root}/tests/`);
@@ -46,9 +46,14 @@ function allowedPatchScopePaths(findings: StructuredFinding[]): string[] {
         addNormalizedPath(allowed, `${packageRoot}/tests/`);
       }
     }
-    if (/\b(document(?:ed|ation)?|docs?|readme)\b/i.test(text)) {
+    if (/\b(document(?:ed|ation)?|docs?|readme|dokument(?:ation|ieren|iert)?)\b/i.test(text)) {
       addNormalizedPath(allowed, "README.md");
       addNormalizedPath(allowed, "docs/");
+    }
+    if (/\b(?:env|environment|dotenv|ENCRYPTION_KEY)\b|\.env(?:\.[A-Za-z0-9_.-]+)?/i.test(text)) {
+      addNormalizedPath(allowed, ".env.example");
+      addNormalizedPath(allowed, ".env.sample");
+      addNormalizedPath(allowed, ".env.local.example");
     }
     if (/\b(middleware|auth|authorization|authentication|token)\b/i.test(text)) {
       for (const root of roots) {

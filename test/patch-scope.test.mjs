@@ -30,6 +30,48 @@ test("patch scope still rejects unrelated production files for single-finding PR
   assert.match(result.violations.join("\n"), /server\/src\/routes\/proxy\.ts/);
 });
 
+test("patch scope allows env examples and localized documentation hints", () => {
+  const result = evaluatePatchScope([{
+    id: "fnd_env_key",
+    title: "Fallback key is stored beside encrypted API keys",
+    severity: "medium",
+    category: "security",
+    status: "open",
+    paths: ["server/src/lib/crypto.ts"],
+    evidence: "ENCRYPTION_KEY fallback persists a key in local settings.",
+    recommendation: "Make ENCRYPTION_KEY required in production.",
+    minimumFixScope: "server/src/lib/crypto.ts und Start-/Env-Dokumentation."
+  }], [
+    ".env.example",
+    "README.md",
+    "server/src/lib/crypto.ts"
+  ], 12);
+
+  assert.equal(result.passed, true);
+  assert.ok(result.allowedPaths.includes(".env.example"));
+  assert.ok(result.allowedPaths.includes("README.md"));
+});
+
+test("patch scope allows tests from localized test hints", () => {
+  const result = evaluatePatchScope([{
+    id: "fnd_rate_limit",
+    title: "Rate-limit state is lost on restart",
+    severity: "medium",
+    category: "reliability",
+    status: "open",
+    paths: ["server/src/services/ratelimit.ts"],
+    evidence: "Rate limit state uses process-local maps.",
+    recommendation: "Persist per-key usage and cooldown state.",
+    suggestedRegressionTest: "Integrationstest mit temporärer DB ergänzen."
+  }], [
+    "server/src/__tests__/services/ratelimit.test.ts",
+    "server/src/services/ratelimit.ts"
+  ], 12);
+
+  assert.equal(result.passed, true);
+  assert.ok(result.allowedPaths.includes("server/src/__tests__/"));
+});
+
 test("git status parser includes tracked and untracked changed files", () => {
   assert.deepEqual(parseGitStatusFiles([
     " M src/index.ts",
