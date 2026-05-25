@@ -57,6 +57,8 @@ test("secret masking redacts sensitive object keys and env assignments", () => {
   assert.equal(maskSensitiveText("https://user:pass@example.com"), "https://[masked]@example.com");
   assert.equal(maskSensitiveText("Authorization: Bearer ghp_123456789012345678901234"), "Authorization: [masked]");
   assert.equal(maskSensitiveText('{"apiKey":"sk-123456789012345678901234"}'), '{"apiKey":"[masked]"}');
+  assert.equal(maskSensitiveText("api_key=abc node deploy.js"), "api_key=[masked] node deploy.js");
+  assert.equal(maskSensitiveText("const estimatedInputTokens = messages.reduce((sum, m) => {"), "const estimatedInputTokens = messages.reduce((sum, m) => {");
 });
 
 test("streaming secret masker catches secrets split across chunks", () => {
