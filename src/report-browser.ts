@@ -1014,7 +1014,7 @@ export async function deleteMarkedReportRuns(runs: ReportRunSummary[], markedDir
   return deleted;
 }
 
-async function loadReportRun(
+export async function loadReportRun(
   runDir: string,
   fallbackRunId: string,
   projectRoot: string,

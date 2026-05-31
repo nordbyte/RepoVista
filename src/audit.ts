@@ -49,6 +49,7 @@ import {
   updatePhaseStatus
 } from "./resume-manager.js";
 import { createRunId } from "./run-id.js";
+import { combineLoggerSinks, createRunStatusRecorder, type RepoVistaRunStatusRecorder } from "./run-status.js";
 import {
   prepareRunDirectory,
   readReport,
@@ -85,6 +86,7 @@ export interface AuditDependencies extends PreflightDependencies, EvidenceDepend
   spawnAdapter?: SpawnAdapter;
   abortSignal?: AbortSignal;
   loggerSink?: LoggerSink;
+  statusFile?: string;
 }
 
 export interface AuditResult {
@@ -108,7 +110,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const outputProjectRoot = dependencies.cwd ?? process.cwd();
   const now = dependencies.now ?? new Date();
   const version = dependencies.version ?? "0.0.0";
-  const logger = new Logger(options.progress, dependencies.loggerSink);
+  let logger = new Logger(options.progress, dependencies.loggerSink);
   const abortSignal = dependencies.abortSignal;
   const createLogs = options.keepLogs || options.json;
   const paths = await createRunPaths(outputProjectRoot, options, now, createLogs);
@@ -161,6 +163,14 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   if (snapshot) {
     meta.snapshot = snapshot.meta;
   }
+  const statusRecorder: RepoVistaRunStatusRecorder = createRunStatusRecorder({
+    projectRoot,
+    paths,
+    meta,
+    options,
+    statusFile: dependencies.statusFile
+  });
+  logger = new Logger(options.progress, combineLoggerSinks(dependencies.loggerSink, statusRecorder.sink));
   logger.auditSettings(createAuditSettingsSummary(effectiveSettings));
   const previousReports: Record<string, string> = {};
   const previousMeta = options.resumeDir ? await readPreviousMeta(paths.runDir) : undefined;
@@ -390,6 +400,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     await snapshot?.cleanup();
     completeRunTiming(meta, runStartedAtMs);
     await writeMeta(paths.runDir, meta);
+    await statusRecorder.finish(meta.exitCode);
   }
 
   if (meta.exitCode === 0) {

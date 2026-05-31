@@ -60,6 +60,7 @@ test("audit creates the full report structure with mocked Codex phases", async (
       "04-feature-roadmap.md",
       "index.md",
       "report.json",
+      "status.json",
       "meta.json"
     ];
 
@@ -76,6 +77,14 @@ test("audit creates the full report structure with mocked Codex phases", async (
     assert.equal(meta.phases.every((phase) => phase.status === "success"), true);
     assert.equal(typeof meta.cache.scanFingerprint, "string");
     assert.equal(meta.workspace.detected, false);
+
+    const status = JSON.parse(await readFile(path.join(result.paths.runDir, "status.json"), "utf8"));
+    assert.equal(status.schemaVersion, 1);
+    assert.equal(status.status, "success");
+    assert.equal(status.runId, result.paths.runId);
+    assert.equal(status.runDir, result.paths.runDir);
+    assert.equal(status.phases.every((phase) => phase.status === "success"), true);
+    assert.equal(status.options.reasoning, "xhigh");
 
     const inventory = await readFile(path.join(result.paths.runDir, "00-inventory.md"), "utf8");
     assert.match(inventory, /## AI Provider Execution Settings/);
