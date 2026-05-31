@@ -53,9 +53,7 @@ export function buildCodexExecArgs(request: ProviderRunRequest): string[] {
     args.push("--config", `model_reasoning_effort="${request.reasoning}"`);
   }
 
-  if (request.fastMode) {
-    args.push("--config", 'service_tier="fast"');
-  }
+  args.push("--config", `service_tier="${request.fastMode ? "fast" : "default"}"`);
 
   if (request.jsonEvents) {
     args.push("--json");

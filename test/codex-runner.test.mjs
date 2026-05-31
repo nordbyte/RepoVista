@@ -119,6 +119,7 @@ test("codex args omit recorded none profile sentinel", () => {
 
   assert.ok(!args.includes("--profile"));
   assert.ok(!args.includes("none"));
+  assert.ok(args.includes('service_tier="default"'));
 });
 
 test("claude args use print mode, model, effort and non-persistent sessions", () => {
