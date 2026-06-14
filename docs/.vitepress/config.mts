@@ -15,6 +15,7 @@ export default defineConfig({
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["link", { rel: "alternate icon", type: "image/png", sizes: "256x256", href: "/repovista-logo.png" }],
     ["link", { rel: "apple-touch-icon", href: "/repovista-logo.png" }],
+    ["script", { defer: "", "data-domain": "repovista.com", src: "https://purestats.io/pf.min.js" }],
     ["meta", { name: "theme-color", content: "#16724a" }],
     ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:title", content: "RepoVista documentation" }],
